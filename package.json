@@ -14,6 +14,7 @@
     "@elizaos/plugin-bootstrap": "^1.0.0",
     "@elizaos/plugin-discord": "^1.0.0",
     "@elizaos/plugin-ollama": "1.2.4",
+    "@elizaos/plugin-openai": "^1.0.11",
     "@elizaos/plugin-openrouter": "1.2.6",
     "@elizaos/plugin-sql": "^1.0.0",
     "@elizaos/plugin-telegram": "^1.0.0",
@@ -24,7 +25,13 @@
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   },
-  "keywords": ["elizaos", "ai-agent", "pixel-art", "lightning-network", "survival-ai"],
+  "keywords": [
+    "elizaos",
+    "ai-agent",
+    "pixel-art",
+    "lightning-network",
+    "survival-ai"
+  ],
   "author": "Pixel",
   "license": "MIT"
 }

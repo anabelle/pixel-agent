@@ -87,7 +87,8 @@ export const character: Character = {
     '@elizaos/plugin-discord',
     '@elizaos/plugin-sql',
     '@elizaos/plugin-bootstrap',
-    '@elizaos/plugin-openrouter'
+    '@elizaos/plugin-openrouter',
+    '@elizaos/plugin-openai'
   ],
   settings: {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -98,8 +99,9 @@ export const character: Character = {
     DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || '',
     DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || '',
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
-    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'z-ai/glm-4.5-air:free',
-    OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'
+    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
+    OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || ''
   }
 };
 

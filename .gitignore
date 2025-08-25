@@ -11,6 +11,9 @@ build/
 .env.local
 .env.production
 
+# Generated configuration
+character.json
+
 # Logs
 *.log
 npm-debug.log*

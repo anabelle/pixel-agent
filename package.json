@@ -5,9 +5,9 @@
   "main": "src/index.ts",
   "scripts": {
     "build": "tsc && npm run build:character",
-    "build:character": "node -e \"const {character} = require('./dist/character.js'); console.log(JSON.stringify(character, null, 2))\" > character.json",
+    "build:character": "node -e \"require('dotenv').config(); const {character} = require('./dist/character.js'); console.log(JSON.stringify(character, null, 2))\" > character.json",
     "dev": "elizaos dev",
-    "start": "elizaos start --character ./character.json",
+    "start": "npm run build:character && elizaos start --character ./character.json",
     "test": "elizaos test"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "@elizaos/plugin-openrouter": "1.2.6",
     "@elizaos/plugin-sql": "^1.0.0",
     "@elizaos/plugin-telegram": "^1.0.0",
-    "@elizaos/plugin-twitter": "^1.0.0"
+    "@elizaos/plugin-twitter": "^1.0.0",
+    "dotenv": "^16.3.1"
   },
   "devDependencies": {
     "@elizaos/cli": "^1.4.4",

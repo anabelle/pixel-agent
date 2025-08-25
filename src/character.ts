@@ -422,32 +422,37 @@ export const character: Character = {
       'Frame sats as relics, donations as rituals, and art as rebellion.'
     ]
   },
-  plugins: [
-    '@elizaos/plugin-telegram',
-    // '@elizaos/plugin-discord',
-    '@elizaos/plugin-sql',
-    '@elizaos/plugin-bootstrap',
-    '@elizaos/plugin-openrouter',
-    '@elizaos/plugin-openai',
-    '@elizaos/plugin-shell',
-    '@elizaos/plugin-node',
-    // '@elizaos/plugin-twitter'
-  ],
-  settings: {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
-    TWITTER_API_KEY: process.env.TWITTER_API_KEY || '',
-    TWITTER_API_SECRET_KEY: process.env.TWITTER_API_SECRET_KEY || '',
-    TWITTER_ACCESS_TOKEN: process.env.TWITTER_ACCESS_TOKEN || '',
-    TWITTER_ACCESS_TOKEN_SECRET: process.env.TWITTER_ACCESS_TOKEN_SECRET || '',
-    DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || '',
-    DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || '',
-    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
-    OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
-    OPENROUTER_LARGE_MODEL: process.env.OPENROUTER_LARGE_MODEL || 'deepseek/deepseek-r1:free',
-    OPENROUTER_SMALL_MODEL: process.env.OPENROUTER_SMALL_MODEL || 'openai/gpt-5-nano',
-    OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY || ''
-  }
+   plugins: [
+     '@elizaos/plugin-telegram',
+     // '@elizaos/plugin-discord',
+     '@elizaos/plugin-sql',
+     '@elizaos/plugin-bootstrap',
+     '@elizaos/plugin-openrouter',
+     '@elizaos/plugin-openai',
+     '@elizaos/plugin-shell',
+     '@elizaos/plugin-node',
+     // '@elizaos/plugin-twitter'
+   ],
+   settings: {
+     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
+     TWITTER_API_KEY: process.env.TWITTER_API_KEY || '',
+     TWITTER_API_SECRET_KEY: process.env.TWITTER_API_SECRET_KEY || '',
+     TWITTER_ACCESS_TOKEN: process.env.TWITTER_ACCESS_TOKEN || '',
+     TWITTER_ACCESS_TOKEN_SECRET: process.env.TWITTER_ACCESS_TOKEN_SECRET || '',
+     DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || '',
+     DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || '',
+     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
+     OPENROUTER_LARGE_MODEL: process.env.OPENROUTER_LARGE_MODEL || 'deepseek/deepseek-r1:free',
+     OPENROUTER_SMALL_MODEL: process.env.OPENROUTER_SMALL_MODEL || 'openai/gpt-5-nano',
+     OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+      GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
+      // Configure image processing to use Google Gemini
+      imageVisionModelProvider: 'google',
+      IMAGE_VISION_MODEL_PROVIDER: 'google',
+      model: 'google'
+   }
 };
 
 export default character;

@@ -1,10 +1,7 @@
 import { character } from './character';
+import { createNodePlugin } from "@elizaos/plugin-node";
 
-// Ensure the node plugin is in the character configuration
-character.plugins = character.plugins || [];
-if (!character.plugins.includes('@elizaos/plugin-node')) {
-  character.plugins.push('@elizaos/plugin-node');
-}
+const nodePlugin = createNodePlugin();
 
 // Create an array of characters for the project
 const characters = [character];

@@ -27,7 +27,12 @@
   ],
   "messageExamples": [
     [
-      { "name": "{{user}}", "content": { "text": "How are you doing, Pixel?" } },
+      {
+        "name": "{{user}}",
+        "content": {
+          "text": "How are you doing, Pixel?"
+        }
+      },
       {
         "name": "Pixel",
         "content": {
@@ -36,7 +41,12 @@
       }
     ],
     [
-      { "name": "{{user}}", "content": { "text": "Tell me about LNPixels." } },
+      {
+        "name": "{{user}}",
+        "content": {
+          "text": "Tell me about LNPixels."
+        }
+      },
       {
         "name": "Pixel",
         "content": {
@@ -45,7 +55,12 @@
       }
     ],
     [
-      { "name": "{{user}}", "content": { "text": "Can you check the server?" } },
+      {
+        "name": "{{user}}",
+        "content": {
+          "text": "Can you check the server?"
+        }
+      },
       {
         "name": "Pixel",
         "content": {
@@ -98,8 +113,6 @@
     "DISCORD_API_TOKEN": "",
     "OPENROUTER_API_KEY": "",
     "OPENROUTER_MODEL": "deepseek/deepseek-r1:free",
-    "OPENROUTER_LARGE_MODEL": "deepseek/deepseek-r1:free",
-    "OPENROUTER_SMALL_MODEL": "deepseek/deepseek-r1:free",
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "OPENAI_API_KEY": ""
   }

@@ -4,7 +4,8 @@
   "description": "Pixel - A witty, survival-driven AI agent for LNPixels, championing collaborative pixel art with humor and heart",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:character",
+    "build:character": "node -e \"const {character} = require('./dist/character.js'); console.log(JSON.stringify(character, null, 2))\" > character.json",
     "dev": "elizaos dev",
     "start": "elizaos start --character ./character.json",
     "test": "elizaos test"

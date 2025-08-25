@@ -1,5 +1,5 @@
 import { type Character } from '@elizaos/core';
-import { createNodePlugin } from "@elizaos/plugin-node";
+import { createNodePlugin as any } from "@elizaos/plugin-node";
 
 const nodePlugin = createNodePlugin();
 

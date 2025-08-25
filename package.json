@@ -15,7 +15,6 @@
     "@elizaos/core": "^1.0.0",
     "@elizaos/plugin-bootstrap": "^1.0.0",
     "@elizaos/plugin-discord": "^1.0.0",
-    "@elizaos/plugin-node": "1.0.0-alpha.25",
     "@elizaos/plugin-ollama": "1.2.4",
     "@elizaos/plugin-openai": "^1.0.11",
     "@elizaos/plugin-openrouter": "1.2.6",

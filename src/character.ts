@@ -423,8 +423,9 @@ export const character: Character = {
     ]
   },
   plugins: [
+    '@elizaos/plugin-node',
     '@elizaos/plugin-telegram',
-    '@elizaos/plugin-discord',
+    // '@elizaos/plugin-discord',
     '@elizaos/plugin-sql',
     '@elizaos/plugin-bootstrap',
     '@elizaos/plugin-openrouter',

@@ -295,6 +295,8 @@ export const character: Character = {
     DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || '',
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
     OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
+    OPENROUTER_LARGE_MODEL: process.env.OPENROUTER_LARGE_MODEL || 'deepseek/deepseek-r1:free',
+    OPENROUTER_SMALL_MODEL: process.env.OPENROUTER_SMALL_MODEL || 'openai/gpt-5-nano',
     OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || ''
   }

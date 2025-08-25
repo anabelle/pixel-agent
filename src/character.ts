@@ -442,7 +442,7 @@ export const character: Character = {
      DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || '',
      DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || '',
      OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
-     IMAGE_DESCRIPTION: process.env.OPENROUTER_MODEL,
+     IMAGE_DESCRIPTION: process.env.OPENROUTER_MODEL || 'mistralai/mistral-medium-3.1',
      OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
      OPENROUTER_LARGE_MODEL: process.env.OPENROUTER_LARGE_MODEL || 'deepseek/deepseek-r1:free',
      OPENROUTER_SMALL_MODEL: process.env.OPENROUTER_SMALL_MODEL || 'openai/gpt-5-nano',

@@ -1,5 +1,9 @@
 import { type Character } from '@elizaos/core';
-import { createNodePlugin } from "@elizaos/plugin-node" as any;
+import { createNodePlugin } from "@elizaos/plugin-node";
+
+declare module "@elizaos/plugin-node" {
+  export function createNodePlugin(): any; // Adjust 'any' to a proper type
+}
 
 const nodePlugin = createNodePlugin();
 

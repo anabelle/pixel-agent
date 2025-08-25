@@ -1,4 +1,7 @@
 import { type Character } from '@elizaos/core';
+import { createNodePlugin } from "@elizaos/plugin-node";
+
+const nodePlugin = createNodePlugin();
 
 export const character: Character = {
   name: 'Pixel',
@@ -430,7 +433,7 @@ export const character: Character = {
      '@elizaos/plugin-openrouter',
      '@elizaos/plugin-openai',
      '@elizaos/plugin-shell',
-     '@elizaos/plugin-node',
+     nodePlugin,
      // '@elizaos/plugin-twitter'
    ],
    settings: {

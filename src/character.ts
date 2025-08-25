@@ -1,10 +1,8 @@
 import { type Character } from '@elizaos/core';
-import { createNodePlugin } from "@elizaos/plugin-node";
 
-declare module "@elizaos/plugin-node" {
-  export function createNodePlugin(): any; // Adjust 'any' to a proper type
-}
+const createNodePlugin: any = require("@elizaos/plugin-node").createNodePlugin;
 
+// Then use it in your code
 const nodePlugin = createNodePlugin();
 
 export const character: Character = {

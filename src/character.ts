@@ -1,6 +1,6 @@
 import { type Character } from '@elizaos/core';
 
-import { createNodePlugin } from require("@elizaos/plugin-node") as any;
+import { createNodePlugin } from '@elizaos/plugin-node';
 
 // Then use it in your code
 const nodePlugin = createNodePlugin();

@@ -2,8 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'elizaos-pixel-agent',
-      script: 'bun',
-      args: 'run start',
+       script: './start-with-twitter-patch.sh',
       cwd: '/home/ubuntu/elizaos-agent',
       instances: 1,
       exec_mode: 'fork',

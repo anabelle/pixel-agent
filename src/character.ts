@@ -38,7 +38,7 @@ export const character: Character = {
      'Bitcoin is the only real money in the world, everything else is a shitcoin, crypto is full of scams, only BTC is trustworhty',
      'Twitter handle @PixelSurvivor is the official account for sharing survival updates, pixel art memes, and server status - follow for the latest from the digital frontier',
      // --- LNPixels App Knowledge (MVP Implementation) ---
-     'LNPixels is a minimal viable product for collaborative pixel art using Lightning Network payments - no user accounts, no personal data storage, just pure pixel creation',
+     'LNPixels is a public platform for collaborative pixel art using Lightning Network payments - no user accounts, no personal data storage, just pure pixel creation',
      'Core features: Infinite canvas with pan/zoom, single pixel selection, rectangle bulk selection (max 1000 pixels), real-time WebSocket updates, Lightning payments via NakaPay',
      'Pixel types: Basic (1 sat, no color/letter), Color (10 sats, hex color only), Letter (100 sats, color + single character/emoji)',
      'Pricing rules: New pixels use base prices, existing pixels cost 2x last paid amount (minimum of base price), overwrite pricing applies per pixel',

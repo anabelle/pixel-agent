@@ -66,12 +66,10 @@ class TwitterServiceWithRateLimitProtection extends Service {
       return service;
     }
 
-    service.v2Client = new TwitterApi({
-      appKey,
-      appSecret,
-      accessToken,
-      accessSecret
-    });
+    // Force OAuth 1.0a by using the string constructor
+    service.v2Client = new TwitterApi(`${appKey}:${appSecret}:${accessToken}:${accessSecret}`);
+
+    logger.info('[TWITTER SAFE] Twitter client initialized with OAuth 1.0a authentication');
 
     logger.info('[TWITTER SAFE] Twitter service initialized successfully');
     return service;

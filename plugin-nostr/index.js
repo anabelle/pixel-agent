@@ -1,5 +1,5 @@
 // Minimal Nostr plugin (CJS) for elizaOS with dynamic ESM imports
-let logger;
+let logger, createUniqueUuid, ChannelType;
 
 let SimplePool, nip19, finalizeEvent, getPublicKey;
 
@@ -30,7 +30,9 @@ async function ensureDeps() {
   }
   if (!logger) {
     const core = await import('@elizaos/core');
-    logger = core.logger;
+  logger = core.logger;
+  createUniqueUuid = core.createUniqueUuid;
+  ChannelType = core.ChannelType;
   }
     // Provide WebSocket to nostr-tools (either via injector or global)
   const WebSocket = (await import('ws')).default || require('ws');
@@ -132,7 +134,7 @@ class NostrService {
       svc.scheduleNextPost(minSec, maxSec);
     }
 
-    logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled}`);
+  logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled}`);
     return svc;
   }
 
@@ -166,30 +168,159 @@ class NostrService {
       return false;
     }
   }
+  // --- Helpers inspired by @elizaos/plugin-twitter ---
+  _getConversationIdFromEvent(evt) {
+    try {
+      // Prefer root 'e' tag
+      const eTags = Array.isArray(evt.tags) ? evt.tags.filter(t => t[0] === 'e') : [];
+      const root = eTags.find(t => t[3] === 'root');
+      if (root && root[1]) return root[1];
+      // Fallback to any first 'e' tag
+      if (eTags.length && eTags[0][1]) return eTags[0][1];
+    } catch {}
+    // Use the event id as thread id fallback
+    return evt?.id || 'nostr';
+  }
+
+  async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
+    const runtime = this.runtime;
+    const worldId = createUniqueUuid(runtime, userPubkey);
+    const roomId = createUniqueUuid(runtime, conversationId);
+    const entityId = createUniqueUuid(runtime, userPubkey);
+    // Best effort creations
+  logger.info(`[NOSTR] Ensuring context world/room/connection for pubkey=${userPubkey.slice(0,8)} conv=${conversationId.slice(0,8)}`);
+    await runtime.ensureWorldExists({
+      id: worldId,
+      name: `${usernameLike || userPubkey.slice(0,8)}'s Nostr`,
+      agentId: runtime.agentId,
+      serverId: userPubkey,
+      metadata: { ownership: { ownerId: userPubkey }, nostr: { pubkey: userPubkey } }
+    }).catch(() => {});
+    await runtime.ensureRoomExists({
+      id: roomId,
+      name: `Nostr thread ${conversationId.slice(0,8)}`,
+      source: 'nostr',
+      type: ChannelType ? ChannelType.FEED : undefined,
+      channelId: conversationId,
+      serverId: userPubkey,
+      worldId
+    }).catch(() => {});
+    await runtime.ensureConnection({
+      entityId,
+      roomId,
+      userName: usernameLike || userPubkey,
+      name: usernameLike || userPubkey,
+      source: 'nostr',
+      type: ChannelType ? ChannelType.FEED : undefined,
+      worldId
+    }).catch(() => {});
+  logger.info(`[NOSTR] Context ensured world=${worldId} room=${roomId} entity=${entityId}`);
+    return { worldId, roomId, entityId };
+  }
+
+  async _createMemorySafe(memory, tableName = 'messages', maxRetries = 3) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        logger.info(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt+1}/${maxRetries}`);
+        await this.runtime.createMemory(memory, tableName);
+        logger.info(`[NOSTR] Memory created id=${memory.id}`);
+        return true;
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err?.message || err || '');
+        if (msg.includes('duplicate') || msg.includes('constraint')) {
+          logger.info('[NOSTR] Memory already exists, skipping');
+          return true;
+        }
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 250));
+      }
+    }
+    logger.warn('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr);
+    return false;
+  }
 
   async handleMention(evt) {
     try {
-      // Deduplicate events
-      if (!evt || !evt.id || this.handledEventIds.has(evt.id)) return;
+      if (!evt || !evt.id) return;
+      // In-memory dedup for this session
+      if (this.handledEventIds.has(evt.id)) {
+        logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0,8)} (in-memory dedup)`);
+        return;
+      }
       this.handledEventIds.add(evt.id);
 
-      // Persist interaction memory (best-effort)
-      await this.saveInteractionMemory('mention', evt).catch(() => {});
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      // Persistent dedup: if memory already exists, skip
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (existing) {
+          logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0,8)} (persistent dedup)`);
+          return;
+        }
+      } catch {}
 
-      // Auto-reply if enabled and we have keys
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(
+        evt.pubkey,
+        undefined,
+        conversationId
+      );
+
+      const createdAtMs = (evt.created_at ? evt.created_at * 1000 : Date.now());
+      const memory = {
+        id: eventMemoryId,
+        entityId,
+        agentId: runtime.agentId,
+        roomId,
+        content: {
+          text: evt.content || '',
+          source: 'nostr',
+          event: { id: evt.id, pubkey: evt.pubkey }
+        },
+        createdAt: createdAtMs
+      };
+
+  logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`);
+  await this._createMemorySafe(memory, 'messages');
+
+      // Check if we've already replied in this room (recent history)
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
+        const hasReply = recent.some(m => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) {
+          logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0,8)} (found existing reply)`);
+          return;
+        }
+      } catch {}
+
+      // Auto-reply if enabled
       if (!this.replyEnabled || !this.sk || !this.pool) return;
-
-      // Simple per-user throttle
       const last = this.lastReplyByUser.get(evt.pubkey) || 0;
       const now = Date.now();
       if (now - last < this.replyThrottleSec * 1000) {
-        logger.debug(`[NOSTR] Throttling reply to ${evt.pubkey}`);
+        logger.info(`[NOSTR] Throttling reply to ${evt.pubkey.slice(0,8)} (${Math.round((this.replyThrottleSec*1000 - (now-last))/1000)}s left)`);
         return;
       }
       this.lastReplyByUser.set(evt.pubkey, now);
-
       const replyText = this.pickReplyTextFor(evt);
-      await this.postReply(evt, replyText);
+      logger.info(`[NOSTR] Sending reply to ${evt.id.slice(0,8)} len=${replyText.length}`);
+      const replyOk = await this.postReply(evt, replyText);
+      if (replyOk) {
+        logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0,8)}; storing reply link memory`);
+        // Persist reply memory (best-effort)
+        // We don't know the reply event id synchronously; skip storing reply id, but store a linking memory
+        const replyMemory = {
+          id: createUniqueUuid(runtime, `${evt.id}:reply:${now}`),
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId },
+          createdAt: now
+        };
+        await this._createMemorySafe(replyMemory, 'messages');
+      }
     } catch (err) {
       logger.warn('[NOSTR] handleMention failed:', err?.message || err);
     }
@@ -253,17 +384,26 @@ class NostrService {
       timestamp: Date.now(),
       ...extra,
     };
-    // Prefer high-level API if available
+    // Prefer high-level API if available (use stable UUIDs and messages table)
     if (typeof runtime.createMemory === 'function') {
-      return await runtime.createMemory(
-        {
-          id: `nostr:${evt?.id || Math.random().toString(36).slice(2)}`,
-          entityId: evt?.pubkey || 'nostr:unknown',
-          roomId: 'nostr',
-          content: { type: 'social_interaction', data: body },
-        },
-        'events'
-      );
+      try {
+        const roomId = createUniqueUuid(runtime, this._getConversationIdFromEvent(evt));
+        const id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
+        const entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
+        return await runtime.createMemory(
+          {
+            id,
+            entityId,
+            roomId,
+            agentId: runtime.agentId,
+            content: { type: 'social_interaction', source: 'nostr', data: body },
+            createdAt: Date.now()
+          },
+          'messages'
+        );
+      } catch (e) {
+        logger.debug('[NOSTR] saveInteractionMemory fallback:', e?.message || e);
+      }
     }
     // Fallback to database adapter if exposed
     if (runtime.databaseAdapter && typeof runtime.databaseAdapter.createMemory === 'function') {
@@ -281,114 +421,6 @@ class NostrService {
     if (this.pool) { try { this.pool.close(this.relays); } catch {} this.pool = null; }
     logger.info('[NOSTR] Service stopped');
   }
-
-  async handleMention(evt) {
-    try {
-      // Deduplicate events
-      if (!evt || !evt.id || this.handledEventIds.has(evt.id)) return;
-      this.handledEventIds.add(evt.id);
-
-      // Create proper memory for the mention using UUID conversion
-      const eventId = evt.id.startsWith('nostr:') ? evt.id.substring(6) : evt.id;
-      const hash = bytesToHexLocal(new TextEncoder().encode(eventId));
-      const memoryId = hash.substring(0, 32).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
-
-      // Convert pubkey to UUID format for database compatibility
-      const pubkeyHash = bytesToHexLocal(new TextEncoder().encode(evt.pubkey));
-      const entityId = pubkeyHash.substring(0, 32).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
-
-      const memory = {
-        id: memoryId,
-        type: 'messages',
-        entityId: entityId,
-        agentId: this.runtime.agentId,
-        roomId: 'nostr',
-        content: {
-          text: evt.content || '',
-          source: 'nostr',
-          metadata: {
-            eventId: evt.id,
-            eventType: 'mention',
-            created_at: evt.created_at
-          }
-        },
-        createdAt: new Date().toISOString(),
-        unique: true,
-        metadata: { type: 'message' }
-      };
-
-      // Store the memory with proper UUID - specify type as second parameter
-      // Temporarily disabled to test if NOSTR service works
-      logger.info(`[NOSTR] Would store memory for: ${evt.content?.slice(0, 50)}... from ${evt.pubkey.slice(0, 8)}`);
-      // await this.runtime.createMemory(memory, 'messages');
-
-      // Auto-reply if enabled and we have keys
-      if (!this.replyEnabled || !this.sk || !this.pool) return;
-
-      // Simple per-user throttle
-      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
-      const now = Date.now();
-      if (now - last < this.replyThrottleSec * 1000) {
-        logger.debug(`[NOSTR] Throttling reply to ${evt.pubkey}`);
-        return;
-      }
-      this.lastReplyByUser.set(evt.pubkey, now);
-
-      const replyText = this.pickReplyTextFor(evt);
-      await this.postReply(evt, replyText);
-    } catch (err) {
-      logger.warn('[NOSTR] handleMention failed:', err?.message || err);
-    }
-  }
-
-  pickReplyTextFor(evt) {
-    const baseChoices = [
-      'noted.',
-      'seen.',
-      'alive.',
-      'breathing pixels.',
-      'gm.',
-      'ping received.'
-    ];
-    const content = (evt?.content || '').trim();
-    if (!content) return baseChoices[Math.floor(Math.random() * baseChoices.length)];
-    if (content.length < 10) return 'yo.';
-    if (content.includes('?')) return 'hmm.';
-    return baseChoices[Math.floor(Math.random() * baseChoices.length)];
-  }
-
-  async postReply(parentEvt, text) {
-    if (!this.pool || !this.sk || !this.relays.length) return false;
-    try {
-      const created_at = Math.floor(Date.now() / 1000);
-      const tags = [];
-      // Include reply linkage
-      tags.push(['e', parentEvt.id, '', 'reply']);
-      // Try to carry root if present
-      const rootTag = Array.isArray(parentEvt.tags)
-        ? parentEvt.tags.find(t => t[0] === 'e' && (t[3] === 'root' || t[3] === 'reply'))
-        : null;
-      if (rootTag) {
-        tags.push(['e', rootTag[1], '', 'root']);
-      }
-      tags.push(['p', parentEvt.pubkey]);
-
-      const replyEvt = {
-        kind: 1,
-        created_at,
-        tags,
-        content: text
-      };
-
-      const signed = finalizeEvent(replyEvt, this.sk);
-      await Promise.race(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Replied to ${parentEvt.pubkey.slice(0, 8)}… (${text.length} chars)`);
-      return true;
-    } catch (err) {
-      logger.warn('[NOSTR] postReply failed:', err?.message || err);
-      return false;
-    }
-  }
 }
 
 const nostrPlugin = {
@@ -399,5 +431,4 @@ const nostrPlugin = {
 
 module.exports = nostrPlugin;
 module.exports.nostrPlugin = nostrPlugin;
-module.exports.default = nostrPlugin;
 module.exports.default = nostrPlugin;

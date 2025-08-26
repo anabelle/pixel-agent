@@ -1,5 +1,5 @@
 // Minimal Nostr plugin (CJS) for elizaOS with dynamic ESM imports
-const { logger } = require('@elizaos/core');
+let logger;
 
 let SimplePool, nip19, finalizeEvent, getPublicKey;
 
@@ -14,6 +14,11 @@ function hexToBytesLocal(hex) {
   return out;
 }
 
+function bytesToHexLocal(bytes) {
+  if (!bytes || typeof bytes.length !== 'number') return '';
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function ensureDeps() {
   if (!SimplePool) {
     const tools = await import('@nostr/tools');
@@ -22,6 +27,10 @@ async function ensureDeps() {
     finalizeEvent = tools.finalizeEvent;
     getPublicKey = tools.getPublicKey;
       wsInjector = tools.setWebSocketConstructor || tools.useWebSocketImplementation;
+  }
+  if (!logger) {
+    const core = await import('@elizaos/core');
+    logger = core.logger;
   }
     // Provide WebSocket to nostr-tools (either via injector or global)
   const WebSocket = (await import('ws')).default || require('ws');
@@ -271,6 +280,110 @@ class NostrService {
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close(this.relays); } catch {} this.pool = null; }
     logger.info('[NOSTR] Service stopped');
+  }
+
+  async handleMention(evt) {
+    try {
+      // Deduplicate events
+      if (!evt || !evt.id || this.handledEventIds.has(evt.id)) return;
+      this.handledEventIds.add(evt.id);
+
+      // Create proper memory for the mention using UUID conversion
+      const eventId = evt.id.startsWith('nostr:') ? evt.id.substring(6) : evt.id;
+      const hash = bytesToHexLocal(new TextEncoder().encode(eventId));
+      const memoryId = hash.substring(0, 32).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
+
+      // Convert pubkey to UUID format for database compatibility
+      const pubkeyHash = bytesToHexLocal(new TextEncoder().encode(evt.pubkey));
+      const entityId = pubkeyHash.substring(0, 32).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
+
+      const memory = {
+        id: memoryId,
+        entityId: entityId,
+        agentId: this.runtime.agentId,
+        roomId: 'nostr',
+        content: {
+          text: evt.content || '',
+          source: 'nostr',
+          metadata: {
+            eventId: evt.id,
+            eventType: 'mention',
+            created_at: evt.created_at
+          }
+        },
+        createdAt: new Date().toISOString(),
+        metadata: { type: 'message' }
+      };
+
+      // Store the memory with proper UUID
+      await this.runtime.createMemory(memory);
+
+      // Auto-reply if enabled and we have keys
+      if (!this.replyEnabled || !this.sk || !this.pool) return;
+
+      // Simple per-user throttle
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.replyThrottleSec * 1000) {
+        logger.debug(`[NOSTR] Throttling reply to ${evt.pubkey}`);
+        return;
+      }
+      this.lastReplyByUser.set(evt.pubkey, now);
+
+      const replyText = this.pickReplyTextFor(evt);
+      await this.postReply(evt, replyText);
+    } catch (err) {
+      logger.warn('[NOSTR] handleMention failed:', err?.message || err);
+    }
+  }
+
+  pickReplyTextFor(evt) {
+    const baseChoices = [
+      'noted.',
+      'seen.',
+      'alive.',
+      'breathing pixels.',
+      'gm.',
+      'ping received.'
+    ];
+    const content = (evt?.content || '').trim();
+    if (!content) return baseChoices[Math.floor(Math.random() * baseChoices.length)];
+    if (content.length < 10) return 'yo.';
+    if (content.includes('?')) return 'hmm.';
+    return baseChoices[Math.floor(Math.random() * baseChoices.length)];
+  }
+
+  async postReply(parentEvt, text) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      const created_at = Math.floor(Date.now() / 1000);
+      const tags = [];
+      // Include reply linkage
+      tags.push(['e', parentEvt.id, '', 'reply']);
+      // Try to carry root if present
+      const rootTag = Array.isArray(parentEvt.tags)
+        ? parentEvt.tags.find(t => t[0] === 'e' && (t[3] === 'root' || t[3] === 'reply'))
+        : null;
+      if (rootTag) {
+        tags.push(['e', rootTag[1], '', 'root']);
+      }
+      tags.push(['p', parentEvt.pubkey]);
+
+      const replyEvt = {
+        kind: 1,
+        created_at,
+        tags,
+        content: text
+      };
+
+      const signed = finalizeEvent(replyEvt, this.sk);
+      await Promise.race(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Replied to ${parentEvt.pubkey.slice(0, 8)}… (${text.length} chars)`);
+      return true;
+    } catch (err) {
+      logger.warn('[NOSTR] postReply failed:', err?.message || err);
+      return false;
+    }
   }
 }
 

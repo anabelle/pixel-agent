@@ -108,6 +108,8 @@ require = function(id) {
       constructor(appKey, appSecret, accessToken, accessSecret) {
         super(appKey, appSecret, accessToken, accessSecret);
         this.rateLimitStatus = rateLimitStatus;
+        // Ensure OAuth 1.0a is used by setting the auth version
+        this.authVersion = '1.0a';
       }
 
       /**

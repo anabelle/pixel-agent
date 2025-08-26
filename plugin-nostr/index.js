@@ -1,5 +1,5 @@
 // Minimal Nostr plugin (CJS) for elizaOS with dynamic ESM imports
-let logger, createUniqueUuid, ChannelType;
+let logger, createUniqueUuid, ChannelType, ModelType;
 
 let SimplePool, nip19, finalizeEvent, getPublicKey;
 
@@ -33,6 +33,7 @@ async function ensureDeps() {
   logger = core.logger;
   createUniqueUuid = core.createUniqueUuid;
   ChannelType = core.ChannelType;
+  ModelType = core.ModelType || core.ModelClass || { TEXT_SMALL: 'TEXT_SMALL' };
   }
     // Provide WebSocket to nostr-tools (either via injector or global)
   const WebSocket = (await import('ws')).default || require('ws');
@@ -154,14 +155,160 @@ class NostrService {
     return null;
   }
 
+  // --- LLM-driven generation helpers ---
+  _getSmallModelType() {
+    // Prefer TEXT_SMALL; legacy fallbacks included
+    return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL';
+  }
+
+  _getLargeModelType() {
+    // Prefer TEXT_LARGE; include sensible fallbacks
+    return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE';
+  }
+
+  _buildPostPrompt() {
+    const ch = this.runtime.character || {};
+    const name = ch.name || 'Agent';
+    const topics = Array.isArray(ch.topics) ? ch.topics.slice(0, 12).join(', ') : '';
+    const style = ch.style?.post || [];
+    const examples = Array.isArray(ch.postExamples) ? ch.postExamples.slice(0, 10) : [];
+    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla. Only LN: sparepicolo55@walletofsatoshi.com.`;
+    return [
+      `You are ${name}, an agent posting a single engaging Nostr note.`,
+      ch.system ? `Persona/system: ${ch.system}` : '',
+      topics ? `Relevant topics: ${topics}` : '',
+      style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+      examples.length ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join('\n- ')}` : '',
+      whitelist,
+      'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist—no other links or handles.',
+    ].filter(Boolean).join('\n\n');
+  }
+
+  _buildReplyPrompt(evt, recentMessages) {
+    const ch = this.runtime.character || {};
+    const name = ch.name || 'Agent';
+    const style = ch.style?.chat || ch.style?.all || [];
+    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla. Only LN: sparepicolo55@walletofsatoshi.com.`;
+    const userText = (evt?.content || '').slice(0, 800);
+    const history = Array.isArray(recentMessages) && recentMessages.length
+      ? `Recent conversation (most recent last):\n` + recentMessages.map(m => `- ${m.role}: ${m.text}`).join('\n')
+      : '';
+    return [
+      `You are ${name}. Craft a concise, on-character reply to a Nostr mention.`,
+      ch.system ? `Persona/system: ${ch.system}` : '',
+      style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+      whitelist,
+      history,
+      `Original message: "${userText}"`,
+      'Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.'
+    ].filter(Boolean).join('\n\n');
+  }
+
+  _extractTextFromModelResult(result) {
+    if (!result) return '';
+    if (typeof result === 'string') return result.trim();
+    if (typeof result.text === 'string') return result.text.trim();
+    if (typeof result.content === 'string') return result.content.trim();
+    if (Array.isArray(result.choices) && result.choices[0]?.message?.content) {
+      return String(result.choices[0].message.content).trim();
+    }
+    try { return String(result).trim(); } catch { return ''; }
+  }
+
+  _sanitizeWhitelist(text) {
+    if (!text) return '';
+    let out = String(text);
+    // Strip URLs except allowed domain
+    out = out.replace(/https?:\/\/[^\s)]+/gi, (m) => {
+      return m.startsWith('https://lnpixels.heyanabelle.com') ? m : '';
+    });
+    // Strip @handles except allowed
+    out = out.replace(/(^|\s)@[a-z0-9_\.:-]+/gi, (m) => {
+      return /@PixelSurvivor\b/i.test(m) ? m : (m.startsWith(' ') ? ' ' : '');
+    });
+    // Keep BTC/LN if present, otherwise fine
+    return out.trim();
+  }
+
+  async generatePostTextLLM() {
+    const prompt = this._buildPostPrompt();
+    const type = this._getLargeModelType();
+    try {
+      if (!this.runtime?.useModel) throw new Error('useModel missing');
+      const res = await this.runtime.useModel(type, {
+        prompt,
+        maxTokens: 256,
+        temperature: 0.9,
+      });
+      const text = this._sanitizeWhitelist(this._extractTextFromModelResult(res));
+      return text || null;
+    } catch (err) {
+      logger?.warn?.('[NOSTR] LLM post generation failed, falling back to examples:', err?.message || err);
+      return this.pickPostText();
+    }
+  }
+
+  async generateReplyTextLLM(evt, roomId) {
+    // Collect recent messages from this room for richer context
+    let recent = [];
+    try {
+      if (this.runtime?.getMemories && roomId) {
+        const rows = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 12 });
+        // Format as role/text pairs, newest last
+        const ordered = Array.isArray(rows) ? rows.slice().reverse() : [];
+        recent = ordered.map(m => ({
+          role: m.agentId && this.runtime && m.agentId === this.runtime.agentId ? 'agent' : 'user',
+          text: String(m.content?.text || '').slice(0, 220)
+        })).filter(x => x.text);
+      }
+    } catch {}
+
+    const prompt = this._buildReplyPrompt(evt, recent);
+    const type = this._getLargeModelType();
+    try {
+      if (!this.runtime?.useModel) throw new Error('useModel missing');
+      const res = await this.runtime.useModel(type, {
+        prompt,
+        maxTokens: 192,
+        temperature: 0.8,
+      });
+      const text = this._sanitizeWhitelist(this._extractTextFromModelResult(res));
+      // Ensure not empty
+      return text || 'noted.';
+    } catch (err) {
+      logger?.warn?.('[NOSTR] LLM reply generation failed, falling back to heuristic:', err?.message || err);
+      return this.pickReplyTextFor(evt);
+    }
+  }
+
   async postOnce(content) {
     if (!this.pool || !this.sk || !this.relays.length) return false;
-    const text = (content?.trim?.() || this.pickPostText() || 'hello, nostr');
+    let text = content?.trim?.();
+    if (!text) {
+      text = await this.generatePostTextLLM();
+      if (!text) text = this.pickPostText();
+    }
+    text = text || 'hello, nostr';
     const evtTemplate = { kind: 1, created_at: Math.floor(Date.now() / 1000), tags: [], content: text };
     try {
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       logger.info(`[NOSTR] Posted note (${text.length} chars)`);
+      // Best-effort memory of the post for future context
+      try {
+        const runtime = this.runtime;
+        const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
+        const roomId = createUniqueUuid(runtime, 'nostr:posts');
+        const entityId = createUniqueUuid(runtime, this.pkHex || 'nostr');
+        await this._createMemorySafe({
+          id,
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined },
+          createdAt: Date.now(),
+        }, 'messages');
+      } catch {}
       return true;
     } catch (err) {
       logger.error('[NOSTR] Post failed:', err?.message || err);
@@ -304,7 +451,7 @@ class NostrService {
         return;
       }
       this.lastReplyByUser.set(evt.pubkey, now);
-      const replyText = this.pickReplyTextFor(evt);
+  const replyText = await this.generateReplyTextLLM(evt, roomId);
       logger.info(`[NOSTR] Sending reply to ${evt.id.slice(0,8)} len=${replyText.length}`);
       const replyOk = await this.postReply(evt, replyText);
       if (replyOk) {

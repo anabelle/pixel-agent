@@ -426,7 +426,8 @@ export const character: Character = {
       '@elizaos/plugin-openai',
       '@elizaos/plugin-knowledge',
       '@elizaos/plugin-shell',
-      '@elizaos/plugin-twitter'
+      // '@elizaos/plugin-twitter',
+  '@pixel/plugin-nostr'
     ],
    settings: {
      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
@@ -447,6 +448,13 @@ export const character: Character = {
      OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
      OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
      GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
+  // Nostr
+  NOSTR_PRIVATE_KEY: process.env.NOSTR_PRIVATE_KEY || '',
+  NOSTR_RELAYS: process.env.NOSTR_RELAYS || 'wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social',
+  NOSTR_LISTEN_ENABLE: process.env.NOSTR_LISTEN_ENABLE || 'true',
+  NOSTR_POST_ENABLE: process.env.NOSTR_POST_ENABLE || 'false',
+  NOSTR_POST_INTERVAL_MIN: process.env.NOSTR_POST_INTERVAL_MIN || '3600',
+  NOSTR_POST_INTERVAL_MAX: process.env.NOSTR_POST_INTERVAL_MAX || '10800',
    }
 };
 

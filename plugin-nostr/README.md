@@ -20,6 +20,10 @@ Config (from Character.settings):
 - NOSTR_POST_INTERVAL_MIN / MAX: seconds
 - NOSTR_REPLY_ENABLE: true/false
 - NOSTR_REPLY_THROTTLE_SEC: seconds
+ - NOSTR_DISCOVERY_ENABLE: true/false (default true)
+ - NOSTR_DISCOVERY_INTERVAL_MIN / MAX: seconds (default 900/1800)
+ - NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN: number (default 5)
+ - NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN: number (default 5)
 
 LLM requirements:
 - Ensure an LLM plugin is installed and configured (e.g. `@elizaos/plugin-openrouter` or `@elizaos/plugin-openai`).

@@ -75,6 +75,13 @@ class NostrService {
   this.replyThrottleSec = 60;
   this.handledEventIds = new Set();
   this.lastReplyByUser = new Map(); // pubkey -> timestamp ms
+  // Discovery
+  this.discoveryEnabled = true;
+  this.discoveryTimer = null;
+  this.discoveryMinSec = 900; // 15m
+  this.discoveryMaxSec = 1800; // 30m
+  this.discoveryMaxReplies = 5;
+  this.discoveryMaxFollows = 5;
   }
 
   static async start(runtime) {
@@ -90,11 +97,22 @@ class NostrService {
     const maxSec = Number(runtime.getSetting('NOSTR_POST_INTERVAL_MAX') ?? '10800');
   const replyVal = runtime.getSetting('NOSTR_REPLY_ENABLE');
   const throttleVal = runtime.getSetting('NOSTR_REPLY_THROTTLE_SEC');
+  // Discovery settings
+  const discoveryVal = runtime.getSetting('NOSTR_DISCOVERY_ENABLE');
+  const discoveryMin = Number(runtime.getSetting('NOSTR_DISCOVERY_INTERVAL_MIN') ?? '900');
+  const discoveryMax = Number(runtime.getSetting('NOSTR_DISCOVERY_INTERVAL_MAX') ?? '1800');
+  const discoveryMaxReplies = Number(runtime.getSetting('NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN') ?? '5');
+  const discoveryMaxFollows = Number(runtime.getSetting('NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN') ?? '5');
 
     svc.relays = relays;
     svc.sk = sk;
   svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
   svc.replyThrottleSec = Number(throttleVal ?? '60');
+  svc.discoveryEnabled = String(discoveryVal ?? 'true').toLowerCase() === 'true';
+  svc.discoveryMinSec = discoveryMin;
+  svc.discoveryMaxSec = discoveryMax;
+  svc.discoveryMaxReplies = discoveryMaxReplies;
+  svc.discoveryMaxFollows = discoveryMaxFollows;
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
@@ -135,7 +153,11 @@ class NostrService {
       svc.scheduleNextPost(minSec, maxSec);
     }
 
-  logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled}`);
+  if (svc.discoveryEnabled && sk) {
+      svc.scheduleNextDiscovery();
+    }
+
+  logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled}`);
     return svc;
   }
 
@@ -144,6 +166,162 @@ class NostrService {
     if (this.postTimer) clearTimeout(this.postTimer);
     this.postTimer = setTimeout(() => this.postOnce().finally(() => this.scheduleNextPost(minSec, maxSec)), jitter * 1000);
     logger.info(`[NOSTR] Next post in ~${jitter}s`);
+  }
+
+  scheduleNextDiscovery() {
+    const jitter = this.discoveryMinSec + Math.floor(Math.random() * Math.max(1, this.discoveryMaxSec - this.discoveryMinSec));
+    if (this.discoveryTimer) clearTimeout(this.discoveryTimer);
+    this.discoveryTimer = setTimeout(() => this.discoverOnce().finally(() => this.scheduleNextDiscovery()), jitter * 1000);
+    logger.info(`[NOSTR] Next discovery in ~${jitter}s`);
+  }
+
+  _pickDiscoveryTopics() {
+    const topics = Array.isArray(this.runtime.character?.topics) ? this.runtime.character.topics : [];
+    const seed = topics.filter(t => typeof t === 'string' && t.length > 2);
+    // Pick up to 3 random topics
+    const out = new Set();
+    while (out.size < Math.min(3, seed.length)) {
+      out.add(seed[Math.floor(Math.random() * seed.length)]);
+    }
+    return Array.from(out);
+  }
+
+  async _listEventsByTopic(topic) {
+    if (!this.pool) return [];
+    const now = Math.floor(Date.now() / 1000);
+    const filters = [
+      // Try NIP-50 search if supported by relays
+      { kinds: [1], search: topic, limit: 30 },
+      // Fallback: recent notes window
+      { kinds: [1], since: now - 6 * 3600, limit: 200 }
+    ];
+    try {
+      // Attempt both filters and merge results
+      const [res1, res2] = await Promise.all([
+        this.pool.list(this.relays, [filters[0]]).catch(() => []),
+        this.pool.list(this.relays, [filters[1]]).catch(() => [])
+      ]);
+      const merged = [...res1, ...res2].filter(Boolean);
+      // Basic content filter to ensure relevance
+      const lc = topic.toLowerCase();
+      const relevant = merged.filter(e => (e?.content || '').toLowerCase().includes(lc));
+      // Dedup by id
+      const seen = new Set();
+      const unique = [];
+      for (const e of relevant) { if (e && e.id && !seen.has(e.id)) { seen.add(e.id); unique.push(e); } }
+      return unique;
+    } catch (err) {
+      logger.warn('[NOSTR] Discovery list failed:', err?.message || err);
+      return [];
+    }
+  }
+
+  _scoreEventForEngagement(evt) {
+    // Simple scoring: length, question mark, mentions density, age decay
+    const text = String(evt?.content || '');
+    let score = 0;
+    if (text.length > 20) score += 0.2;
+    if (text.length > 80) score += 0.2;
+    if (/[?]/.test(text)) score += 0.2;
+    const ats = (text.match(/(^|\s)@[A-Za-z0-9_\.:-]+/g) || []).length;
+    if (ats <= 2) score += 0.1; // not too spammy
+    const ageSec = Math.max(1, Math.floor(Date.now() / 1000) - (evt.created_at || 0));
+    if (ageSec < 3600) score += 0.2; // fresh content
+    // small randomness
+    score += Math.random() * 0.2;
+    return Math.min(1, score);
+  }
+
+  async _loadCurrentContacts() {
+    if (!this.pool || !this.pkHex) return new Set();
+    try {
+      const events = await this.pool.list(this.relays, [{ kinds: [3], authors: [this.pkHex], limit: 2 }]);
+      if (!events || !events.length) return new Set();
+      const latest = events.sort((a,b) => (b.created_at||0) - (a.created_at||0))[0];
+      const pTags = Array.isArray(latest.tags) ? latest.tags.filter(t => t[0] === 'p') : [];
+      const set = new Set(pTags.map(t => t[1]).filter(Boolean));
+      return set;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to load contacts:', err?.message || err);
+      return new Set();
+    }
+  }
+
+  async _publishContacts(newSet) {
+    if (!this.pool || !this.sk) return false;
+    try {
+      const tags = [];
+      for (const pk of newSet) { tags.push(['p', pk]); }
+      const evtTemplate = { kind: 3, created_at: Math.floor(Date.now() / 1000), tags, content: JSON.stringify({}) };
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
+      return true;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to publish contacts:', err?.message || err);
+      return false;
+    }
+  }
+
+  async discoverOnce() {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    const topics = this._pickDiscoveryTopics();
+    if (!topics.length) return false;
+    logger.info(`[NOSTR] Discovery run: topics=${topics.join(', ')}`);
+    // Gather candidate events across topics
+    const buckets = await Promise.all(topics.map(t => this._listEventsByTopic(t)));
+    const all = buckets.flat();
+    // Score and sort
+    const scored = all.map(e => ({ evt: e, score: this._scoreEventForEngagement(e) }))
+      .sort((a,b) => b.score - a.score);
+
+    // Decide replies
+    let replies = 0;
+    const usedAuthors = new Set();
+    for (const { evt } of scored) {
+      if (replies >= this.discoveryMaxReplies) break;
+      if (!evt || !evt.id || !evt.pubkey) continue;
+      if (this.handledEventIds.has(evt.id)) continue;
+      // Avoid same author spam this cycle
+      if (usedAuthors.has(evt.pubkey)) continue;
+      // Self-avoid: don't reply to our own notes
+      if (evt.pubkey === this.pkHex) continue;
+      try {
+        // Build conversation id from event
+        const convId = this._getConversationIdFromEvent(evt);
+        const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
+        const text = await this.generateReplyTextLLM(evt, roomId);
+        const ok = await this.postReply(evt, text);
+        if (ok) {
+          this.handledEventIds.add(evt.id);
+          usedAuthors.add(evt.pubkey);
+          replies++;
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Discovery reply error:', err?.message || err);
+      }
+    }
+
+    // Decide follows
+    try {
+      const current = await this._loadCurrentContacts();
+      const toAdd = [];
+      for (const { evt } of scored) {
+        if (toAdd.length >= this.discoveryMaxFollows) break;
+        if (!evt || !evt.pubkey) continue;
+        if (evt.pubkey === this.pkHex) continue;
+        if (!current.has(evt.pubkey)) toAdd.push(evt.pubkey);
+      }
+      if (toAdd.length) {
+        const newSet = new Set([...current, ...toAdd]);
+        await this._publishContacts(newSet);
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Discovery follow error:', err?.message || err);
+    }
+
+    logger.info(`[NOSTR] Discovery run complete: replies=${replies}`);
+    return true;
   }
 
   pickPostText() {
@@ -564,6 +742,7 @@ class NostrService {
 
   async stop() {
     if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
+  if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close(this.relays); } catch {} this.pool = null; }
     logger.info('[NOSTR] Service stopped');

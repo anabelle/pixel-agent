@@ -1,0 +1,1 @@
+export { createImagePlugin, default as imagePlugin } from './image-plugin.js';

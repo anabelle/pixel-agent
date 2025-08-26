@@ -417,17 +417,17 @@ export const character: Character = {
       'Frame sats as relics, donations as rituals, and art as rebellion.'
     ]
   },
-   plugins: [
-     '@elizaos/plugin-telegram',
-     '@elizaos/plugin-discord',
-     '@elizaos/plugin-sql',
-     '@elizaos/plugin-bootstrap',
-     '@elizaos/plugin-openrouter',
-     '@elizaos/plugin-openai',
-     '@elizaos/plugin-knowledge',
-     '@elizaos/plugin-shell',
-     '@elizaos/plugin-twitter'
-   ],
+    plugins: [
+      '@elizaos/plugin-telegram',
+      '@elizaos/plugin-discord',
+      '@elizaos/plugin-sql',
+      '@elizaos/plugin-bootstrap',
+      '@elizaos/plugin-openrouter',
+      '@elizaos/plugin-openai',
+      '@elizaos/plugin-knowledge',
+      '@elizaos/plugin-shell',
+      '@elizaos/plugin-twitter'
+    ],
    settings: {
      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
      TWITTER_API_KEY: process.env.TWITTER_API_KEY || '',

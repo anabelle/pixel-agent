@@ -299,6 +299,7 @@ class NostrService {
 
       const memory = {
         id: memoryId,
+        type: 'messages',
         entityId: entityId,
         agentId: this.runtime.agentId,
         roomId: 'nostr',
@@ -312,11 +313,14 @@ class NostrService {
           }
         },
         createdAt: new Date().toISOString(),
+        unique: true,
         metadata: { type: 'message' }
       };
 
-      // Store the memory with proper UUID
-      await this.runtime.createMemory(memory);
+      // Store the memory with proper UUID - specify type as second parameter
+      // Temporarily disabled to test if NOSTR service works
+      logger.info(`[NOSTR] Would store memory for: ${evt.content?.slice(0, 50)}... from ${evt.pubkey.slice(0, 8)}`);
+      // await this.runtime.createMemory(memory, 'messages');
 
       // Auto-reply if enabled and we have keys
       if (!this.replyEnabled || !this.sk || !this.pool) return;

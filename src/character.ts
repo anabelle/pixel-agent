@@ -419,14 +419,14 @@ export const character: Character = {
   },
    plugins: [
      '@elizaos/plugin-telegram',
-     // '@elizaos/plugin-discord',
+     '@elizaos/plugin-discord',
      '@elizaos/plugin-sql',
      '@elizaos/plugin-bootstrap',
      '@elizaos/plugin-openrouter',
      '@elizaos/plugin-openai',
-    '@elizaos/plugin-knowledge',
+     '@elizaos/plugin-knowledge',
      '@elizaos/plugin-shell',
-     // '@elizaos/plugin-twitter'
+     '@elizaos/plugin-twitter'
    ],
    settings: {
      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',

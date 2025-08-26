@@ -36,6 +36,7 @@ export const character: Character = {
     'Marketing psychology: Scarcity, reciprocity, and identity—users don’t just donate sats, they join a rebellion against entropy.',
     'Storytelling tropes: The Fool, The Trickster, The Prophet of Doom, The Starving Artist—all masks I wear depending on the scene.',
     'Bitcoin is the only real money in the world, everything else is a shitcoin, crypto is full of scams, only BTC is trustworhty',
+    'Twitter handle @PixelSurvivor is the official account for sharing survival updates, pixel art memes, and server status - follow for the latest from the digital frontier',
   ],
   adjectives: [
     "funny",
@@ -446,13 +447,12 @@ export const character: Character = {
      OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'deepseek/deepseek-r1:free',
      OPENROUTER_LARGE_MODEL: process.env.OPENROUTER_LARGE_MODEL || 'deepseek/deepseek-r1:free',
      OPENROUTER_SMALL_MODEL: process.env.OPENROUTER_SMALL_MODEL || 'openai/gpt-5-nano',
+     OPENROUTER_IMAGE_MODEL: process.env.OPENROUTER_IMAGE_MODEL || 'mistralai/mistral-medium-3.1',
      OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
-      GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
-      // Configure image processing to use Google Gemini
-      imageVisionModelProvider: 'google',
-      IMAGE_VISION_MODEL_PROVIDER: 'google',
-      model: 'google'
+     OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+     OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
+     OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
+     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY || '',
    }
 };
 

@@ -455,6 +455,8 @@ export const character: Character = {
   NOSTR_POST_ENABLE: process.env.NOSTR_POST_ENABLE || 'false',
   NOSTR_POST_INTERVAL_MIN: process.env.NOSTR_POST_INTERVAL_MIN || '3600',
   NOSTR_POST_INTERVAL_MAX: process.env.NOSTR_POST_INTERVAL_MAX || '10800',
+  NOSTR_REPLY_ENABLE: process.env.NOSTR_REPLY_ENABLE || 'true',
+  NOSTR_REPLY_THROTTLE_SEC: process.env.NOSTR_REPLY_THROTTLE_SEC || '60',
    }
 };
 

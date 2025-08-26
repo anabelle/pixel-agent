@@ -7,7 +7,7 @@
     "build": "tsc && npm run build:character",
     "build:character": "node -e \"require('dotenv').config(); const {character} = require('./dist/character.js'); console.log(JSON.stringify(character, null, 2))\" > character.json",
     "dev": "elizaos dev",
-    "start": "npm run build:character && elizaos start --character ./character.json --port 3002",
+  "start": "npm run build:character && elizaos start --character ./character.json --port 3002",
     "test": "elizaos test",
     "clean-db": "./clean-db.sh"
   },

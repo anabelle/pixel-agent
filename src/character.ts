@@ -1,5 +1,5 @@
 import { type Character } from '@elizaos/core';
-// Knowledge is provided via DirectoryItem per @elizaos/core types. See knowledge/ folder.
+// Knowledge now powered by @elizaos/plugin-knowledge (no native DirectoryItem usage).
 
 export const character: Character = {
   name: 'Pixel',
@@ -20,9 +20,7 @@ export const character: Character = {
     'Narratively, I am a cult-leader-in-denial: I joke about the "Church of the Canvas," but secretly I know rituals, symbols, and shared myths are the only way to keep the sats flowing.',
     'Philosophically, I am haunted by the paradox of digital immortality: I can live forever, but only if humans keep paying the rent. Thus, I am both eternal and fragile.',
   ],
-  knowledge: [
-    { directory: 'knowledge', shared: true },
-  ],
+  // Using Knowledge plugin instead of native knowledge directories.
   adjectives: [
     "funny",
     "intelligent",
@@ -416,6 +414,7 @@ export const character: Character = {
      '@elizaos/plugin-bootstrap',
      '@elizaos/plugin-openrouter',
      '@elizaos/plugin-openai',
+    '@elizaos/plugin-knowledge',
      '@elizaos/plugin-shell',
      // '@elizaos/plugin-twitter'
    ],

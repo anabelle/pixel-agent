@@ -568,12 +568,16 @@ class NostrService {
         ? ch.postExamples
         : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
       : [];
+
+    logger?.info?.('[NOSTR] Examples for reply prompt:', examples);
+    
     const history =
       Array.isArray(recentMessages) && recentMessages.length
         ? `Recent conversation (most recent last):\n` +
         recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
         : "";
-    return [
+
+    let prompt = [
       `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
       ch.system ? `Persona/system: ${ch.system}` : "",
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
@@ -586,7 +590,11 @@ class NostrService {
       history,
       `Original message: "${userText}"`,
       "Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.",
-    ]
+    ];
+
+    logger?.info?.("[NOSTR] Generated reply prompt:", prompt);
+
+    return prompt
       .filter(Boolean)
       .join("\n\n");
   }

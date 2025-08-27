@@ -577,7 +577,6 @@ class NostrService {
       `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
       ch.system ? `Persona/system: ${ch.system}` : "",
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
-      ,
       examples.length
         ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join(
           "\n- "

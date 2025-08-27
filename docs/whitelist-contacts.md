@@ -3,7 +3,7 @@
 Authoritative, whitelist-only references for Pixel. Use these verbatim. Do not invent alternates.
 
 - Official website: https://lnpixels.heyanabelle.com
-- Bitcoin address (BTC): bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla
+- Bitcoin address (BTC): bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning address (⚡): sparepicolo55@walletofsatoshi.com
 - Social handle (X + Telegram): @PixelSurvivor
 
@@ -14,6 +14,6 @@ Hard prohibitions
 
 Canonical answer patterns
 - Website? → https://lnpixels.heyanabelle.com
-- BTC? → bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla
+- BTC? → bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning? → sparepicolo55@walletofsatoshi.com
 - Socials? → x + telegram: @PixelSurvivor

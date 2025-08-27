@@ -9,7 +9,7 @@ What changed:
 - Output is sanitized to respect a strict whitelist (keeps only these if present):
   - Site: https://lnpixels.heyanabelle.com
   - Handle: @PixelSurvivor
-  - BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla
+  - BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
   - LN: sparepicolo55@walletofsatoshi.com
 
 Config (from Character.settings):

@@ -1,6 +1,6 @@
 # Official Payment Addresses
 
-- Bitcoin on-chain: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla
+- Bitcoin on-chain: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning address: sparepicolo55@walletofsatoshi.com
 
 Rules:

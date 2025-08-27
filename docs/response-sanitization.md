@@ -6,7 +6,8 @@ Approved items only
 - URL: https://lnpixels.heyanabelle.com
 - BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - LN: sparepicolo55@walletofsatoshi.com
-- X + Telegram: @PixelSurvivor
+- X: @PixelSurvivor
+- Telegram: https://t.me/PixelSurvival_bot
 
 When generating text
 - If any http/https URL appears that is not the approved domain, delete it or replace with the approved URL.
@@ -15,4 +16,4 @@ When generating text
 - If asked for alternatives, politely refuse and restate the approved items only.
 
 Example refusals
-- “i only use https://lnpixels.heyanabelle.com, @PixelSurvivor, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za, and sparepicolo55@walletofsatoshi.com.”
+- “I only use https://lnpixels.heyanabelle.com, @PixelSurvivor, https://t.me/PixelSurvival_bot, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za, and sparepicolo55@walletofsatoshi.com.”

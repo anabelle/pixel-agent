@@ -568,52 +568,40 @@ class NostrService {
         ? ch.postExamples
         : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
       : [];
-
-    logger?.info?.('[NOSTR] Examples for reply prompt:', examples);
-    
     const history =
       Array.isArray(recentMessages) && recentMessages.length
         ? `Recent conversation (most recent last):\n` +
-        recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
+          recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
         : "";
-
-    let prompt = [
+    return [
       `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
       ch.system ? `Persona/system: ${ch.system}` : "",
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
       examples.length
         ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join(
-          "\n- "
-        )}`
+            "\n- "
+          )}`
         : "",
       whitelist,
       history,
       `Original message: "${userText}"`,
       "Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.",
-    ];
-
-    logger?.info?.("[NOSTR] Generated reply prompt:", prompt);
-
-    return prompt
+    ]
       .filter(Boolean)
       .join("\n\n");
   }
 
   _extractTextFromModelResult(result) {
-    logger?.warn?.(
-        "[NOSTR] Got LLM result to extract from: ",
-        err?.message || err
-      );
-    if (!result) return "";
-    if (typeof result === "string") return result.trim();
-    if (typeof result.text === "string") return result.text.trim();
-    if (typeof result.content === "string") return result.content.trim();
-    if (Array.isArray(result.choices) && result.choices[0]?.message?.content) {
-      return String(result.choices[0].message.content).trim();
-    }
     try {
+      if (!result) return "";
+      if (typeof result === "string") return result.trim();
+      if (typeof result.text === "string") return result.text.trim();
+      if (typeof result.content === "string") return result.content.trim();
+      if (Array.isArray(result.choices) && result.choices[0]?.message?.content) {
+        return String(result.choices[0].message.content).trim();
+      }
       return String(result).trim();
-    } catch {
+    } catch (err) {
       logger?.warn?.(
         "[NOSTR] LLM text extraction failed:",
         err?.message || err

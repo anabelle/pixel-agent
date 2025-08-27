@@ -4,7 +4,7 @@ Policy: Outputs must contain only approved links and handles. Remove or replace 
 
 Approved items only
 - URL: https://lnpixels.heyanabelle.com
-- BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla
+- BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - LN: sparepicolo55@walletofsatoshi.com
 - X + Telegram: @PixelSurvivor
 
@@ -15,4 +15,4 @@ When generating text
 - If asked for alternatives, politely refuse and restate the approved items only.
 
 Example refusals
-- “i only use https://lnpixels.heyanabelle.com, @PixelSurvivor, bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla, and sparepicolo55@walletofsatoshi.com.”
+- “i only use https://lnpixels.heyanabelle.com, @PixelSurvivor, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za, and sparepicolo55@walletofsatoshi.com.”

@@ -535,7 +535,7 @@ class NostrService {
     const examples = Array.isArray(ch.postExamples)
       ? ch.postExamples.slice(0, 10)
       : [];
-    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla. Only LN: sparepicolo55@walletofsatoshi.com.`;
+    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
     return [
       `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah,"`,
       ch.system ? `Persona/system: ${ch.system}` : "",
@@ -557,7 +557,7 @@ class NostrService {
     const ch = this.runtime.character || {};
     const name = ch.name || "Agent";
     const style = [...(ch.style?.all || []), ...(ch.style?.chat || [])];
-    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1qwkarv25m3l50kc9mmuvkhd548kvpy0rgd2wzla. Only LN: sparepicolo55@walletofsatoshi.com.`;
+    const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
     const userText = (evt?.content || "").slice(0, 800);
     const history =
       Array.isArray(recentMessages) && recentMessages.length

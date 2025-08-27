@@ -53,7 +53,7 @@ function parseSk(input) {
       const decoded = nip19.decode(input);
       if (decoded.type === "nsec") return decoded.data;
     }
-  } catch {}
+  } catch { }
   const bytes = hexToBytesLocal(input);
   return bytes || null;
 }
@@ -163,8 +163,8 @@ class NostrService {
     // Log effective configuration to aid debugging
     logger.info(
       `[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, ` +
-        `replyThrottle=${svc.replyThrottleSec}s, discovery=${svc.discoveryEnabled} ` +
-        `interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows}`
+      `replyThrottle=${svc.replyThrottleSec}s, discovery=${svc.discoveryEnabled} ` +
+      `interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows}`
     );
 
     if (!relays.length) {
@@ -371,7 +371,7 @@ class NostrService {
         done = true;
         try {
           if (unsub) unsub();
-        } catch {}
+        } catch { }
         if (settleTimer) clearTimeout(settleTimer);
         if (safetyTimer) clearTimeout(safetyTimer);
         resolve(events);
@@ -526,14 +526,18 @@ class NostrService {
     const ch = this.runtime.character || {};
     const name = ch.name || "Agent";
     const topics = Array.isArray(ch.topics)
-      ? ch.topics.slice(0, 12).join(", ")
+      ? ch.topics.length <= 12
+        ? ch.topics.join(", ")
+        : ch.topics.sort(() => 0.5 - Math.random()).slice(0, 12).join(", ")
       : "";
     const style = [
       ...(ch.style?.all || []),
       ...(ch.style?.post || []),
     ];
     const examples = Array.isArray(ch.postExamples)
-      ? ch.postExamples.slice(0, 10)
+      ? ch.postExamples.length <= 10
+        ? ch.postExamples
+        : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
       : [];
     const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
     return [
@@ -543,8 +547,8 @@ class NostrService {
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
       examples.length
         ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join(
-            "\n- "
-          )}`
+          "\n- "
+        )}`
         : "",
       whitelist,
       "Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist—no other links or handles.",
@@ -559,15 +563,26 @@ class NostrService {
     const style = [...(ch.style?.all || []), ...(ch.style?.chat || [])];
     const whitelist = `Only allowed site: https://lnpixels.heyanabelle.com. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
     const userText = (evt?.content || "").slice(0, 800);
+    const examples = Array.isArray(ch.postExamples)
+      ? ch.postExamples.length <= 10
+        ? ch.postExamples
+        : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
+      : [];
     const history =
       Array.isArray(recentMessages) && recentMessages.length
         ? `Recent conversation (most recent last):\n` +
-          recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
+        recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
         : "";
     return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,"`,
+      `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
       ch.system ? `Persona/system: ${ch.system}` : "",
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
+      ,
+      examples.length
+        ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join(
+          "\n- "
+        )}`
+        : "",
       whitelist,
       history,
       `Original message: "${userText}"`,
@@ -652,7 +667,7 @@ class NostrService {
           }))
           .filter((x) => x.text);
       }
-    } catch {}
+    } catch { }
 
     const prompt = this._buildReplyPrompt(evt, recent);
     const type = this._getLargeModelType();
@@ -719,7 +734,7 @@ class NostrService {
           },
           "messages"
         );
-      } catch {}
+      } catch { }
       return true;
     } catch (err) {
       logger.error("[NOSTR] Post failed:", err?.message || err);
@@ -737,7 +752,7 @@ class NostrService {
       if (root && root[1]) return root[1];
       // Fallback to any first 'e' tag
       if (eTags.length && eTags[0][1]) return eTags[0][1];
-    } catch {}
+    } catch { }
     // Use the event id as thread id fallback
     return evt?.id || "nostr";
   }
@@ -765,7 +780,7 @@ class NostrService {
           nostr: { pubkey: userPubkey },
         },
       })
-      .catch(() => {});
+      .catch(() => { });
     await runtime
       .ensureRoomExists({
         id: roomId,
@@ -776,7 +791,7 @@ class NostrService {
         serverId: userPubkey,
         worldId,
       })
-      .catch(() => {});
+      .catch(() => { });
     await runtime
       .ensureConnection({
         entityId,
@@ -787,7 +802,7 @@ class NostrService {
         type: ChannelType ? ChannelType.FEED : undefined,
         worldId,
       })
-      .catch(() => {});
+      .catch(() => { });
     logger.info(
       `[NOSTR] Context ensured world=${worldId} room=${roomId} entity=${entityId}`
     );
@@ -799,8 +814,7 @@ class NostrService {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         logger.info(
-          `[NOSTR] Creating memory id=${memory.id} room=${
-            memory.roomId
+          `[NOSTR] Creating memory id=${memory.id} room=${memory.roomId
           } attempt=${attempt + 1}/${maxRetries}`
         );
         await this.runtime.createMemory(memory, tableName);
@@ -846,7 +860,7 @@ class NostrService {
           );
           return;
         }
-      } catch {}
+      } catch { }
 
       const conversationId = this._getConversationIdFromEvent(evt);
       const { roomId, entityId } = await this._ensureNostrContext(
@@ -893,7 +907,7 @@ class NostrService {
           );
           return;
         }
-      } catch {}
+      } catch { }
 
       // Auto-reply if enabled
       if (!this.replyEnabled || !this.sk || !this.pool) return;
@@ -968,8 +982,8 @@ class NostrService {
       // Try to carry root if present
       const rootTag = Array.isArray(parentEvt.tags)
         ? parentEvt.tags.find(
-            (t) => t[0] === "e" && (t[3] === "root" || t[3] === "reply")
-          )
+          (t) => t[0] === "e" && (t[3] === "root" || t[3] === "reply")
+        )
         : null;
       if (rootTag && rootTag[1] && rootTag[1] !== parentEvt.id) {
         tags.push(["e", rootTag[1], "", "root"]);
@@ -986,16 +1000,15 @@ class NostrService {
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       logger.info(
-        `[NOSTR] Replied to ${parentEvt.id.slice(0, 8)}… (${
-          evtTemplate.content.length
+        `[NOSTR] Replied to ${parentEvt.id.slice(0, 8)}… (${evtTemplate.content.length
         } chars)`
       );
       // Persist relationship bump
       await this.saveInteractionMemory("reply", parentEvt, {
         replied: true,
-      }).catch(() => {});
+      }).catch(() => { });
       // Drop a like on the post we replied to (best-effort)
-      this.postReaction(parentEvt, "+").catch(() => {});
+      this.postReaction(parentEvt, "+").catch(() => { });
       return true;
     } catch (err) {
       logger.warn("[NOSTR] Reply failed:", err?.message || err);
@@ -1020,8 +1033,7 @@ class NostrService {
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       logger.info(
-        `[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${
-          evtTemplate.content
+        `[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content
         }"`
       );
       return true;
@@ -1099,13 +1111,13 @@ class NostrService {
     if (this.listenUnsub) {
       try {
         this.listenUnsub();
-      } catch {}
+      } catch { }
       this.listenUnsub = null;
     }
     if (this.pool) {
       try {
         this.pool.close(this.relays);
-      } catch {}
+      } catch { }
       this.pool = null;
     }
     logger.info("[NOSTR] Service stopped");

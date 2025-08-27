@@ -593,6 +593,10 @@ class NostrService {
   }
 
   _extractTextFromModelResult(result) {
+    logger?.warn?.(
+        "[NOSTR] Got LLM result to extract from: ",
+        err?.message || err
+      );
     if (!result) return "";
     if (typeof result === "string") return result.trim();
     if (typeof result.text === "string") return result.text.trim();
@@ -603,6 +607,10 @@ class NostrService {
     try {
       return String(result).trim();
     } catch {
+      logger?.warn?.(
+        "[NOSTR] LLM text extraction failed:",
+        err?.message || err
+      );
       return "";
     }
   }
@@ -613,10 +621,6 @@ class NostrService {
     // Strip URLs except allowed domain
     out = out.replace(/https?:\/\/[^\s)]+/gi, (m) => {
       return m.startsWith("https://lnpixels.heyanabelle.com") ? m : "";
-    });
-    // Strip @handles except allowed
-    out = out.replace(/(^|\s)@[a-z0-9_\.:-]+/gi, (m) => {
-      return /@PixelSurvivor\b/i.test(m) ? m : m.startsWith(" ") ? " " : "";
     });
     // Keep BTC/LN if present, otherwise fine
     return out.trim();

@@ -86,9 +86,12 @@ class NostrService {
     this.listenUnsub = null;
     this.replyEnabled = true;
     this.replyThrottleSec = 60;
+    // Human-like initial delay before sending an auto-reply (jittered)
+    this.replyInitialDelayMinMs = 800;
+    this.replyInitialDelayMaxMs = 2500;
     this.handledEventIds = new Set();
     this.lastReplyByUser = new Map(); // pubkey -> timestamp ms
-  this.pendingReplyTimers = new Map(); // pubkey -> Timeout
+    this.pendingReplyTimers = new Map(); // pubkey -> Timeout
     // Discovery
     this.discoveryEnabled = true;
     this.discoveryTimer = null;
@@ -133,6 +136,13 @@ class NostrService {
     );
     const replyVal = runtime.getSetting("NOSTR_REPLY_ENABLE");
     const throttleVal = runtime.getSetting("NOSTR_REPLY_THROTTLE_SEC");
+    // Thinking delay (ms) before first auto-reply send
+    const thinkMinMsVal = runtime.getSetting(
+      "NOSTR_REPLY_INITIAL_DELAY_MIN_MS"
+    );
+    const thinkMaxMsVal = runtime.getSetting(
+      "NOSTR_REPLY_INITIAL_DELAY_MAX_MS"
+    );
     // Discovery settings
     const discoveryVal = runtime.getSetting("NOSTR_DISCOVERY_ENABLE");
     const discoveryMin = normalizeSeconds(
@@ -154,6 +164,19 @@ class NostrService {
     svc.sk = sk;
     svc.replyEnabled = String(replyVal ?? "true").toLowerCase() === "true";
     svc.replyThrottleSec = Number(throttleVal ?? "60");
+    // Configure initial thinking delay
+    const parseMs = (v, d) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : d;
+    };
+    svc.replyInitialDelayMinMs = parseMs(thinkMinMsVal, 800);
+    svc.replyInitialDelayMaxMs = parseMs(thinkMaxMsVal, 2500);
+    if (svc.replyInitialDelayMaxMs < svc.replyInitialDelayMinMs) {
+      // swap if misconfigured
+      const tmp = svc.replyInitialDelayMinMs;
+      svc.replyInitialDelayMinMs = svc.replyInitialDelayMaxMs;
+      svc.replyInitialDelayMaxMs = tmp;
+    }
     svc.discoveryEnabled =
       String(discoveryVal ?? "true").toLowerCase() === "true";
     svc.discoveryMinSec = discoveryMin;
@@ -164,7 +187,7 @@ class NostrService {
     // Log effective configuration to aid debugging
     logger.info(
       `[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, ` +
-      `replyThrottle=${svc.replyThrottleSec}s, discovery=${svc.discoveryEnabled} ` +
+      `replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} ` +
       `interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows}`
     );
 
@@ -426,6 +449,8 @@ class NostrService {
 
   async discoverOnce() {
     if (!this.pool || !this.sk || !this.relays.length) return false;
+    // Honor global reply toggle for discovery-generated replies
+    const canReply = !!this.replyEnabled;
     const topics = this._pickDiscoveryTopics();
     if (!topics.length) return false;
     logger.info(`[NOSTR] Discovery run: topics=${topics.join(", ")}`);
@@ -450,6 +475,19 @@ class NostrService {
       if (usedAuthors.has(evt.pubkey)) continue;
       // Self-avoid: don't reply to our own notes
       if (evt.pubkey === this.pkHex) continue;
+      // Respect global reply toggle
+      if (!canReply) continue;
+      // Respect per-author cooldown used for mentions as well
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.replyThrottleSec * 1000) {
+        logger.debug(
+          `[NOSTR] Discovery skipping ${evt.pubkey.slice(0, 8)} due to cooldown (${Math.round(
+            (this.replyThrottleSec * 1000 - (now - last)) / 1000
+          )}s left)`
+        );
+        continue;
+      }
       try {
         // Build conversation id from event
         const convId = this._getConversationIdFromEvent(evt);
@@ -463,6 +501,7 @@ class NostrService {
         if (ok) {
           this.handledEventIds.add(evt.id);
           usedAuthors.add(evt.pubkey);
+          this.lastReplyByUser.set(evt.pubkey, Date.now());
           replies++;
         }
       } catch (err) {
@@ -572,7 +611,7 @@ class NostrService {
     const history =
       Array.isArray(recentMessages) && recentMessages.length
         ? `Recent conversation (most recent last):\n` +
-          recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
+        recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
         : "";
     return [
       `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
@@ -580,8 +619,8 @@ class NostrService {
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
       examples.length
         ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join(
-            "\n- "
-          )}`
+          "\n- "
+        )}`
         : "",
       whitelist,
       history,
@@ -951,7 +990,7 @@ class NostrService {
                   );
                   return;
                 }
-              } catch {}
+              } catch { }
               // Re-check throttle window
               const lastNow = this.lastReplyByUser.get(pubkey) || 0;
               const now2 = Date.now();
@@ -993,7 +1032,7 @@ class NostrService {
                     createdAt: now2,
                   },
                   "messages"
-                ).catch(() => {});
+                ).catch(() => { });
               }
             } catch (e) {
               logger.warn(
@@ -1011,6 +1050,14 @@ class NostrService {
         return;
       }
       this.lastReplyByUser.set(evt.pubkey, now);
+      // Add small human-like thinking delay with jitter for realism
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) {
+        logger.debug(`[NOSTR] Thinking for ~${delayMs}ms before replying...`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
       const replyText = await this.generateReplyTextLLM(evt, roomId);
       logger.info(
         `[NOSTR] Sending reply to ${evt.id.slice(0, 8)} len=${replyText.length}`
@@ -1211,7 +1258,7 @@ class NostrService {
     }
     if (this.pendingReplyTimers && this.pendingReplyTimers.size) {
       for (const [, t] of this.pendingReplyTimers) {
-        try { clearTimeout(t); } catch {}
+        try { clearTimeout(t); } catch { }
       }
       this.pendingReplyTimers.clear();
     }

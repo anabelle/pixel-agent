@@ -88,6 +88,7 @@ class NostrService {
     this.replyThrottleSec = 60;
     this.handledEventIds = new Set();
     this.lastReplyByUser = new Map(); // pubkey -> timestamp ms
+  this.pendingReplyTimers = new Map(); // pubkey -> Timeout
     // Discovery
     this.discoveryEnabled = true;
     this.discoveryTimer = null;
@@ -913,11 +914,100 @@ class NostrService {
       const last = this.lastReplyByUser.get(evt.pubkey) || 0;
       const now = Date.now();
       if (now - last < this.replyThrottleSec * 1000) {
-        logger.info(
-          `[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)} (${Math.round(
-            (this.replyThrottleSec * 1000 - (now - last)) / 1000
-          )}s left)`
-        );
+        const waitMs = this.replyThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          logger.info(
+            `[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(
+              waitMs / 1000
+            )}s`
+          );
+          // Capture needed values for delayed send
+          const pubkey = evt.pubkey;
+          const parentEvt = { ...evt };
+          const capturedRoomId = roomId;
+          const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              // If we already replied in this room since, skip
+              try {
+                const recent = await this.runtime.getMemories({
+                  tableName: "messages",
+                  roomId: capturedRoomId,
+                  count: 10,
+                });
+                const hasReply = recent.some(
+                  (m) =>
+                    m.content?.inReplyTo === capturedEventMemoryId ||
+                    m.content?.inReplyTo === parentEvt.id
+                );
+                if (hasReply) {
+                  logger.info(
+                    `[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(
+                      0,
+                      8
+                    )} (found existing reply)`
+                  );
+                  return;
+                }
+              } catch {}
+              // Re-check throttle window
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0;
+              const now2 = Date.now();
+              if (now2 - lastNow < this.replyThrottleSec * 1000) {
+                logger.info(
+                  `[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`
+                );
+                return;
+              }
+              this.lastReplyByUser.set(pubkey, now2);
+              const replyText = await this.generateReplyTextLLM(
+                parentEvt,
+                capturedRoomId
+              );
+              logger.info(
+                `[NOSTR] Sending scheduled reply to ${parentEvt.id.slice(
+                  0,
+                  8
+                )} len=${replyText.length}`
+              );
+              const ok = await this.postReply(parentEvt, replyText);
+              if (ok) {
+                // Persist link memory best-effort
+                const linkId = createUniqueUuid(
+                  this.runtime,
+                  `${parentEvt.id}:reply:${now2}:scheduled`
+                );
+                await this._createMemorySafe(
+                  {
+                    id: linkId,
+                    entityId,
+                    agentId: this.runtime.agentId,
+                    roomId: capturedRoomId,
+                    content: {
+                      text: replyText,
+                      source: "nostr",
+                      inReplyTo: capturedEventMemoryId,
+                    },
+                    createdAt: now2,
+                  },
+                  "messages"
+                ).catch(() => {});
+              }
+            } catch (e) {
+              logger.warn(
+                "[NOSTR] Scheduled reply failed:",
+                e?.message || e
+              );
+            }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        } else {
+          logger.debug(
+            `[NOSTR] Reply already scheduled for ${evt.pubkey.slice(0, 8)}`
+          );
+        }
         return;
       }
       this.lastReplyByUser.set(evt.pubkey, now);
@@ -1118,6 +1208,12 @@ class NostrService {
         this.pool.close(this.relays);
       } catch { }
       this.pool = null;
+    }
+    if (this.pendingReplyTimers && this.pendingReplyTimers.size) {
+      for (const [, t] of this.pendingReplyTimers) {
+        try { clearTimeout(t); } catch {}
+      }
+      this.pendingReplyTimers.clear();
     }
     logger.info("[NOSTR] Service stopped");
   }

@@ -531,7 +531,7 @@ export const character: Character = {
     "@elizaos/plugin-openrouter",
     "@elizaos/plugin-openai",
     "@elizaos/plugin-knowledge",
-    // "@elizaos/plugin-shell",
+    "@elizaos/plugin-shell",
     // '@elizaos/plugin-twitter',
     "@pixel/plugin-nostr",
   ],

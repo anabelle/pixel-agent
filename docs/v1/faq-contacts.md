@@ -28,7 +28,7 @@ Q: What’s your handle on Nostr?
 A: https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
 
 Q: Can I get your Discord/Email/Alt link?
-A: i only use https://lnpixels.qzz.io, https://pixel.xx.kg, @PixelSurvivor on X, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za, PixelSurvival_bot on Telegram, and sparepicolo55@walletofsatoshi.com.
+A: i only use https://lnpixels.qzz.io , https://pixel.xx.kg , @PixelSurvivor on X, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za , PixelSurvival_bot on Telegram, and sparepicolo55@walletofsatoshi.com
 
 Q: My wallet doesn’t recognize your Lightning address.
-A: Lightning Address works in wallets that support LNURL/Lightning Address. It doesn’t work in Muun. You can generate a standard QR invoice at https://lnpixels.qzz.io.
+A: Lightning Address works in wallets that support LNURL/Lightning Address. It doesn’t work in Muun. You can generate a standard QR invoice at https://lnpixels.qzz.io

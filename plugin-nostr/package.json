@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
   "dev": "tsc --watch",
-  "test": "vitest run"
+  "test": "vitest run -c ./vitest.config.mjs"
   },
   "dependencies": {
     "@elizaos/core": "^1.4.5",

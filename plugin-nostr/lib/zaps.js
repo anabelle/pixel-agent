@@ -73,9 +73,31 @@ function generateThanksText(amountMsats) {
   return `⚡️ ${sats} sats — appreciated! ${pick()} ✨`;
 }
 
+// Extract the actual zapper (user) pubkey from the NIP-57 description tag
+function getZapSenderPubkey(evt) {
+  try {
+    if (!evt || !Array.isArray(evt.tags)) return null;
+    const descTag = evt.tags.find((t) => t && t[0] === 'description' && typeof t[1] === 'string');
+    if (!descTag) return null;
+    const raw = descTag[1];
+    // Description should be a JSON-serialized Nostr event (zap request)
+    try {
+      const obj = JSON.parse(raw);
+      const pk = obj && typeof obj.pubkey === 'string' ? obj.pubkey : null;
+      if (pk && /^[0-9a-fA-F]{64}$/.test(pk)) return pk.toLowerCase();
+    } catch {
+      // Fallback: regex search for a pubkey field
+      const m = raw.match(/"pubkey"\s*:\s*"([0-9a-fA-F]{64})"/);
+      if (m && m[1]) return m[1].toLowerCase();
+    }
+  } catch {}
+  return null;
+}
+
 module.exports = {
   getZapAmountMsats,
   getZapTargetEventId,
   generateThanksText,
+  getZapSenderPubkey,
   parseBolt11Msats,
 };

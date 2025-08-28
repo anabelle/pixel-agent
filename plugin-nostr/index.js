@@ -1588,14 +1588,24 @@ class NostrService {
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
 
       const thanks = generateThanksText(amountMsats);
+      // Add a NIP-27 mention so clients visibly link the zapper
+      let thanksWithMention = thanks;
+      try {
+        if (sender && /^[0-9a-fA-F]{64}$/.test(sender)) {
+          const npub = nip19?.npubEncode ? nip19.npubEncode(sender) : null;
+          if (npub) {
+            thanksWithMention = `${thanks} nostr:${npub}`;
+          }
+        }
+      } catch {}
       if (targetEventId) {
         // Reply under the zapped note (root) and mention the giver; no extra reaction
         logger.info(`[NOSTR] Zap thanks: replying under root ${String(targetEventId).slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
+        await this.postReply(targetEventId, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
       } else {
         // Fallback: reply to the zap receipt; no extra reaction
         logger.info(`[NOSTR] Zap thanks: replying to receipt ${evt.id.slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-        await this.postReply(evt, `${thanks}`, { skipReaction: true, expectMentionPk: sender });
+  await this.postReply(evt, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
       }
 
       // Persist interaction memory (best-effort)

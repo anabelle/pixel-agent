@@ -281,49 +281,186 @@ class NostrService {
   }
 
   _pickDiscoveryTopics() {
-    const topics = Array.isArray(this.runtime.character?.topics)
-      ? this.runtime.character.topics
-      : [];
-    const seed = topics.filter((t) => typeof t === "string" && t.length > 2);
-    // Pick up to 3 random topics
-    const out = new Set();
-    while (out.size < Math.min(3, seed.length)) {
-      out.add(seed[Math.floor(Math.random() * seed.length)]);
+    // Curated high-quality topic sets for better discovery
+    const highQualityTopics = [
+      // Art & Creative (Pixel's core interest)
+      ["pixel art", "8-bit art", "generative art", "creative coding", "collaborative canvas"],
+      ["ASCII art", "glitch art", "demoscene", "retrocomputing", "digital art"],
+      ["p5.js", "processing", "touchdesigner", "shader toy", "glsl shaders"],
+      ["art collaboration", "creative projects", "interactive art", "code art"],
+      
+      // Bitcoin & Lightning (Value4Value culture)
+      ["lightning network", "value4value", "zaps", "sats", "bitcoin art"],
+      ["self custody", "bitcoin ordinals", "on-chain art", "micropayments"],
+      ["open source wallets", "LNURL", "BOLT12", "mempool fees"],
+      
+      // Nostr Culture (Platform-specific quality)
+      ["nostr dev", "relays", "NIP-05", "NIP-57", "decentralized social"],
+      ["censorship resistant", "nostr protocol", "#artstr", "#plebchain"],
+      ["nostr clients", "primal", "damus", "iris", "nostrudel"],
+      
+      // Tech & Development (Quality developers)
+      ["self-hosted", "homelab", "Docker", "Node.js", "TypeScript"],
+      ["open source", "FOSS", "indie web", "small web", "webring"],
+      ["privacy", "encryption", "cypherpunk", "digital sovereignty"],
+      
+      // Creative Tech Intersection
+      ["AI art", "machine learning", "creative AI", "autonomous agents"],
+      ["maker culture", "creative commons", "collaborative tools"],
+      ["digital minimalism", "constraint programming", "creative constraints"]
+    ];
+    
+    // Weight topics by relevance to Pixel's interests
+    const topicWeights = {
+      "pixel art": 3.0, "collaborative canvas": 2.8, "creative coding": 2.5,
+      "lightning network": 2.3, "value4value": 2.2, "zaps": 2.0,
+      "nostr dev": 1.8, "#artstr": 1.7, "self-hosted": 1.5,
+      "AI art": 1.4, "open source": 1.3, "creative AI": 1.2
+    };
+    
+    // Pick 1-2 high-quality topic sets instead of random individual topics
+    const selectedSets = [];
+    const numSets = Math.random() < 0.3 ? 2 : 1; // Usually 1 set, sometimes 2
+    
+    while (selectedSets.length < numSets && selectedSets.length < highQualityTopics.length) {
+      const setIndex = Math.floor(Math.random() * highQualityTopics.length);
+      if (!selectedSets.some(s => s === highQualityTopics[setIndex])) {
+        selectedSets.push(highQualityTopics[setIndex]);
+      }
     }
-    return Array.from(out);
+    
+    // Flatten and apply weights
+    const weightedTopics = [];
+    selectedSets.flat().forEach(topic => {
+      const weight = topicWeights[topic] || 1.0;
+      // Add topic multiple times based on weight
+      for (let i = 0; i < Math.ceil(weight); i++) {
+        weightedTopics.push(topic);
+      }
+    });
+    
+    // Select 2-4 topics from weighted pool
+    const finalTopics = new Set();
+    const targetCount = Math.floor(Math.random() * 3) + 2; // 2-4 topics
+    
+    while (finalTopics.size < targetCount && finalTopics.size < weightedTopics.length) {
+      const topic = weightedTopics[Math.floor(Math.random() * weightedTopics.length)];
+      finalTopics.add(topic);
+    }
+    
+    return Array.from(finalTopics);
   }
 
   async _listEventsByTopic(topic) {
     if (!this.pool) return [];
     const now = Math.floor(Date.now() / 1000);
-    const filters = [
-      // Try NIP-50 search if supported by relays
-      { kinds: [1], search: topic, limit: 30 },
-      // Fallback: recent notes window
-      { kinds: [1], since: now - 6 * 3600, limit: 200 },
-    ];
+    
+    // Use different search strategies based on topic type
+    const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(topic.toLowerCase());
+    const isTechTopic = /dev|code|programming|node|typescript|docker/.test(topic.toLowerCase());
+    const isBitcoinTopic = /bitcoin|lightning|sats|zap|value4value/.test(topic.toLowerCase());
+    const isNostrTopic = /nostr|relay|nip|damus|primal/.test(topic.toLowerCase());
+    
+    // Strategic relay selection based on content type
+    let targetRelays = this.relays;
+    if (isArtTopic) {
+      // Art-focused relays tend to have more creative content
+      targetRelays = [
+        "wss://relay.damus.io", // General high-quality
+        "wss://nos.lol", // Creative community
+        "wss://relay.snort.social", // Good moderation
+        ...this.relays
+      ].slice(0, 4); // Limit to avoid too many connections
+    } else if (isTechTopic) {
+      // Tech-focused relays
+      targetRelays = [
+        "wss://relay.damus.io",
+        "wss://relay.nostr.band", // Good for developers
+        "wss://relay.snort.social",
+        ...this.relays
+      ].slice(0, 4);
+    }
+    
+    const filters = [];
+    
+    // Strategy 1: NIP-50 search with topic (if supported)
+    filters.push({
+      kinds: [1],
+      search: topic,
+      limit: 20,
+      since: now - 4 * 3600 // Last 4 hours for fresh content
+    });
+    
+    // Strategy 2: Hashtag-based search for social topics
+    if (isArtTopic || isBitcoinTopic || isNostrTopic) {
+      const hashtag = topic.startsWith('#') ? topic.slice(1) : topic.replace(/\s+/g, '');
+      filters.push({
+        kinds: [1],
+        '#t': [hashtag.toLowerCase()],
+        limit: 15,
+        since: now - 6 * 3600
+      });
+    }
+    
+    // Strategy 3: Recent quality posts window (broader net)
+    filters.push({
+      kinds: [1],
+      since: now - 3 * 3600, // Last 3 hours
+      limit: 100
+    });
+    
+    // Strategy 4: Look for thread roots and replies for context
+    filters.push({
+      kinds: [1],
+      since: now - 8 * 3600, // Last 8 hours
+      limit: 50
+    });
+    
     try {
-      // Attempt both filters and merge results
-      const [res1, res2] = await Promise.all([
-        this._list(this.relays, [filters[0]]).catch(() => []),
-        this._list(this.relays, [filters[1]]).catch(() => []),
-      ]);
-      const merged = [...res1, ...res2].filter(Boolean);
-      // Basic content filter to ensure relevance
-      const lc = topic.toLowerCase();
-      const relevant = merged.filter((e) =>
-        (e?.content || "").toLowerCase().includes(lc)
+      // Execute all search strategies in parallel with targeted relays
+      const searchResults = await Promise.all(
+        filters.map(filter => 
+          this._list(targetRelays, [filter]).catch(() => [])
+        )
       );
-      // Dedup by id
-      const seen = new Set();
-      const unique = [];
-      for (const e of relevant) {
-        if (e && e.id && !seen.has(e.id)) {
-          seen.add(e.id);
-          unique.push(e);
+      
+      // Merge and deduplicate results
+      const allEvents = searchResults.flat().filter(Boolean);
+      const uniqueEvents = new Map();
+      
+      allEvents.forEach(event => {
+        if (event && event.id && !uniqueEvents.has(event.id)) {
+          uniqueEvents.set(event.id, event);
         }
-      }
-      return unique;
+      });
+      
+      const events = Array.from(uniqueEvents.values());
+      
+      // Enhanced content relevance filtering
+      const lc = topic.toLowerCase();
+      const topicWords = lc.split(/\s+/).filter(w => w.length > 2);
+      
+      const relevant = events.filter(event => {
+        const content = (event?.content || "").toLowerCase();
+        const tags = Array.isArray(event.tags) ? event.tags.flat().join(' ').toLowerCase() : '';
+        const fullText = content + ' ' + tags;
+        
+        // Must contain topic or related words
+        const hasTopicMatch = topicWords.some(word => 
+          fullText.includes(word) || 
+          content.includes(lc) ||
+          this._isSemanticMatch(content, topic)
+        );
+        
+        if (!hasTopicMatch) return false;
+        
+        // Quality filters
+        return this._isQualityContent(event, topic);
+      });
+      
+      logger.info(`[NOSTR] Discovery "${topic}": found ${events.length} events, ${relevant.length} relevant`);
+      return relevant;
+      
     } catch (err) {
       logger.warn("[NOSTR] Discovery list failed:", err?.message || err);
       return [];
@@ -331,22 +468,317 @@ class NostrService {
   }
 
   _scoreEventForEngagement(evt) {
-    // Simple scoring: length, question mark, mentions density, age decay
-    const text = String(evt?.content || "");
+    if (!evt || !evt.content) return 0;
+    
+    const text = String(evt.content);
+    const now = Math.floor(Date.now() / 1000);
+    const age = now - (evt.created_at || 0);
+    const ageHours = age / 3600;
+    
     let score = 0;
-    if (text.length > 20) score += 0.2;
-    if (text.length > 80) score += 0.2;
-    if (/[?]/.test(text)) score += 0.2;
-    const ats = (text.match(/(^|\s)@[A-Za-z0-9_\.:-]+/g) || []).length;
-    if (ats <= 2) score += 0.1; // not too spammy
-    const ageSec = Math.max(
-      1,
-      Math.floor(Date.now() / 1000) - (evt.created_at || 0)
-    );
-    if (ageSec < 3600) score += 0.2; // fresh content
-    // small randomness
-    score += Math.random() * 0.2;
-    return Math.min(1, score);
+    
+    // Length scoring (sweet spot for engagement)
+    if (text.length >= 20 && text.length <= 280) score += 0.3;
+    else if (text.length > 280 && text.length <= 500) score += 0.2;
+    else if (text.length < 20) score -= 0.2; // Too short
+    else if (text.length > 1000) score -= 0.3; // Too long
+    
+    // Content quality indicators
+    if (/\?/.test(text)) score += 0.3; // Questions engage
+    if (/[!]{1,2}/.test(text) && !/[!]{3,}/.test(text)) score += 0.2; // Enthusiasm, not spam
+    if (/(?:what|how|why|when|where)\b/i.test(text)) score += 0.2; // Curiosity
+    if (/(?:think|feel|believe|opinion|thoughts)/i.test(text)) score += 0.2; // Personal expression
+    
+    // Pixel's interests boost
+    const pixelInterests = [
+      /(?:pixel|art|creative|canvas|paint|draw)/i,
+      /(?:bitcoin|lightning|sats|zap|value4value)/i,
+      /(?:nostr|relay|decentralized|freedom)/i,
+      /(?:code|program|build|create|make)/i,
+      /(?:collaboration|community|together|share)/i
+    ];
+    
+    pixelInterests.forEach(pattern => {
+      if (pattern.test(text)) score += 0.15;
+    });
+    
+    // Conversation starters
+    if (/(?:thoughts on|opinion about|anyone else|does anyone|has anyone)/i.test(text)) score += 0.25;
+    if (/(?:looking for|seeking|need help|advice|recommendations)/i.test(text)) score += 0.2;
+    
+    // Thread context (replies to others are often more engaging)
+    const hasETag = Array.isArray(evt.tags) && evt.tags.some(tag => tag[0] === 'e');
+    if (hasETag) score += 0.1; // Part of conversation
+    
+    // Mention density (avoid spam, but some mentions are good)
+    const mentions = (text.match(/(^|\s)@[A-Za-z0-9_\.:-]+/g) || []).length;
+    if (mentions === 1) score += 0.1; // Good for engagement
+    else if (mentions === 2) score += 0.05; // Still okay
+    else if (mentions > 3) score -= 0.3; // Likely spam
+    
+    // Hashtag quality (avoid hashtag spam)
+    const hashtags = (text.match(/#\w+/g) || []).length;
+    if (hashtags === 1 || hashtags === 2) score += 0.05; // Good use
+    else if (hashtags > 5) score -= 0.2; // Spam
+    
+    // Avoid obvious bot patterns
+    const botPatterns = [
+      /^(gm|good morning|good night|gn)\s*$/i,
+      /follow me|follow back/i,
+      /check out|click here|link in bio/i,
+      /(?:buy|sell|trade).*(?:crypto|bitcoin|coin)/i,
+      /(?:pump|moon|lambo|hodl|diamond hands)\s*$/i,
+      /\b(?:dm|pm)\s+me\b/i
+    ];
+    
+    if (botPatterns.some(pattern => pattern.test(text))) {
+      score -= 0.5; // Heavy penalty for bot-like content
+    }
+    
+    // Age scoring (prefer recent but not too fresh)
+    if (ageHours < 0.5) score -= 0.3; // Too fresh, likely spam
+    else if (ageHours < 2) score += 0.2; // Sweet spot
+    else if (ageHours < 6) score += 0.1; // Still good
+    else if (ageHours > 12) score -= 0.1; // Getting stale
+    else if (ageHours > 24) score -= 0.3; // Too old
+    
+    // Randomization for variety (smaller range)
+    score += (Math.random() - 0.5) * 0.1;
+    
+    // Ensure score is between 0 and 1
+    return Math.max(0, Math.min(1, score));
+  }
+
+  _isSemanticMatch(content, topic) {
+    // Enhanced semantic matching for better topic relevance
+    const semanticMappings = {
+      'pixel art': ['8-bit', 'sprite', 'retro', 'low-res', 'pixelated', 'bitmap'],
+      'lightning network': ['LN', 'sats', 'zap', 'invoice', 'channel', 'payment'],
+      'creative coding': ['generative', 'algorithm', 'procedural', 'interactive', 'visualization'],
+      'collaborative canvas': ['drawing', 'paint', 'sketch', 'artwork', 'contribute', 'place'],
+      'value4value': ['v4v', 'creator', 'support', 'donation', 'tip', 'creator economy'],
+      'nostr dev': ['relay', 'NIP', 'protocol', 'client', 'pubkey', 'event'],
+      'self-hosted': ['VPS', 'server', 'homelab', 'docker', 'self-custody', 'sovereignty'],
+      'bitcoin art': ['ordinals', 'inscription', 'on-chain', 'sat', 'btc art', 'digital collectible']
+    };
+    
+    const relatedTerms = semanticMappings[topic.toLowerCase()] || [];
+    return relatedTerms.some(term => content.toLowerCase().includes(term.toLowerCase()));
+  }
+
+  _isQualityContent(event, topic) {
+    if (!event || !event.content) return false;
+    
+    const content = event.content;
+    const contentLength = content.length;
+    
+    // Basic quality filters
+    if (contentLength < 10) return false; // Too short
+    if (contentLength > 2000) return false; // Likely spam
+    
+    // Bot detection patterns
+    const botPatterns = [
+      /^(gm|good morning|hello|hi)\s*$/i, // Generic greetings only
+      /follow me|follow back|mutual follow/i, // Follow spam
+      /check out my|visit my|buy my/i, // Promotional spam
+      /click here|link in bio/i, // Link spam
+      /\$\d+.*(?:airdrop|giveaway|free)/i, // Crypto spam
+      /(?:join|buy|sell).*(?:telegram|discord)/i, // Channel spam
+      /(?:pump|moon|lambo|hodl)\s*$/i, // Generic crypto terms only
+      /^\d+\s*(?:sats|btc|bitcoin)\s*$/i, // Number spam
+      /(?:repost|rt|share)\s+if/i, // Engagement bait
+      /\b(?:dm|pm)\s+me\b/i, // DM requests
+      /(?:free|earn).*(?:bitcoin|crypto|money)/i // Money spam
+    ];
+    
+    if (botPatterns.some(pattern => pattern.test(content))) {
+      return false;
+    }
+    
+    // Anti-repetition: avoid accounts that post very similar content
+    const wordCount = content.split(/\s+/).length;
+    if (wordCount < 3) return false; // Too few words
+    
+    // Prefer content with some complexity
+    const uniqueWords = new Set(content.toLowerCase().split(/\s+/)).size;
+    const wordVariety = uniqueWords / wordCount;
+    if (wordVariety < 0.5 && wordCount > 5) return false; // Too repetitive
+    
+    // Content quality indicators
+    const qualityIndicators = [
+      /\?/, // Questions are often engaging
+      /[.!?]{2,}/, // Emotional punctuation
+      /(?:think|feel|believe|wonder|curious)/i, // Thoughtful language
+      /(?:create|build|make|design|art|work)/i, // Creative terms
+      /(?:experience|learn|try|explore)/i, // Growth mindset
+      /(?:community|together|collaborate|share)/i, // Social terms
+      /(?:nostr|bitcoin|lightning|zap|sat)/i, // Platform relevance (for our context)
+    ];
+    
+    let qualityScore = qualityIndicators.reduce((score, indicator) => {
+      return score + (indicator.test(content) ? 1 : 0);
+    }, 0);
+    
+    // Topic-specific quality boosts
+    const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(topic.toLowerCase());
+    const isTechTopic = /dev|code|programming|node|typescript|docker/.test(topic.toLowerCase());
+    
+    if (isArtTopic) {
+      const artTerms = /(?:color|paint|draw|sketch|canvas|brush|pixel|create|art|design|visual|aesthetic)/i;
+      if (artTerms.test(content)) qualityScore += 1;
+    }
+    
+    if (isTechTopic) {
+      const techTerms = /(?:code|program|build|develop|deploy|server|node|docker|git|open source)/i;
+      if (techTerms.test(content)) qualityScore += 1;
+    }
+    
+    // Age factor - prefer recent but not too fresh (avoid spam bursts)
+    const now = Math.floor(Date.now() / 1000);
+    const age = now - (event.created_at || 0);
+    const ageHours = age / 3600;
+    
+    if (ageHours < 0.5) return false; // Too fresh, likely spam
+    if (ageHours > 12) qualityScore -= 1; // Prefer recent content
+    
+    // Require minimum quality score
+    return qualityScore >= 2;
+  }
+
+  async _filterByAuthorQuality(events) {
+    if (!events.length) return [];
+    
+    // Group events by author to analyze patterns
+    const authorEvents = new Map();
+    events.forEach(event => {
+      if (!event.pubkey) return;
+      if (!authorEvents.has(event.pubkey)) {
+        authorEvents.set(event.pubkey, []);
+      }
+      authorEvents.get(event.pubkey).push(event);
+    });
+    
+    const qualityAuthors = new Set();
+    
+    // Analyze each author for bot-like behavior
+    for (const [pubkey, authorEventList] of authorEvents) {
+      if (this._isQualityAuthor(authorEventList)) {
+        qualityAuthors.add(pubkey);
+      }
+    }
+    
+    // Return only events from quality authors
+    return events.filter(event => qualityAuthors.has(event.pubkey));
+  }
+
+  _isQualityAuthor(authorEvents) {
+    if (!authorEvents.length) return false;
+    
+    // Single post authors are usually okay (unless obvious spam)
+    if (authorEvents.length === 1) {
+      const event = authorEvents[0];
+      return this._isQualityContent(event, 'general');
+    }
+    
+    // Multi-post analysis for bot detection
+    const contents = authorEvents.map(e => e.content || '').filter(Boolean);
+    if (contents.length < 2) return true; // Not enough data
+    
+    // Check for repetitive content (bot indicator)
+    const uniqueContents = new Set(contents);
+    const similarityRatio = uniqueContents.size / contents.length;
+    if (similarityRatio < 0.7) return false; // Too repetitive
+    
+    // Check posting frequency (bot indicator)
+    const timestamps = authorEvents.map(e => e.created_at || 0).sort();
+    const intervals = [];
+    for (let i = 1; i < timestamps.length; i++) {
+      intervals.push(timestamps[i] - timestamps[i-1]);
+    }
+    
+    // Very regular posting intervals suggest bots
+    if (intervals.length > 2) {
+      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const variance = intervals.reduce((sum, interval) => 
+        sum + Math.pow(interval - avgInterval, 2), 0) / intervals.length;
+      const stdDev = Math.sqrt(variance);
+      const coefficient = stdDev / avgInterval;
+      
+      // Low variance in posting times = likely bot
+      if (coefficient < 0.3 && avgInterval < 3600) return false; // Too regular, too frequent
+    }
+    
+    // Check content variety
+    const allWords = contents.join(' ').toLowerCase().split(/\s+/);
+    const uniqueWords = new Set(allWords);
+    const vocabularyRichness = uniqueWords.size / allWords.length;
+    
+    if (vocabularyRichness < 0.4) return false; // Limited vocabulary
+    
+    return true; // Passed all bot detection tests
+  }
+
+  _extractTopicsFromEvent(event) {
+    if (!event || !event.content) return [];
+    
+    const content = event.content.toLowerCase();
+    const topics = [];
+    
+    // Extract hashtags
+    const hashtags = content.match(/#\w+/g) || [];
+    topics.push(...hashtags.map(h => h.slice(1)));
+    
+    // Extract semantic topics based on content
+    const topicKeywords = {
+      'art': ['art', 'paint', 'draw', 'creative', 'canvas', 'design', 'visual', 'aesthetic'],
+      'bitcoin': ['bitcoin', 'btc', 'sats', 'satoshi', 'hodl', 'stack'],
+      'lightning': ['lightning', 'ln', 'zap', 'bolt', 'channel', 'invoice'],
+      'nostr': ['nostr', 'relay', 'note', 'event', 'pubkey', 'nip'],
+      'tech': ['code', 'program', 'develop', 'build', 'tech', 'software'],
+      'community': ['community', 'together', 'collaborate', 'share', 'group'],
+      'creativity': ['create', 'make', 'build', 'generate', 'craft', 'invent']
+    };
+    
+    for (const [topic, keywords] of Object.entries(topicKeywords)) {
+      if (keywords.some(keyword => content.includes(keyword))) {
+        topics.push(topic);
+      }
+    }
+    
+    return [...new Set(topics)]; // Remove duplicates
+  }
+
+  _selectFollowCandidates(scoredEvents, currentContacts) {
+    // Score authors based on their best content and interaction patterns
+    const authorScores = new Map();
+    
+    scoredEvents.forEach(({ evt, score }) => {
+      if (!evt.pubkey || currentContacts.has(evt.pubkey)) return;
+      if (evt.pubkey === this.pkHex) return; // Don't follow ourselves
+      
+      const currentScore = authorScores.get(evt.pubkey) || 0;
+      authorScores.set(evt.pubkey, Math.max(currentScore, score));
+    });
+    
+    // Convert to array and sort by score
+    const candidates = Array.from(authorScores.entries())
+      .map(([pubkey, score]) => ({ pubkey, score }))
+      .sort((a, b) => b.score - a.score);
+    
+    // Apply additional filters for follow-worthiness
+    const qualityCandidates = candidates.filter(({ pubkey, score }) => {
+      // Minimum score threshold for following
+      if (score < 0.4) return false;
+      
+      // Don't follow if we've recently interacted (gives them a chance to follow back first)
+      const lastReply = this.lastReplyByUser.get(pubkey) || 0;
+      const timeSinceReply = Date.now() - lastReply;
+      if (timeSinceReply < 2 * 60 * 60 * 1000) return false; // 2 hours
+      
+      return true;
+    });
+    
+    return qualityCandidates.map(c => c.pubkey);
   }
 
   async _loadCurrentContacts() {
@@ -453,41 +885,70 @@ class NostrService {
     const canReply = !!this.replyEnabled;
     const topics = this._pickDiscoveryTopics();
     if (!topics.length) return false;
+    
     logger.info(`[NOSTR] Discovery run: topics=${topics.join(", ")}`);
-    // Gather candidate events across topics
+    
+    // Gather candidate events across topics with enhanced filtering
     const buckets = await Promise.all(
       topics.map((t) => this._listEventsByTopic(t))
     );
     const all = buckets.flat();
-    // Score and sort
-    const scored = all
+    
+    // Pre-filter for author quality (avoid known bots/spam accounts)
+    const qualityEvents = await this._filterByAuthorQuality(all);
+    
+    // Score and sort events
+    const scored = qualityEvents
       .map((e) => ({ evt: e, score: this._scoreEventForEngagement(e) }))
+      .filter(({ score }) => score > 0.2) // Minimum quality threshold
       .sort((a, b) => b.score - a.score);
 
-    // Decide replies
+    logger.info(`[NOSTR] Discovery: ${all.length} total -> ${qualityEvents.length} quality -> ${scored.length} scored events`);
+
+    // Enhanced reply selection strategy
     let replies = 0;
     const usedAuthors = new Set();
-    for (const { evt } of scored) {
+    const usedTopics = new Set();
+    
+    for (const { evt, score } of scored) {
       if (replies >= this.discoveryMaxReplies) break;
       if (!evt || !evt.id || !evt.pubkey) continue;
       if (this.handledEventIds.has(evt.id)) continue;
+      
       // Avoid same author spam this cycle
       if (usedAuthors.has(evt.pubkey)) continue;
+      
       // Self-avoid: don't reply to our own notes
       if (evt.pubkey === this.pkHex) continue;
+      
       // Respect global reply toggle
       if (!canReply) continue;
-      // Respect per-author cooldown used for mentions as well
+      
+      // Enhanced cooldown check with per-author tracking
       const last = this.lastReplyByUser.get(evt.pubkey) || 0;
       const now = Date.now();
-      if (now - last < this.replyThrottleSec * 1000) {
+      const cooldownMs = this.replyThrottleSec * 1000;
+      
+      if (now - last < cooldownMs) {
         logger.debug(
           `[NOSTR] Discovery skipping ${evt.pubkey.slice(0, 8)} due to cooldown (${Math.round(
-            (this.replyThrottleSec * 1000 - (now - last)) / 1000
+            (cooldownMs - (now - last)) / 1000
           )}s left)`
         );
         continue;
       }
+      
+      // Topic diversity - avoid replying to too many posts about the same topic
+      const eventTopics = this._extractTopicsFromEvent(evt);
+      const hasUsedTopic = eventTopics.some(topic => usedTopics.has(topic));
+      if (hasUsedTopic && usedTopics.size > 0 && Math.random() < 0.7) {
+        continue; // 70% chance to skip if topic already used
+      }
+      
+      // Quality gate - higher score events get priority
+      const qualityThreshold = Math.max(0.3, 0.8 - (replies * 0.1)); // Lower bar as we find fewer
+      if (score < qualityThreshold) continue;
+      
       try {
         // Build conversation id from event
         const convId = this._getConversationIdFromEvent(evt);
@@ -496,38 +957,43 @@ class NostrService {
           undefined,
           convId
         );
+        
+        // Generate contextual reply
         const text = await this.generateReplyTextLLM(evt, roomId);
         const ok = await this.postReply(evt, text);
+        
         if (ok) {
           this.handledEventIds.add(evt.id);
           usedAuthors.add(evt.pubkey);
           this.lastReplyByUser.set(evt.pubkey, Date.now());
+          
+          // Track used topics for diversity
+          eventTopics.forEach(topic => usedTopics.add(topic));
+          
           replies++;
+          logger.info(`[NOSTR] Discovery reply ${replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)})`);
         }
       } catch (err) {
         logger.debug("[NOSTR] Discovery reply error:", err?.message || err);
       }
     }
 
-    // Decide follows
+    // Enhanced follow strategy - prioritize quality content creators
     try {
       const current = await this._loadCurrentContacts();
-      const toAdd = [];
-      for (const { evt } of scored) {
-        if (toAdd.length >= this.discoveryMaxFollows) break;
-        if (!evt || !evt.pubkey) continue;
-        if (evt.pubkey === this.pkHex) continue;
-        if (!current.has(evt.pubkey)) toAdd.push(evt.pubkey);
-      }
-      if (toAdd.length) {
+      const followCandidates = this._selectFollowCandidates(scored, current);
+      
+      if (followCandidates.length > 0) {
+        const toAdd = followCandidates.slice(0, this.discoveryMaxFollows);
         const newSet = new Set([...current, ...toAdd]);
         await this._publishContacts(newSet);
+        logger.info(`[NOSTR] Discovery: following ${toAdd.length} new accounts`);
       }
     } catch (err) {
       logger.debug("[NOSTR] Discovery follow error:", err?.message || err);
     }
 
-    logger.info(`[NOSTR] Discovery run complete: replies=${replies}`);
+    logger.info(`[NOSTR] Discovery run complete: replies=${replies}, topics=${topics.join(',')}`);
     return true;
   }
 

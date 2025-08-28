@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { _scoreEventForEngagement, _isQualityContent } from '../lib/scoring.js';
+import { isSelfAuthor } from '../lib/nostr.js';
 
 describe('scoring', () => {
   const now = Math.floor(Date.now() / 1000);
@@ -24,5 +25,12 @@ describe('scoring', () => {
   it('rejects too-short content', () => {
     const evt = { content: 'hi', created_at: now - 4000 };
     expect(_isQualityContent(evt, 'art')).toBe(false);
+  });
+
+  it('detects self-author by pubkey match', () => {
+    const self = 'abc123';
+    const evt = { pubkey: 'AbC123' };
+    expect(isSelfAuthor(evt, self)).toBe(true);
+    expect(isSelfAuthor({ pubkey: 'zzz' }, self)).toBe(false);
   });
 });

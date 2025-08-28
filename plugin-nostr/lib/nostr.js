@@ -31,7 +31,17 @@ function extractTopicsFromEvent(event) {
   return [...new Set(topics)];
 }
 
+function isSelfAuthor(evt, selfPkHex) {
+  if (!evt || !evt.pubkey || !selfPkHex) return false;
+  try {
+    return String(evt.pubkey).toLowerCase() === String(selfPkHex).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   getConversationIdFromEvent,
   extractTopicsFromEvent,
+  isSelfAuthor,
 };

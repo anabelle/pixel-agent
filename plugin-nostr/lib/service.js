@@ -605,16 +605,12 @@ class NostrService {
       this.lastReplyByUser.set(sender, now);
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
-      const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
-      let thanksWithMention = thanks;
-      try { if (sender && /^[0-9a-fA-F]{64}$/.test(sender)) { const npub = nip19?.npubEncode ? nip19.npubEncode(sender) : null; if (npub) { thanksWithMention = `${thanks} nostr:${npub}`; } } } catch {}
-      if (targetEventId) {
-        logger.info(`[NOSTR] Zap thanks: replying under root ${String(targetEventId).slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-        await this.postReply(targetEventId, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
-      } else {
-        logger.info(`[NOSTR] Zap thanks: replying to receipt ${evt.id.slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-        await this.postReply(evt, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
-      }
+  const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
+  const { buildZapThanksPost } = require('./zapHandler');
+  const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
+  const parentLog = typeof prepared.parent === 'string' ? prepared.parent : prepared.parent?.id;
+  logger.info(`[NOSTR] Zap thanks: replying to ${String(parentLog||'').slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
+  await this.postReply(prepared.parent, prepared.text, prepared.options);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => {});
     } catch (err) { logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
   }

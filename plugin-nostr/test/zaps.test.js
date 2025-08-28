@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { getZapAmountMsats, getZapTargetEventId, generateThanksText, parseBolt11Msats } from '../lib/zaps.js';
+const { describe, it, expect } = globalThis;
+const { getZapAmountMsats, getZapTargetEventId, generateThanksText, parseBolt11Msats } = require('../lib/zaps.js');
 
 describe('zaps helpers', () => {
   it('extracts amount from amount tag', () => {

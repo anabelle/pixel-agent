@@ -1,11 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-
-// Mock scoring dependency used inside discovery helpers
-vi.mock('../lib/scoring', () => ({
-  _isQualityContent: (event) => Boolean(event && event.content && event.content.trim().length > 0),
-}));
-
-import { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } from '../lib/discovery';
+const { describe, it, expect, beforeEach, afterEach } = globalThis;
+const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('../lib/discovery');
 
 describe('discovery helpers', () => {
   const realRandom = Math.random;

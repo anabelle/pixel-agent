@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { hexToBytesLocal, bytesToHexLocal, parseRelays, normalizeSeconds, pickRangeWithJitter } from '../lib/utils.js';
+const { describe, it, expect } = globalThis;
+const { hexToBytesLocal, bytesToHexLocal, parseRelays, normalizeSeconds, pickRangeWithJitter } = require('../lib/utils.js');
 
 describe('utils', () => {
   it('hexToBytesLocal parses valid hex', () => {

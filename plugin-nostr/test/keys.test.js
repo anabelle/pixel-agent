@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { parseSk, parsePk } from '../lib/keys.js';
+const { describe, it, expect } = globalThis;
+const { parseSk, parsePk } = require('../lib/keys.js');
 
 // minimal nip19 stub
 const nip19 = {

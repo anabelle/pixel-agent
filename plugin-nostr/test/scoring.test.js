@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest';
-import { _scoreEventForEngagement, _isQualityContent } from '../lib/scoring.js';
+const { describe, it, expect } = globalThis;
+const { _scoreEventForEngagement, _isQualityContent } = require('../lib/scoring.js');
+
+describe('scoring', () => {
+  it('scores higher for longer content', () => {
+    const a = _scoreEventForEngagement({ content: 'short' });
+    const b = _scoreEventForEngagement({ content: 'this is a bit longer content text' });
+    expect(b).toBeGreaterThanOrEqual(a);
+  });
+
+  it('marks empty as low quality', () => {
+    expect(_isQualityContent({ content: '' }, 'topic')).toBe(false);
+  });
+});
 import { isSelfAuthor } from '../lib/nostr.js';
 
 describe('scoring', () => {

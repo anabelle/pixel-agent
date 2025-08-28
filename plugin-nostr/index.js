@@ -1419,6 +1419,14 @@ class NostrService {
       for (const pk of extraPTags) {
         if (pk && pk !== parentAuthorPk) tags.push(["p", pk]);
       }
+      // Debug: summarize tag set and expected mention
+      try {
+        const eCount = tags.filter(t => t?.[0] === 'e').length;
+        const pCount = tags.filter(t => t?.[0] === 'p').length;
+        const expectPk = opts.expectMentionPk;
+        const hasExpected = expectPk ? tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
+        logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0,8)} root=${rootId?String(rootId).slice(0,8):'-'}${expectPk?` mentionExpected=${hasExpected?'yes':'no'}`:''}`);
+      } catch {}
 
       const evtTemplate = {
         kind: 1,
@@ -1574,10 +1582,12 @@ class NostrService {
       const thanks = generateThanksText(amountMsats);
       if (targetEventId) {
         // Reply under the zapped note (root) and mention the giver; no extra reaction
-        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender], skipReaction: true });
+        logger.info(`[NOSTR] Zap thanks: replying under root ${String(targetEventId).slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
+        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
       } else {
         // Fallback: reply to the zap receipt; no extra reaction
-        await this.postReply(evt, `${thanks}`, { skipReaction: true });
+        logger.info(`[NOSTR] Zap thanks: replying to receipt ${evt.id.slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
+        await this.postReply(evt, `${thanks}`, { skipReaction: true, expectMentionPk: sender });
       }
 
       // Persist interaction memory (best-effort)

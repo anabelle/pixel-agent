@@ -61,6 +61,22 @@ async function ensureDeps() {
       nip10Parse = typeof nip10.parse === "function" ? nip10.parse : undefined;
     } catch {}
   }
+  // Increase default max listeners to avoid ping/pong warnings on many relays
+  try {
+    const eventsMod = require("events");
+    const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 64);
+    if (Number.isFinite(max) && max > 0) {
+      if (typeof eventsMod.setMaxListeners === "function") {
+        eventsMod.setMaxListeners(max);
+      }
+      if (
+        eventsMod.EventEmitter &&
+        typeof eventsMod.EventEmitter.defaultMaxListeners === "number"
+      ) {
+        eventsMod.EventEmitter.defaultMaxListeners = max;
+      }
+    }
+  } catch {}
 }
 
 function parseSk(input) {

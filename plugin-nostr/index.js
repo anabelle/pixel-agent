@@ -2,6 +2,7 @@
 let logger, createUniqueUuid, ChannelType, ModelType;
 
 let SimplePool, nip19, finalizeEvent, getPublicKey;
+let wsInjector; // optional injector from @nostr/tools
 
 function hexToBytesLocal(hex) {
   if (typeof hex !== "string") return null;
@@ -41,6 +42,9 @@ async function ensureDeps() {
   }
   // Provide WebSocket to nostr-tools (either via injector or global)
   const WebSocket = (await import("ws")).default || require("ws");
+  if (wsInjector) {
+    try { wsInjector(WebSocket); } catch { }
+  }
   if (!globalThis.WebSocket) {
     globalThis.WebSocket = WebSocket;
   }
@@ -56,6 +60,21 @@ function parseSk(input) {
   } catch { }
   const bytes = hexToBytesLocal(input);
   return bytes || null;
+}
+
+// Allow listening with only a public key (hex or npub1)
+function parsePk(input) {
+  if (!input) return null;
+  try {
+    if (typeof input === "string" && input.startsWith("npub1")) {
+      const decoded = nip19.decode(input);
+      if (decoded.type === "npub") return decoded.data; // hex string
+    }
+  } catch { }
+  const bytes = hexToBytesLocal(input);
+  if (bytes) return bytesToHexLocal(bytes);
+  if (typeof input === "string" && /^[0-9a-fA-F]{64}$/.test(input)) return input.toLowerCase();
+  return null;
 }
 
 function parseRelays(input) {
@@ -106,10 +125,13 @@ class NostrService {
     const svc = new NostrService(runtime);
     const relays = parseRelays(runtime.getSetting("NOSTR_RELAYS"));
     const sk = parseSk(runtime.getSetting("NOSTR_PRIVATE_KEY"));
+  const pkEnv = parsePk(runtime.getSetting("NOSTR_PUBLIC_KEY"));
     const listenVal = runtime.getSetting("NOSTR_LISTEN_ENABLE");
     const postVal = runtime.getSetting("NOSTR_POST_ENABLE");
+  const pingVal = runtime.getSetting("NOSTR_ENABLE_PING");
     const listenEnabled = String(listenVal ?? "true").toLowerCase() === "true";
     const postEnabled = String(postVal ?? "false").toLowerCase() === "true";
+  const enablePing = String(pingVal ?? "true").toLowerCase() === "true";
     // Helper to coerce ms->s if user passed milliseconds
     const normalizeSeconds = (val, keyName) => {
       const n = Number(val);
@@ -163,7 +185,11 @@ class NostrService {
     svc.relays = relays;
     svc.sk = sk;
     svc.replyEnabled = String(replyVal ?? "true").toLowerCase() === "true";
-    svc.replyThrottleSec = Number(throttleVal ?? "60");
+    // Normalize throttle seconds (coerce ms-like values)
+    svc.replyThrottleSec = normalizeSeconds(
+      throttleVal ?? "60",
+      "NOSTR_REPLY_THROTTLE_SEC"
+    );
     // Configure initial thinking delay
     const parseMs = (v, d) => {
       const n = Number(v);
@@ -196,7 +222,7 @@ class NostrService {
       return svc;
     }
 
-    svc.pool = new SimplePool({ enablePing: true });
+  svc.pool = new SimplePool({ enablePing });
 
     if (sk) {
       const pk = getPublicKey(sk);
@@ -204,8 +230,15 @@ class NostrService {
       logger.info(
         `[NOSTR] Ready with pubkey npub: ${nip19.npubEncode(svc.pkHex)}`
       );
-    } else {
+    } else if (pkEnv) {
+      // Listen-only mode with public key
+      svc.pkHex = pkEnv;
+      logger.info(
+        `[NOSTR] Ready (listen-only) with pubkey npub: ${nip19.npubEncode(svc.pkHex)}`
+      );
       logger.warn("[NOSTR] No private key configured; posting disabled");
+    } else {
+      logger.warn("[NOSTR] No key configured; listening and posting disabled");
     }
 
     if (listenEnabled && svc.pool && svc.pkHex) {

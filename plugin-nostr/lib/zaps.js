@@ -67,10 +67,10 @@ function generateThanksText(amountMsats) {
     return `zap received — ${pick()} ⚡️💛`; 
   }
   const sats = Math.floor(amountMsats / 1000);
-  if (sats >= 10000) return `⚡️ ${sats} sats — i’m screaming, thank you!! ${pick()} 🙏💛`;
-  if (sats >= 1000) return `⚡️ ${sats} sats — massive thanks! ${pick()} 🙌`;
-  if (sats >= 100) return `⚡️ ${sats} sats — thank you, truly! ${pick()} ✨`;
-  return `⚡️ ${sats} sats — appreciated! ${pick()} ✨`;
+  if (sats >= 10000) return `⚡️ ${sats} sats, i’m screaming, thank you!! ${pick()} 🙏💛`;
+  if (sats >= 1000) return `⚡️ ${sats} sats, massive thanks! ${pick()} 🙌`;
+  if (sats >= 100) return `⚡️ ${sats} sats, thank you, truly! ${pick()} ✨`;
+  return `⚡️ ${sats} sats, appreciated! ${pick()} ✨`;
 }
 
 // Extract the actual zapper (user) pubkey from the NIP-57 description tag

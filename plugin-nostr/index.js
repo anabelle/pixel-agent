@@ -3,6 +3,7 @@ let logger, createUniqueUuid, ChannelType, ModelType;
 
 let SimplePool, nip19, finalizeEvent, getPublicKey;
 let wsInjector; // optional injector from @nostr/tools
+let nip10Parse; // thread parsing
 
 // Extracted helpers
 const {
@@ -15,6 +16,7 @@ const {
 const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
 const { buildPostPrompt, buildReplyPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./lib/nostr');
+const { getZapAmountMsats, getZapTargetEventId, generateThanksText } = require('./lib/zaps');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -23,8 +25,7 @@ async function ensureDeps() {
     nip19 = tools.nip19;
     finalizeEvent = tools.finalizeEvent;
     getPublicKey = tools.getPublicKey;
-    wsInjector =
-      tools.setWebSocketConstructor || tools.useWebSocketImplementation;
+  wsInjector = tools.setWebSocketConstructor || tools.useWebSocketImplementation;
   }
   if (!logger) {
     const core = await import("@elizaos/core");
@@ -36,11 +37,29 @@ async function ensureDeps() {
   }
   // Provide WebSocket to nostr-tools (either via injector or global)
   const WebSocket = (await import("ws")).default || require("ws");
-  if (wsInjector) {
-    try { wsInjector(WebSocket); } catch { }
+  // Prefer documented API from nostr-tools/pool
+  try {
+    const poolMod = await import("@nostr/tools/pool");
+    if (typeof poolMod.useWebSocketImplementation === "function") {
+      poolMod.useWebSocketImplementation(WebSocket);
+    } else if (wsInjector) {
+      wsInjector(WebSocket);
+    }
+  } catch {
+    // Fallback to any injector on root
+    if (wsInjector) {
+      try { wsInjector(WebSocket); } catch {}
+    }
   }
   if (!globalThis.WebSocket) {
     globalThis.WebSocket = WebSocket;
+  }
+  // Load nip10.parse for threading if available
+  if (!nip10Parse) {
+    try {
+      const nip10 = await import("@nostr/tools/nip10");
+      nip10Parse = typeof nip10.parse === "function" ? nip10.parse : undefined;
+    } catch {}
   }
 }
 
@@ -94,6 +113,7 @@ class NostrService {
     this.handledEventIds = new Set();
     this.lastReplyByUser = new Map(); // pubkey -> timestamp ms
     this.pendingReplyTimers = new Map(); // pubkey -> Timeout
+  this.zapCooldownByUser = new Map(); // pubkey -> last ts
     // Discovery
     this.discoveryEnabled = true;
     this.discoveryTimer = null;
@@ -213,7 +233,10 @@ class NostrService {
       try {
         svc.listenUnsub = svc.pool.subscribeMany(
           relays,
-          [{ kinds: [1], "#p": [svc.pkHex] }],
+          [
+            { kinds: [1], "#p": [svc.pkHex] },
+            { kinds: [9735], authors: undefined, limit: 0, "#p": [svc.pkHex] },
+          ],
           {
             onevent(evt) {
               logger.info(
@@ -225,6 +248,13 @@ class NostrService {
               // Skip self-authored events to avoid feedback loops
               if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) {
                 logger.debug('[NOSTR] Skipping self-authored event');
+                return;
+              }
+              // Handle zaps (kind 9735)
+              if (evt.kind === 9735) {
+                svc
+                  .handleZap(evt)
+                  .catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err));
                 return;
               }
               svc
@@ -992,7 +1022,14 @@ class NostrService {
   }
   // --- Helpers inspired by @elizaos/plugin-twitter ---
   _getConversationIdFromEvent(evt) {
-  return getConversationIdFromEvent(evt);
+    try {
+      if (nip10Parse) {
+        const refs = nip10Parse(evt);
+        if (refs?.root?.id) return refs.root.id;
+        if (refs?.reply?.id) return refs.reply.id;
+      }
+    } catch {}
+    return getConversationIdFromEvent(evt);
   }
 
   async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
@@ -1336,16 +1373,19 @@ class NostrService {
     try {
       const created_at = Math.floor(Date.now() / 1000);
       const tags = [];
-      // Include reply linkage
+      // Threading via NIP-10 if available
+      let rootId = null;
+      try {
+        if (nip10Parse) {
+          const refs = nip10Parse(parentEvt);
+          if (refs?.root?.id) rootId = refs.root.id;
+          if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvt.id) rootId = refs.reply.id;
+        }
+      } catch {}
+      // Add reply tag
       tags.push(["e", parentEvt.id, "", "reply"]);
-      // Try to carry root if present
-      const rootTag = Array.isArray(parentEvt.tags)
-        ? parentEvt.tags.find(
-          (t) => t[0] === "e" && (t[3] === "root" || t[3] === "reply")
-        )
-        : null;
-      if (rootTag && rootTag[1] && rootTag[1] !== parentEvt.id) {
-        tags.push(["e", rootTag[1], "", "root"]);
+      if (rootId && rootId !== parentEvt.id) {
+        tags.push(["e", rootId, "", "root"]);
       }
       // Mention the author
       if (parentEvt.pubkey) tags.push(["p", parentEvt.pubkey]);
@@ -1379,6 +1419,11 @@ class NostrService {
     if (!this.pool || !this.sk || !this.relays.length) return false;
     try {
       if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      // Skip reacting to our own posts
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) {
+        logger.debug("[NOSTR] Skipping reaction to self-authored event");
+        return false;
+      }
       const created_at = Math.floor(Date.now() / 1000);
       const tags = [];
       tags.push(["e", parentEvt.id]);
@@ -1458,6 +1503,48 @@ class NostrService {
     }
   }
 
+  async handleZap(evt) {
+    try {
+      // Ensure valid zap receipt
+      if (!evt || evt.kind !== 9735) return;
+      if (!this.pkHex) return; // need our key to identify target
+      // Skip self-zaps
+      if (isSelfAuthor(evt, this.pkHex)) return;
+
+      // Extract info
+      const amountMsats = getZapAmountMsats(evt);
+      const targetEventId = getZapTargetEventId(evt);
+      const sender = evt.pubkey;
+
+      // Throttle per sender to avoid spam (e.g., 5 min)
+      const now = Date.now();
+      const last = this.zapCooldownByUser.get(sender) || 0;
+      const cooldownMs = 5 * 60 * 1000;
+      if (now - last < cooldownMs) return;
+      this.zapCooldownByUser.set(sender, now);
+
+      // Build conversation id: reply under the target event if available
+      const convId = targetEventId || this._getConversationIdFromEvent(evt);
+      const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
+
+      const thanks = generateThanksText(amountMsats);
+      // Prefer replying to the target event. If none, reply to zap receipt (harmless)
+      const parent = targetEventId ? { id: targetEventId, pubkey: sender, tags: [] } : evt;
+
+      // Send a reply with gratitude
+      await this.postReply(parent, `${thanks}`);
+
+      // Persist interaction memory (best-effort)
+      await this.saveInteractionMemory('zap_thanks', evt, {
+        amountMsats: amountMsats ?? undefined,
+        targetEventId: targetEventId ?? undefined,
+        thanked: true,
+      }).catch(() => {});
+    } catch (err) {
+      logger.debug('[NOSTR] handleZap failed:', err?.message || err);
+    }
+  }
+
   async stop() {
     if (this.postTimer) {
       clearTimeout(this.postTimer);
@@ -1475,7 +1562,8 @@ class NostrService {
     }
     if (this.pool) {
       try {
-        this.pool.close(this.relays);
+  // Per nostr-tools examples, close pool with an empty list
+  this.pool.close([]);
       } catch { }
       this.pool = null;
     }

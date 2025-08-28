@@ -1387,8 +1387,8 @@ class NostrService {
       if (rootId && rootId !== parentEvt.id) {
         tags.push(["e", rootId, "", "root"]);
       }
-      // Mention the author
-      if (parentEvt.pubkey) tags.push(["p", parentEvt.pubkey]);
+  // Mention the author (parent pubkey); if absent, fall back to evt.pubkey when provided later
+  if (parentEvt.pubkey) tags.push(["p", parentEvt.pubkey]);
 
       const evtTemplate = {
         kind: 1,
@@ -1527,12 +1527,9 @@ class NostrService {
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
 
-      const thanks = generateThanksText(amountMsats);
-      // Prefer replying to the target event. If none, reply to zap receipt (harmless)
-      const parent = targetEventId ? { id: targetEventId, pubkey: sender, tags: [] } : evt;
-
-      // Send a reply with gratitude
-      await this.postReply(parent, `${thanks}`);
+  const thanks = generateThanksText(amountMsats);
+  // Reply to the zap receipt (kind 9735) so it appears directed to the sender
+  await this.postReply(evt, `${thanks}`);
 
       // Persist interaction memory (best-effort)
       await this.saveInteractionMemory('zap_thanks', evt, {

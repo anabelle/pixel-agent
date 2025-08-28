@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { buildTextNote, buildReplyNote, buildReaction, buildContacts } from '../lib/eventFactory.js';
+const { describe, it, expect } = globalThis;
+const { buildTextNote, buildReplyNote, buildReaction, buildContacts } = require('../lib/eventFactory.js');
 
 describe('eventFactory', () => {
   it('buildTextNote constructs kind 1', () => {

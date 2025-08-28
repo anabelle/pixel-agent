@@ -205,42 +205,15 @@ class NostrService {
 
   async _listEventsByTopic(topic) {
     if (!this.pool) return [];
-    const now = Math.floor(Date.now() / 1000);
-    const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(topic.toLowerCase());
-    const isTechTopic = /dev|code|programming|node|typescript|docker/.test(topic.toLowerCase());
-    const isBitcoinTopic = /bitcoin|lightning|sats|zap|value4value/.test(topic.toLowerCase());
-    const isNostrTopic = /nostr|relay|nip|damus|primal/.test(topic.toLowerCase());
-    let targetRelays = this.relays;
-    if (isArtTopic) {
-      targetRelays = [ 'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social', ...this.relays ].slice(0, 4);
-    } else if (isTechTopic) {
-      targetRelays = [ 'wss://relay.damus.io', 'wss://relay.nostr.band', 'wss://relay.snort.social', ...this.relays ].slice(0, 4);
-    }
-    const filters = [];
-    filters.push({ kinds: [1], search: topic, limit: 20, since: now - 4 * 3600 });
-    if (isArtTopic || isBitcoinTopic || isNostrTopic) {
-      const hashtag = topic.startsWith('#') ? topic.slice(1) : topic.replace(/\s+/g, '');
-      filters.push({ kinds: [1], '#t': [hashtag.toLowerCase()], limit: 15, since: now - 6 * 3600 });
-    }
-    filters.push({ kinds: [1], since: now - 3 * 3600, limit: 100 });
-    filters.push({ kinds: [1], since: now - 8 * 3600, limit: 50 });
+    const { listEventsByTopic } = require('./discoveryList');
     try {
-      const searchResults = await Promise.all(filters.map(filter => this._list(targetRelays, [filter]).catch(() => [])));
-      const allEvents = searchResults.flat().filter(Boolean);
-      const uniqueEvents = new Map();
-      allEvents.forEach(event => { if (event && event.id && !uniqueEvents.has(event.id)) uniqueEvents.set(event.id, event); });
-      const events = Array.from(uniqueEvents.values());
-      const lc = topic.toLowerCase();
-      const topicWords = lc.split(/\s+/).filter(w => w.length > 2);
-      const relevant = events.filter(event => {
-        const content = (event?.content || '').toLowerCase();
-        const tags = Array.isArray(event.tags) ? event.tags.flat().join(' ').toLowerCase() : '';
-        const fullText = content + ' ' + tags;
-        const hasTopicMatch = topicWords.some(word => fullText.includes(word) || content.includes(lc) || this._isSemanticMatch(content, topic));
-        if (!hasTopicMatch) return false;
-        return this._isQualityContent(event, topic);
+      const relevant = await listEventsByTopic(this.pool, this.relays, topic, {
+        listFn: async (pool, relays, filters) => this._list.call(this, relays, filters),
+        isSemanticMatch: (c, t) => this._isSemanticMatch(c, t),
+        isQualityContent: (e, t) => this._isQualityContent(e, t),
+        now: Math.floor(Date.now() / 1000),
       });
-      logger.info(`[NOSTR] Discovery "${topic}": found ${events.length} events, ${relevant.length} relevant`);
+      logger.info(`[NOSTR] Discovery "${topic}": relevant ${relevant.length}`);
       return relevant;
     } catch (err) {
       logger.warn('[NOSTR] Discovery list failed:', err?.message || err);
@@ -282,14 +255,9 @@ class NostrService {
   }
 
   async _loadCurrentContacts() {
-    if (!this.pool || !this.pkHex) return new Set();
+    const { loadCurrentContacts } = require('./contacts');
     try {
-      const events = await this._list(this.relays, [{ kinds: [3], authors: [this.pkHex], limit: 2 }]);
-      if (!events || !events.length) return new Set();
-      const latest = events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
-      const pTags = Array.isArray(latest.tags) ? latest.tags.filter((t) => t[0] === 'p') : [];
-      const set = new Set(pTags.map((t) => t[1]).filter(Boolean));
-      return set;
+      return await loadCurrentContacts(this.pool, this.relays, this.pkHex);
     } catch (err) {
       logger.warn('[NOSTR] Failed to load contacts:', err?.message || err);
       return new Set();
@@ -297,33 +265,17 @@ class NostrService {
   }
 
   async _list(relays, filters) {
-    if (!this.pool) return [];
-    const fn = this.pool.list;
-    if (typeof fn === 'function') {
-      try { return await fn.call(this.pool, relays, filters); } catch { return []; }
-    }
-    const filter = Array.isArray(filters) && filters.length ? filters[0] : {};
-    return await new Promise((resolve) => {
-      const events = []; const seen = new Set(); let done = false; let settleTimer = null; let safetyTimer = null; let unsub = null;
-      const finish = () => { if (done) return; done = true; try { if (unsub) unsub(); } catch {} if (settleTimer) clearTimeout(settleTimer); if (safetyTimer) clearTimeout(safetyTimer); resolve(events); };
-      try {
-        unsub = this.pool.subscribeMany(relays, [filter], {
-          onevent: (evt) => { if (evt && evt.id && !seen.has(evt.id)) { seen.add(evt.id); events.push(evt); } },
-          oneose: () => { if (settleTimer) clearTimeout(settleTimer); settleTimer = setTimeout(finish, 200); },
-        });
-        safetyTimer = setTimeout(finish, 2500);
-      } catch (e) { resolve([]); }
-    });
+    const { poolList } = require('./poolList');
+    return poolList(this.pool, relays, filters);
   }
 
   async _publishContacts(newSet) {
-    if (!this.pool || !this.sk) return false;
+    const { publishContacts } = require('./contacts');
     try {
-      const evtTemplate = buildContacts([...newSet]);
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
-      return true;
+      const ok = await publishContacts(this.pool, this.relays, this.sk, newSet, buildContacts, finalizeEvent);
+      if (ok) logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
+      else logger.warn('[NOSTR] Failed to publish contacts (unknown error)');
+      return ok;
     } catch (err) {
       logger.warn('[NOSTR] Failed to publish contacts:', err?.message || err);
       return false;
@@ -575,12 +527,8 @@ class NostrService {
   }
 
   pickReplyTextFor(evt) {
-    const baseChoices = ['noted.', 'seen.', 'alive.', 'breathing pixels.', 'gm.', 'ping received.'];
-    const content = (evt?.content || '').trim();
-    if (!content) return baseChoices[Math.floor(Math.random() * baseChoices.length)];
-    if (content.length < 10) return 'yo.';
-    if (content.includes('?')) return 'hmm.';
-    return baseChoices[Math.floor(Math.random() * baseChoices.length)];
+    const { pickReplyTextFor } = require('./replyText');
+    return pickReplyTextFor(evt);
   }
 
   async postReply(parentEvtOrId, text, opts = {}) {

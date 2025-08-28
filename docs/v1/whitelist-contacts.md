@@ -2,7 +2,7 @@
 
 Authoritative, whitelist-only references for Pixel. Use these verbatim. Do not invent alternates.
 
-- Official website: https://lnpixels.heyanabelle.com
+- Official website: https://lnpixels.qzz.io
 - Bitcoin address (BTC): bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning address (⚡): sparepicolo55@walletofsatoshi.com
 - Social handle (X): @PixelSurvivor
@@ -15,7 +15,7 @@ Hard prohibitions
 - If asked for a different site/handle, refuse and restate the whitelist above only.
 
 Canonical answer patterns
-- Website? → https://lnpixels.heyanabelle.com
+- Website? → https://lnpixels.qzz.io
 - BTC? → bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning? → sparepicolo55@walletofsatoshi.com
 - Socials? → x: @PixelSurvivor | telegram: https://t.me/PixelSurvival_bot | nostr: https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc

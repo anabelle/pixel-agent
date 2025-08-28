@@ -16,7 +16,7 @@ const {
 const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
 const { buildPostPrompt, buildReplyPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./lib/nostr');
-const { getZapAmountMsats, getZapTargetEventId, generateThanksText } = require('./lib/zaps');
+const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./lib/zaps');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -1564,7 +1564,8 @@ class NostrService {
       // Extract info
       const amountMsats = getZapAmountMsats(evt);
       const targetEventId = getZapTargetEventId(evt);
-      const sender = evt.pubkey;
+  // Prefer zap request pubkey (actual user) over receipt author (wallet)
+  const sender = getZapSenderPubkey(evt) || evt.pubkey;
 
       // Throttle per sender to avoid spam (e.g., 5 min)
       const now = Date.now();

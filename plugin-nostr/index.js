@@ -14,7 +14,7 @@ const {
 } = require('./lib/utils');
 const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
 const { buildPostPrompt, buildReplyPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
-const { getConversationIdFromEvent, extractTopicsFromEvent } = require('./lib/nostr');
+const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./lib/nostr');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -222,6 +222,11 @@ class NostrService {
                   140
                 )}`
               );
+              // Skip self-authored events to avoid feedback loops
+              if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) {
+                logger.debug('[NOSTR] Skipping self-authored event');
+                return;
+              }
               svc
                 .handleMention(evt)
                 .catch((err) =>
@@ -1073,6 +1078,11 @@ class NostrService {
   async handleMention(evt) {
     try {
       if (!evt || !evt.id) return;
+      // Skip self-authored mentions
+      if (this.pkHex && isSelfAuthor(evt, this.pkHex)) {
+        logger.info('[NOSTR] Ignoring self-mention');
+        return;
+      }
       // In-memory dedup for this session
       if (this.handledEventIds.has(evt.id)) {
         logger.info(

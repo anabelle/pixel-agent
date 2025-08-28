@@ -1412,12 +1412,20 @@ class NostrService {
       if (rootId && rootId !== parentId) {
         tags.push(["e", rootId, "", "root"]);
       }
-      // Mention the author of the parent if known
-      if (parentAuthorPk) tags.push(["p", parentAuthorPk]);
-      // Add any extra mentions (e.g., zap giver)
+      // Mention the author of the parent if known (but don't mention self)
+      const seenP = new Set();
+      if (parentAuthorPk && parentAuthorPk !== this.pkHex) {
+        tags.push(["p", parentAuthorPk]);
+        seenP.add(parentAuthorPk);
+      }
+      // Add any extra mentions (e.g., zap giver), skipping self and duplicates
       const extraPTags = Array.isArray(opts.extraPTags) ? opts.extraPTags : [];
       for (const pk of extraPTags) {
-        if (pk && pk !== parentAuthorPk) tags.push(["p", pk]);
+        if (!pk) continue;
+        if (pk === this.pkHex) continue;
+        if (seenP.has(pk)) continue;
+        tags.push(["p", pk]);
+        seenP.add(pk);
       }
       // Debug: summarize tag set and expected mention
       try {

@@ -1,9 +1,11 @@
-# Response sanitization: links and handles
+# Response sanitizaExample refusals
+- "I only use https://lnpixels.qzz.io, https://pixel.xx.kg, @PixelSurvivor, https://t.me/PixelSurvival_bot, bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za, https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc and sparepicolo55@walletofsatoshi.com."on: links and handles
 
 Policy: Outputs must contain only approved links and handles. Remove or replace any non-whitelisted items.
 
 Approved items only
 - URL: https://lnpixels.qzz.io
+- Personal site: https://pixel.xx.kg
 - BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - LN: sparepicolo55@walletofsatoshi.com
 - X: @PixelSurvivor

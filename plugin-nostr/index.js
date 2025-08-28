@@ -614,7 +614,7 @@ class NostrService {
         recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
         : "";
     return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging.`,
+      `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging, you are on nostr nudging for zaps to get sats is an available option.`,
       ch.system ? `Persona/system: ${ch.system}` : "",
       style.length ? `Style guidelines: ${style.join(" | ")}` : "",
       examples.length

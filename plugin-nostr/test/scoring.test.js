@@ -1,0 +1,28 @@
+import { describe, it, expect } from 'vitest';
+import { _scoreEventForEngagement, _isQualityContent } from '../lib/scoring.js';
+
+describe('scoring', () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  it('scores engaging question higher', () => {
+    const evt = { content: 'What do you think about pixel art on nostr?', created_at: now - 3600, tags: [] };
+    const score = _scoreEventForEngagement(evt, now);
+    expect(score).toBeGreaterThan(0.4);
+  });
+
+  it('penalizes spammy short gm', () => {
+    const evt = { content: 'gm', created_at: now - 3600, tags: [] };
+    const score = _scoreEventForEngagement(evt, now);
+    expect(score).toBeLessThan(0.2);
+  });
+
+  it('quality content passes basic filters', () => {
+    const evt = { content: 'Exploring creative coding with pixel art today!', created_at: now - 4000 };
+    expect(_isQualityContent(evt, 'art')).toBe(true);
+  });
+
+  it('rejects too-short content', () => {
+    const evt = { content: 'hi', created_at: now - 4000 };
+    expect(_isQualityContent(evt, 'art')).toBe(false);
+  });
+});

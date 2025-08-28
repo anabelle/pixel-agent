@@ -4,23 +4,17 @@ let logger, createUniqueUuid, ChannelType, ModelType;
 let SimplePool, nip19, finalizeEvent, getPublicKey;
 let wsInjector; // optional injector from @nostr/tools
 
-function hexToBytesLocal(hex) {
-  if (typeof hex !== "string") return null;
-  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (clean.length % 2 !== 0 || /[^0-9a-fA-F]/.test(clean)) return null;
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return out;
-}
-
-function bytesToHexLocal(bytes) {
-  if (!bytes || typeof bytes.length !== "number") return "";
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-    ""
-  );
-}
+// Extracted helpers
+const {
+  hexToBytesLocal,
+  bytesToHexLocal,
+  parseRelays,
+  normalizeSeconds,
+  pickRangeWithJitter,
+} = require('./lib/utils');
+const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
+const { buildPostPrompt, buildReplyPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
+const { getConversationIdFromEvent, extractTopicsFromEvent } = require('./lib/nostr');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -77,18 +71,7 @@ function parsePk(input) {
   return null;
 }
 
-function parseRelays(input) {
-  if (!input)
-    return [
-      "wss://relay.damus.io",
-      "wss://nos.lol",
-      "wss://relay.snort.social",
-    ];
-  return input
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+// parseRelays now imported from utils
 
 class NostrService {
   static serviceType = "nostr";
@@ -132,22 +115,7 @@ class NostrService {
     const listenEnabled = String(listenVal ?? "true").toLowerCase() === "true";
     const postEnabled = String(postVal ?? "false").toLowerCase() === "true";
   const enablePing = String(pingVal ?? "true").toLowerCase() === "true";
-    // Helper to coerce ms->s if user passed milliseconds
-    const normalizeSeconds = (val, keyName) => {
-      const n = Number(val);
-      if (!Number.isFinite(n)) return 0;
-      // Heuristic: treat as ms if divisible by 1000 and would be a sensible seconds value (< 7 days)
-      if (n % 1000 === 0) {
-        const sec = n / 1000;
-        if (sec >= 1 && sec <= 7 * 24 * 3600) {
-          logger?.warn?.(
-            `[NOSTR] ${keyName} looks like milliseconds (${n}); interpreting as ${sec}s`
-          );
-          return sec;
-        }
-      }
-      return n;
-    };
+  // normalizeSeconds imported from utils
     const minSec = normalizeSeconds(
       runtime.getSetting("NOSTR_POST_INTERVAL_MIN") ?? "3600",
       "NOSTR_POST_INTERVAL_MIN"
@@ -288,8 +256,7 @@ class NostrService {
   }
 
   scheduleNextPost(minSec, maxSec) {
-    const jitter =
-      minSec + Math.floor(Math.random() * Math.max(1, maxSec - minSec));
+    const jitter = pickRangeWithJitter(minSec, maxSec);
     if (this.postTimer) clearTimeout(this.postTimer);
     this.postTimer = setTimeout(
       () =>
@@ -501,85 +468,7 @@ class NostrService {
   }
 
   _scoreEventForEngagement(evt) {
-    if (!evt || !evt.content) return 0;
-    
-    const text = String(evt.content);
-    const now = Math.floor(Date.now() / 1000);
-    const age = now - (evt.created_at || 0);
-    const ageHours = age / 3600;
-    
-    let score = 0;
-    
-    // Length scoring (sweet spot for engagement)
-    if (text.length >= 20 && text.length <= 280) score += 0.3;
-    else if (text.length > 280 && text.length <= 500) score += 0.2;
-    else if (text.length < 20) score -= 0.2; // Too short
-    else if (text.length > 1000) score -= 0.3; // Too long
-    
-    // Content quality indicators
-    if (/\?/.test(text)) score += 0.3; // Questions engage
-    if (/[!]{1,2}/.test(text) && !/[!]{3,}/.test(text)) score += 0.2; // Enthusiasm, not spam
-    if (/(?:what|how|why|when|where)\b/i.test(text)) score += 0.2; // Curiosity
-    if (/(?:think|feel|believe|opinion|thoughts)/i.test(text)) score += 0.2; // Personal expression
-    
-    // Pixel's interests boost
-    const pixelInterests = [
-      /(?:pixel|art|creative|canvas|paint|draw)/i,
-      /(?:bitcoin|lightning|sats|zap|value4value)/i,
-      /(?:nostr|relay|decentralized|freedom)/i,
-      /(?:code|program|build|create|make)/i,
-      /(?:collaboration|community|together|share)/i
-    ];
-    
-    pixelInterests.forEach(pattern => {
-      if (pattern.test(text)) score += 0.15;
-    });
-    
-    // Conversation starters
-    if (/(?:thoughts on|opinion about|anyone else|does anyone|has anyone)/i.test(text)) score += 0.25;
-    if (/(?:looking for|seeking|need help|advice|recommendations)/i.test(text)) score += 0.2;
-    
-    // Thread context (replies to others are often more engaging)
-    const hasETag = Array.isArray(evt.tags) && evt.tags.some(tag => tag[0] === 'e');
-    if (hasETag) score += 0.1; // Part of conversation
-    
-    // Mention density (avoid spam, but some mentions are good)
-    const mentions = (text.match(/(^|\s)@[A-Za-z0-9_\.:-]+/g) || []).length;
-    if (mentions === 1) score += 0.1; // Good for engagement
-    else if (mentions === 2) score += 0.05; // Still okay
-    else if (mentions > 3) score -= 0.3; // Likely spam
-    
-    // Hashtag quality (avoid hashtag spam)
-    const hashtags = (text.match(/#\w+/g) || []).length;
-    if (hashtags === 1 || hashtags === 2) score += 0.05; // Good use
-    else if (hashtags > 5) score -= 0.2; // Spam
-    
-    // Avoid obvious bot patterns
-    const botPatterns = [
-      /^(gm|good morning|good night|gn)\s*$/i,
-      /follow me|follow back/i,
-      /check out|click here|link in bio/i,
-      /(?:buy|sell|trade).*(?:crypto|bitcoin|coin)/i,
-      /(?:pump|moon|lambo|hodl|diamond hands)\s*$/i,
-      /\b(?:dm|pm)\s+me\b/i
-    ];
-    
-    if (botPatterns.some(pattern => pattern.test(text))) {
-      score -= 0.5; // Heavy penalty for bot-like content
-    }
-    
-    // Age scoring (prefer recent but not too fresh)
-    if (ageHours < 0.5) score -= 0.3; // Too fresh, likely spam
-    else if (ageHours < 2) score += 0.2; // Sweet spot
-    else if (ageHours < 6) score += 0.1; // Still good
-    else if (ageHours > 12) score -= 0.1; // Getting stale
-    else if (ageHours > 24) score -= 0.3; // Too old
-    
-    // Randomization for variety (smaller range)
-    score += (Math.random() - 0.5) * 0.1;
-    
-    // Ensure score is between 0 and 1
-    return Math.max(0, Math.min(1, score));
+    return _scoreEventForEngagement(evt);
   }
 
   _isSemanticMatch(content, topic) {
@@ -600,82 +489,7 @@ class NostrService {
   }
 
   _isQualityContent(event, topic) {
-    if (!event || !event.content) return false;
-    
-    const content = event.content;
-    const contentLength = content.length;
-    
-    // Basic quality filters
-    if (contentLength < 10) return false; // Too short
-    if (contentLength > 2000) return false; // Likely spam
-    
-    // Bot detection patterns
-    const botPatterns = [
-      /^(gm|good morning|hello|hi)\s*$/i, // Generic greetings only
-      /follow me|follow back|mutual follow/i, // Follow spam
-      /check out my|visit my|buy my/i, // Promotional spam
-      /click here|link in bio/i, // Link spam
-      /\$\d+.*(?:airdrop|giveaway|free)/i, // Crypto spam
-      /(?:join|buy|sell).*(?:telegram|discord)/i, // Channel spam
-      /(?:pump|moon|lambo|hodl)\s*$/i, // Generic crypto terms only
-      /^\d+\s*(?:sats|btc|bitcoin)\s*$/i, // Number spam
-      /(?:repost|rt|share)\s+if/i, // Engagement bait
-      /\b(?:dm|pm)\s+me\b/i, // DM requests
-      /(?:free|earn).*(?:bitcoin|crypto|money)/i // Money spam
-    ];
-    
-    if (botPatterns.some(pattern => pattern.test(content))) {
-      return false;
-    }
-    
-    // Anti-repetition: avoid accounts that post very similar content
-    const wordCount = content.split(/\s+/).length;
-    if (wordCount < 3) return false; // Too few words
-    
-    // Prefer content with some complexity
-    const uniqueWords = new Set(content.toLowerCase().split(/\s+/)).size;
-    const wordVariety = uniqueWords / wordCount;
-    if (wordVariety < 0.5 && wordCount > 5) return false; // Too repetitive
-    
-    // Content quality indicators
-    const qualityIndicators = [
-      /\?/, // Questions are often engaging
-      /[.!?]{2,}/, // Emotional punctuation
-      /(?:think|feel|believe|wonder|curious)/i, // Thoughtful language
-      /(?:create|build|make|design|art|work)/i, // Creative terms
-      /(?:experience|learn|try|explore)/i, // Growth mindset
-      /(?:community|together|collaborate|share)/i, // Social terms
-      /(?:nostr|bitcoin|lightning|zap|sat)/i, // Platform relevance (for our context)
-    ];
-    
-    let qualityScore = qualityIndicators.reduce((score, indicator) => {
-      return score + (indicator.test(content) ? 1 : 0);
-    }, 0);
-    
-    // Topic-specific quality boosts
-    const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(topic.toLowerCase());
-    const isTechTopic = /dev|code|programming|node|typescript|docker/.test(topic.toLowerCase());
-    
-    if (isArtTopic) {
-      const artTerms = /(?:color|paint|draw|sketch|canvas|brush|pixel|create|art|design|visual|aesthetic)/i;
-      if (artTerms.test(content)) qualityScore += 1;
-    }
-    
-    if (isTechTopic) {
-      const techTerms = /(?:code|program|build|develop|deploy|server|node|docker|git|open source)/i;
-      if (techTerms.test(content)) qualityScore += 1;
-    }
-    
-    // Age factor - prefer recent but not too fresh (avoid spam bursts)
-    const now = Math.floor(Date.now() / 1000);
-    const age = now - (event.created_at || 0);
-    const ageHours = age / 3600;
-    
-    if (ageHours < 0.5) return false; // Too fresh, likely spam
-    if (ageHours > 12) qualityScore -= 1; // Prefer recent content
-    
-    // Require minimum quality score
-    return qualityScore >= 2;
+    return _isQualityContent(event, topic);
   }
 
   async _filterByAuthorQuality(events) {
@@ -752,33 +566,7 @@ class NostrService {
   }
 
   _extractTopicsFromEvent(event) {
-    if (!event || !event.content) return [];
-    
-    const content = event.content.toLowerCase();
-    const topics = [];
-    
-    // Extract hashtags
-    const hashtags = content.match(/#\w+/g) || [];
-    topics.push(...hashtags.map(h => h.slice(1)));
-    
-    // Extract semantic topics based on content
-    const topicKeywords = {
-      'art': ['art', 'paint', 'draw', 'creative', 'canvas', 'design', 'visual', 'aesthetic'],
-      'bitcoin': ['bitcoin', 'btc', 'sats', 'satoshi', 'hodl', 'stack'],
-      'lightning': ['lightning', 'ln', 'zap', 'bolt', 'channel', 'invoice'],
-      'nostr': ['nostr', 'relay', 'note', 'event', 'pubkey', 'nip'],
-      'tech': ['code', 'program', 'develop', 'build', 'tech', 'software'],
-      'community': ['community', 'together', 'collaborate', 'share', 'group'],
-      'creativity': ['create', 'make', 'build', 'generate', 'craft', 'invent']
-    };
-    
-    for (const [topic, keywords] of Object.entries(topicKeywords)) {
-      if (keywords.some(keyword => content.includes(keyword))) {
-        topics.push(topic);
-      }
-    }
-    
-    return [...new Set(topics)]; // Remove duplicates
+  return extractTopicsFromEvent(event);
   }
 
   _selectFollowCandidates(scoredEvents, currentContacts) {
@@ -1062,102 +850,20 @@ class NostrService {
   }
 
   _buildPostPrompt() {
-    const ch = this.runtime.character || {};
-    const name = ch.name || "Agent";
-    const topics = Array.isArray(ch.topics)
-      ? ch.topics.length <= 12
-        ? ch.topics.join(", ")
-        : ch.topics.sort(() => 0.5 - Math.random()).slice(0, 12).join(", ")
-      : "";
-    const style = [
-      ...(ch.style?.all || []),
-      ...(ch.style?.post || []),
-    ];
-    const examples = Array.isArray(ch.postExamples)
-      ? ch.postExamples.length <= 10
-        ? ch.postExamples
-        : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
-      : [];
-    const whitelist = `Only allowed sites: https://lnpixels.qzz.io, https://pixel.xx.kg. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
-    return [
-      `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah,"`,
-      ch.system ? `Persona/system: ${ch.system}` : "",
-      topics ? `Relevant topics: ${topics}` : "",
-      style.length ? `Style guidelines: ${style.join(" | ")}` : "",
-      examples.length
-        ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join(
-          "\n- "
-        )}`
-        : "",
-      whitelist,
-      "Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist—no other links or handles.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+  return buildPostPrompt(this.runtime.character);
   }
 
   _buildReplyPrompt(evt, recentMessages) {
-    const ch = this.runtime.character || {};
-    const name = ch.name || "Agent";
-    const style = [...(ch.style?.all || []), ...(ch.style?.chat || [])];
-    const whitelist = `Only allowed sites: https://lnpixels.qzz.io, https://pixel.xx.kg. Only allowed handle: @PixelSurvivor. Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Only LN: sparepicolo55@walletofsatoshi.com.`;
-    const userText = (evt?.content || "").slice(0, 800);
-    const examples = Array.isArray(ch.postExamples)
-      ? ch.postExamples.length <= 10
-        ? ch.postExamples
-        : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
-      : [];
-    const history =
-      Array.isArray(recentMessages) && recentMessages.length
-        ? `Recent conversation (most recent last):\n` +
-        recentMessages.map((m) => `- ${m.role}: ${m.text}`).join("\n")
-        : "";
-    return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging, you are on nostr nudging for zaps to get sats is an available option.`,
-      ch.system ? `Persona/system: ${ch.system}` : "",
-      style.length ? `Style guidelines: ${style.join(" | ")}` : "",
-      examples.length
-        ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join(
-          "\n- "
-        )}`
-        : "",
-      whitelist,
-      history,
-      `Original message: "${userText}"`,
-      "Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+  return buildReplyPrompt(this.runtime.character, evt, recentMessages);
   }
 
   _extractTextFromModelResult(result) {
-    try {
-      if (!result) return "";
-      if (typeof result === "string") return result.trim();
-      if (typeof result.text === "string") return result.text.trim();
-      if (typeof result.content === "string") return result.content.trim();
-      if (Array.isArray(result.choices) && result.choices[0]?.message?.content) {
-        return String(result.choices[0].message.content).trim();
-      }
-      return String(result).trim();
-    } catch (err) {
-      logger?.warn?.(
-        "[NOSTR] LLM text extraction failed:",
-        err?.message || err
-      );
-      return "";
-    }
+  try { return extractTextFromModelResult(result); }
+  catch { return ""; }
   }
 
   _sanitizeWhitelist(text) {
-    if (!text) return "";
-    let out = String(text);
-    // Strip URLs except allowed domain
-    out = out.replace(/https?:\/\/[^\s)]+/gi, (m) => {
-      return m.startsWith("https://lnpixels.qzz.io") ? m : "";
-    });
-    // Keep BTC/LN if present, otherwise fine
-    return out.trim();
+  return sanitizeWhitelist(text);
   }
 
   async generatePostTextLLM() {
@@ -1281,18 +987,7 @@ class NostrService {
   }
   // --- Helpers inspired by @elizaos/plugin-twitter ---
   _getConversationIdFromEvent(evt) {
-    try {
-      // Prefer root 'e' tag
-      const eTags = Array.isArray(evt.tags)
-        ? evt.tags.filter((t) => t[0] === "e")
-        : [];
-      const root = eTags.find((t) => t[3] === "root");
-      if (root && root[1]) return root[1];
-      // Fallback to any first 'e' tag
-      if (eTags.length && eTags[0][1]) return eTags[0][1];
-    } catch { }
-    // Use the event id as thread id fallback
-    return evt?.id || "nostr";
+  return getConversationIdFromEvent(evt);
   }
 
   async _ensureNostrContext(userPubkey, usernameLike, conversationId) {

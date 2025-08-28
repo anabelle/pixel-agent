@@ -13,10 +13,12 @@ const {
   normalizeSeconds,
   pickRangeWithJitter,
 } = require('./lib/utils');
+const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./lib/keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
 const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./lib/nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./lib/zaps');
+const { buildTextNote, buildReplyNote, buildReaction, buildContacts } = require('./lib/eventFactory');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -80,30 +82,12 @@ async function ensureDeps() {
 }
 
 function parseSk(input) {
-  if (!input) return null;
-  try {
-    if (input.startsWith("nsec1")) {
-      const decoded = nip19.decode(input);
-      if (decoded.type === "nsec") return decoded.data;
-    }
-  } catch { }
-  const bytes = hexToBytesLocal(input);
-  return bytes || null;
+  return parseSkHelper(input, nip19);
 }
 
 // Allow listening with only a public key (hex or npub1)
 function parsePk(input) {
-  if (!input) return null;
-  try {
-    if (typeof input === "string" && input.startsWith("npub1")) {
-      const decoded = nip19.decode(input);
-      if (decoded.type === "npub") return decoded.data; // hex string
-    }
-  } catch { }
-  const bytes = hexToBytesLocal(input);
-  if (bytes) return bytesToHexLocal(bytes);
-  if (typeof input === "string" && /^[0-9a-fA-F]{64}$/.test(input)) return input.toLowerCase();
-  return null;
+  return parsePkHelper(input, nip19);
 }
 
 // parseRelays now imported from utils
@@ -729,16 +713,7 @@ class NostrService {
   async _publishContacts(newSet) {
     if (!this.pool || !this.sk) return false;
     try {
-      const tags = [];
-      for (const pk of newSet) {
-        tags.push(["p", pk]);
-      }
-      const evtTemplate = {
-        kind: 3,
-        created_at: Math.floor(Date.now() / 1000),
-        tags,
-        content: JSON.stringify({}),
-      };
+  const evtTemplate = buildContacts([...newSet]);
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       logger.info(
@@ -1022,13 +997,8 @@ class NostrService {
       text = await this.generatePostTextLLM();
       if (!text) text = this.pickPostText();
     }
-    text = text || "hello, nostr";
-    const evtTemplate = {
-      kind: 1,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [],
-      content: text,
-    };
+  text = text || "hello, nostr";
+  const evtTemplate = buildTextNote(text);
     try {
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
@@ -1415,8 +1385,6 @@ class NostrService {
   async postReply(parentEvtOrId, text, opts = {}) {
     if (!this.pool || !this.sk || !this.relays.length) return false;
     try {
-      const created_at = Math.floor(Date.now() / 1000);
-      const tags = [];
       // Threading via NIP-10 if available
       let rootId = null;
       let parentId = null;
@@ -1434,42 +1402,19 @@ class NostrService {
           parentId = parentEvtOrId;
         }
       } catch {}
-      // Add reply tag
       if (!parentId) return false;
-      tags.push(["e", parentId, "", "reply"]);
-      if (rootId && rootId !== parentId) {
-        tags.push(["e", rootId, "", "root"]);
-      }
-      // Mention the author of the parent if known (but don't mention self)
-      const seenP = new Set();
-      if (parentAuthorPk && parentAuthorPk !== this.pkHex) {
-        tags.push(["p", parentAuthorPk]);
-        seenP.add(parentAuthorPk);
-      }
-      // Add any extra mentions (e.g., zap giver), skipping self and duplicates
-      const extraPTags = Array.isArray(opts.extraPTags) ? opts.extraPTags : [];
-      for (const pk of extraPTags) {
-        if (!pk) continue;
-        if (pk === this.pkHex) continue;
-        if (seenP.has(pk)) continue;
-        tags.push(["p", pk]);
-        seenP.add(pk);
-      }
+      const parentForFactory = { id: parentId, pubkey: parentAuthorPk, refs: { rootId } };
+      const extraPTags = (Array.isArray(opts.extraPTags) ? opts.extraPTags : []).filter(pk => pk && pk !== this.pkHex);
+      const evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
+      if (!evtTemplate) return false;
       // Debug: summarize tag set and expected mention
       try {
-        const eCount = tags.filter(t => t?.[0] === 'e').length;
-        const pCount = tags.filter(t => t?.[0] === 'p').length;
+        const eCount = evtTemplate.tags.filter(t => t?.[0] === 'e').length;
+        const pCount = evtTemplate.tags.filter(t => t?.[0] === 'p').length;
         const expectPk = opts.expectMentionPk;
-        const hasExpected = expectPk ? tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
+        const hasExpected = expectPk ? evtTemplate.tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
         logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0,8)} root=${rootId?String(rootId).slice(0,8):'-'}${expectPk?` mentionExpected=${hasExpected?'yes':'no'}`:''}`);
       } catch {}
-
-      const evtTemplate = {
-        kind: 1,
-        created_at,
-        tags,
-        content: String(text || "ack."),
-      };
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       const logId = typeof parentEvtOrId === "object" && parentEvtOrId && parentEvtOrId.id
@@ -1502,16 +1447,7 @@ class NostrService {
         logger.debug("[NOSTR] Skipping reaction to self-authored event");
         return false;
       }
-      const created_at = Math.floor(Date.now() / 1000);
-      const tags = [];
-      tags.push(["e", parentEvt.id]);
-      tags.push(["p", parentEvt.pubkey]);
-      const evtTemplate = {
-        kind: 7,
-        created_at,
-        tags,
-        content: String(symbol || "+"),
-      };
+  const evtTemplate = buildReaction(parentEvt, symbol);
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
       logger.info(

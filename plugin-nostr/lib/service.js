@@ -356,15 +356,17 @@ class NostrService {
   async generatePostTextLLM() {
     const prompt = this._buildPostPrompt();
     const type = this._getLargeModelType();
-    try {
-      if (!this.runtime?.useModel) throw new Error('useModel missing');
-      const res = await this.runtime.useModel(type, { prompt, maxTokens: 256, temperature: 0.9 });
-      const text = this._sanitizeWhitelist(this._extractTextFromModelResult(res));
-      return text || null;
-    } catch (err) {
-      logger?.warn?.('[NOSTR] LLM post generation failed, falling back to examples:', err?.message || err);
-      return this.pickPostText();
-    }
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 256, temperature: 0.9 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => this.pickPostText()
+    );
+    return text || null;
   }
 
   _buildZapThanksPrompt(amountMsats, senderInfo) { return buildZapThanksPrompt(this.runtime.character, amountMsats, senderInfo); }
@@ -372,15 +374,17 @@ class NostrService {
   async generateZapThanksTextLLM(amountMsats, senderInfo) {
     const prompt = this._buildZapThanksPrompt(amountMsats, senderInfo);
     const type = this._getLargeModelType();
-    try {
-      if (!this.runtime?.useModel) throw new Error('useModel missing');
-      const res = await this.runtime.useModel(type, { prompt, maxTokens: 128, temperature: 0.8 });
-      const text = this._sanitizeWhitelist(this._extractTextFromModelResult(res));
-      return text || generateThanksText(amountMsats);
-    } catch (err) {
-      logger?.warn?.('[NOSTR] LLM zap thanks generation failed, falling back to static:', err?.message || err);
-      return generateThanksText(amountMsats);
-    }
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 128, temperature: 0.8 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => generateThanksText(amountMsats)
+    );
+    return text || generateThanksText(amountMsats);
   }
 
   async generateReplyTextLLM(evt, roomId) {
@@ -394,15 +398,17 @@ class NostrService {
     } catch {}
     const prompt = this._buildReplyPrompt(evt, recent);
     const type = this._getLargeModelType();
-    try {
-      if (!this.runtime?.useModel) throw new Error('useModel missing');
-      const res = await this.runtime.useModel(type, { prompt, maxTokens: 192, temperature: 0.8 });
-      const text = this._sanitizeWhitelist(this._extractTextFromModelResult(res));
-      return text || 'noted.';
-    } catch (err) {
-      logger?.warn?.('[NOSTR] LLM reply generation failed, falling back to heuristic:', err?.message || err);
-      return this.pickReplyTextFor(evt);
-    }
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 192, temperature: 0.8 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => this.pickReplyTextFor(evt)
+    );
+    return text || 'noted.';
   }
 
   async postOnce(content) {
@@ -432,26 +438,13 @@ class NostrService {
   }
 
   async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
-    const runtime = this.runtime;
-    const worldId = createUniqueUuid(runtime, userPubkey);
-    const roomId = createUniqueUuid(runtime, conversationId);
-    const entityId = createUniqueUuid(runtime, userPubkey);
-    logger.info(`[NOSTR] Ensuring context world/room/connection for pubkey=${userPubkey.slice(0, 8)} conv=${conversationId.slice(0, 8)}`);
-    await runtime.ensureWorldExists({ id: worldId, name: `${usernameLike || userPubkey.slice(0, 8)}'s Nostr`, agentId: runtime.agentId, serverId: userPubkey, metadata: { ownership: { ownerId: userPubkey }, nostr: { pubkey: userPubkey }, }, }).catch(() => {});
-    await runtime.ensureRoomExists({ id: roomId, name: `Nostr thread ${conversationId.slice(0, 8)}`, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: conversationId, serverId: userPubkey, worldId, }).catch(() => {});
-    await runtime.ensureConnection({ entityId, roomId, userName: usernameLike || userPubkey, name: usernameLike || userPubkey, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => {});
-    logger.info(`[NOSTR] Context ensured world=${worldId} room=${roomId} entity=${entityId}`);
-    return { worldId, roomId, entityId };
+  const { ensureNostrContext } = require('./context');
+  return ensureNostrContext(this.runtime, userPubkey, usernameLike, conversationId, { createUniqueUuid, ChannelType, logger });
   }
 
   async _createMemorySafe(memory, tableName = 'messages', maxRetries = 3) {
-    let lastErr = null;
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try { logger.info(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`); await this.runtime.createMemory(memory, tableName); logger.info(`[NOSTR] Memory created id=${memory.id}`); return true; }
-      catch (err) { lastErr = err; const msg = String(err?.message || err || ''); if (msg.includes('duplicate') || msg.includes('constraint')) { logger.info('[NOSTR] Memory already exists, skipping'); return true; } await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250)); }
-    }
-    logger.warn('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr);
-    return false;
+  const { createMemorySafe } = require('./context');
+  return createMemorySafe(this.runtime, memory, tableName, maxRetries, logger);
   }
 
   async handleMention(evt) {
@@ -577,19 +570,8 @@ class NostrService {
   }
 
   async saveInteractionMemory(kind, evt, extra) {
-    const runtime = this.runtime; if (!runtime) return;
-    const body = { platform: 'nostr', kind, eventId: evt?.id, author: evt?.pubkey, content: evt?.content, timestamp: Date.now(), ...extra };
-    if (typeof runtime.createMemory === 'function') {
-      try {
-        const roomId = createUniqueUuid(runtime, this._getConversationIdFromEvent(evt));
-        const id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
-        const entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
-        return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content: { type: 'social_interaction', source: 'nostr', data: body, }, createdAt: Date.now(), }, 'messages');
-      } catch (e) { logger.debug('[NOSTR] saveInteractionMemory fallback:', e?.message || e); }
-    }
-    if (runtime.databaseAdapter && typeof runtime.databaseAdapter.createMemory === 'function') {
-      return await runtime.databaseAdapter.createMemory({ type: 'event', content: body, roomId: 'nostr', });
-    }
+  const { saveInteractionMemory } = require('./context');
+  return saveInteractionMemory(this.runtime, createUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
   }
 
   async handleZap(evt) {

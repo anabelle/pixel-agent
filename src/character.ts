@@ -587,6 +587,14 @@ export const character: Character = {
       process.env.NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN || "5",
     NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN:
       process.env.NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN || "5",
+    // Time-based filtering for old messages (ISO 8601 format)
+    NOSTR_MESSAGE_CUTOFF_DATE:
+      process.env.NOSTR_MESSAGE_CUTOFF_DATE || "2025-08-28T00:00:00Z",
+    // Shell plugin settings
+    SHELL_ENABLED: process.env.SHELL_ENABLED || "true",
+    SHELL_ALLOWED_DIRECTORY: process.env.SHELL_ALLOWED_DIRECTORY || "/home/pixel",
+    SHELL_TIMEOUT: process.env.SHELL_TIMEOUT || "300000",
+    SHELL_FORBIDDEN_COMMANDS: process.env.SHELL_FORBIDDEN_COMMANDS || "rm,mv,chmod,chown,shutdown",
   },
 };
 

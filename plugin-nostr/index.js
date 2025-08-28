@@ -1384,27 +1384,41 @@ class NostrService {
     return baseChoices[Math.floor(Math.random() * baseChoices.length)];
   }
 
-  async postReply(parentEvt, text) {
+  async postReply(parentEvtOrId, text, opts = {}) {
     if (!this.pool || !this.sk || !this.relays.length) return false;
     try {
       const created_at = Math.floor(Date.now() / 1000);
       const tags = [];
       // Threading via NIP-10 if available
       let rootId = null;
+      let parentId = null;
+      let parentAuthorPk = null;
       try {
-        if (nip10Parse) {
-          const refs = nip10Parse(parentEvt);
-          if (refs?.root?.id) rootId = refs.root.id;
-          if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvt.id) rootId = refs.reply.id;
+        if (typeof parentEvtOrId === "object" && parentEvtOrId && parentEvtOrId.id) {
+          parentId = parentEvtOrId.id;
+          parentAuthorPk = parentEvtOrId.pubkey || null;
+          if (nip10Parse) {
+            const refs = nip10Parse(parentEvtOrId);
+            if (refs?.root?.id) rootId = refs.root.id;
+            if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvtOrId.id) rootId = refs.reply.id;
+          }
+        } else if (typeof parentEvtOrId === "string") {
+          parentId = parentEvtOrId;
         }
       } catch {}
       // Add reply tag
-      tags.push(["e", parentEvt.id, "", "reply"]);
-      if (rootId && rootId !== parentEvt.id) {
+      if (!parentId) return false;
+      tags.push(["e", parentId, "", "reply"]);
+      if (rootId && rootId !== parentId) {
         tags.push(["e", rootId, "", "root"]);
       }
-  // Mention the author (parent pubkey); if absent, fall back to evt.pubkey when provided later
-  if (parentEvt.pubkey) tags.push(["p", parentEvt.pubkey]);
+      // Mention the author of the parent if known
+      if (parentAuthorPk) tags.push(["p", parentAuthorPk]);
+      // Add any extra mentions (e.g., zap giver)
+      const extraPTags = Array.isArray(opts.extraPTags) ? opts.extraPTags : [];
+      for (const pk of extraPTags) {
+        if (pk && pk !== parentAuthorPk) tags.push(["p", pk]);
+      }
 
       const evtTemplate = {
         kind: 1,
@@ -1419,11 +1433,13 @@ class NostrService {
         } chars)`
       );
       // Persist relationship bump
-      await this.saveInteractionMemory("reply", parentEvt, {
+      await this.saveInteractionMemory("reply", typeof parentEvtOrId === "object" ? parentEvtOrId : { id: parentId }, {
         replied: true,
       }).catch(() => { });
       // Drop a like on the post we replied to (best-effort)
-      this.postReaction(parentEvt, "+").catch(() => { });
+      if (typeof parentEvtOrId === "object") {
+        this.postReaction(parentEvtOrId, "+").catch(() => { });
+      }
       return true;
     } catch (err) {
       logger.warn("[NOSTR] Reply failed:", err?.message || err);
@@ -1543,9 +1559,14 @@ class NostrService {
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
 
-  const thanks = generateThanksText(amountMsats);
-  // Reply to the zap receipt (kind 9735) so it appears directed to the sender
-  await this.postReply(evt, `${thanks}`);
+      const thanks = generateThanksText(amountMsats);
+      if (targetEventId) {
+        // Reply under the zapped note (root) and mention the giver
+        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender] });
+      } else {
+        // Fallback: reply to the zap receipt
+        await this.postReply(evt, `${thanks}`);
+      }
 
       // Persist interaction memory (best-effort)
       await this.saveInteractionMemory('zap_thanks', evt, {

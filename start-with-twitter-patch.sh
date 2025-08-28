@@ -6,4 +6,4 @@
 echo "Applying Twitter rate limit patch..."
 
 # Apply the patch by preloading the patch module
-NODE_OPTIONS="--require ./twitter-patch.js" elizaos start --character ./character.json --port 3002
+NODE_OPTIONS="--require ./twitter-patch.js" npx elizaos start --character ./character.json --port 3002

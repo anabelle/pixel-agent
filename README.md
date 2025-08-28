@@ -33,7 +33,7 @@ pixel-agent/
 
 1. **Clone and setup**
    ```bash
-   cd /home/ubuntu/elizaos-agent
+    cd /home/pixel/elizaos-agent
    bun install
    ```
 

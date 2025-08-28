@@ -30,7 +30,7 @@ Successfully configured the ElizaOS Pixel agent to start automatically with the 
 
 ### File Structure
 ```
-/home/ubuntu/elizaos-agent/
+/home/pixel/elizaos-agent/
 ├── ecosystem.config.js          # PM2 configuration
 ├── health-check.sh             # Health monitoring script
 ├── src/

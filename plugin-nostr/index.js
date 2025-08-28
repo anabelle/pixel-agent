@@ -1428,9 +1428,11 @@ class NostrService {
       };
       const signed = finalizeEvent(evtTemplate, this.sk);
       await Promise.any(this.pool.publish(this.relays, signed));
+      const logId = typeof parentEvtOrId === "object" && parentEvtOrId && parentEvtOrId.id
+        ? parentEvtOrId.id
+        : parentId || "";
       logger.info(
-        `[NOSTR] Replied to ${parentEvt.id.slice(0, 8)}… (${evtTemplate.content.length
-        } chars)`
+        `[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`
       );
       // Persist relationship bump
       await this.saveInteractionMemory("reply", typeof parentEvtOrId === "object" ? parentEvtOrId : { id: parentId }, {

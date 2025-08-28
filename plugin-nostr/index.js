@@ -1389,23 +1389,24 @@ class NostrService {
 
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);
-      // Persistent dedup: if memory already exists, skip
-      try {
-        const existing = await runtime.getMemoryById(eventMemoryId);
-        if (existing) {
-          logger.info(
-            `[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (persistent dedup)`
-          );
-          return;
-        }
-      } catch { }
-
       const conversationId = this._getConversationIdFromEvent(evt);
       const { roomId, entityId } = await this._ensureNostrContext(
         evt.pubkey,
         undefined,
         conversationId
       );
+
+      // Persistent dedup: don't re-save memory, but still allow replying if we haven't replied before
+      let alreadySaved = false;
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (existing) {
+          alreadySaved = true;
+          logger.info(
+            `[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`
+          );
+        }
+      } catch { }
 
       const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
       const memory = {
@@ -1420,9 +1421,10 @@ class NostrService {
         },
         createdAt: createdAtMs,
       };
-
-      logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`);
-      await this._createMemorySafe(memory, "messages");
+      if (!alreadySaved) {
+        logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`);
+        await this._createMemorySafe(memory, "messages");
+      }
 
       // Check if we've already replied in this room (recent history)
       try {
@@ -1448,7 +1450,18 @@ class NostrService {
       } catch { }
 
       // Auto-reply if enabled
-      if (!this.replyEnabled || !this.sk || !this.pool) return;
+      if (!this.replyEnabled) {
+        logger.info("[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)");
+        return;
+      }
+      if (!this.sk) {
+        logger.info("[NOSTR] No private key available; listen-only mode, not replying");
+        return;
+      }
+      if (!this.pool) {
+        logger.info("[NOSTR] No Nostr pool available; cannot send reply");
+        return;
+      }
       const last = this.lastReplyByUser.get(evt.pubkey) || 0;
       const now = Date.now();
       if (now - last < this.replyThrottleSec * 1000) {

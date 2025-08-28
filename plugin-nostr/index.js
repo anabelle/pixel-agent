@@ -1438,8 +1438,8 @@ class NostrService {
       await this.saveInteractionMemory("reply", typeof parentEvtOrId === "object" ? parentEvtOrId : { id: parentId }, {
         replied: true,
       }).catch(() => { });
-      // Drop a like on the post we replied to (best-effort)
-      if (typeof parentEvtOrId === "object") {
+      // Optionally drop a like on the post we replied to (best-effort)
+      if (!opts.skipReaction && typeof parentEvtOrId === "object") {
         this.postReaction(parentEvtOrId, "+").catch(() => { });
       }
       return true;
@@ -1557,17 +1557,27 @@ class NostrService {
       if (now - last < cooldownMs) return;
       this.zapCooldownByUser.set(sender, now);
 
+      // Cancel any pending scheduled LLM reply for this sender; for zaps we only thank
+      const existingTimer = this.pendingReplyTimers.get(sender);
+      if (existingTimer) {
+        try { clearTimeout(existingTimer); } catch {}
+        this.pendingReplyTimers.delete(sender);
+        logger.info(`[NOSTR] Cancelled scheduled reply for ${sender.slice(0,8)} due to zap`);
+      }
+      // Mark last reply for this user to throttle immediate follow-ups
+      this.lastReplyByUser.set(sender, now);
+
       // Build conversation id: reply under the target event if available
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
 
       const thanks = generateThanksText(amountMsats);
       if (targetEventId) {
-        // Reply under the zapped note (root) and mention the giver
-        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender] });
+        // Reply under the zapped note (root) and mention the giver; no extra reaction
+        await this.postReply(targetEventId, `${thanks}`, { extraPTags: [sender], skipReaction: true });
       } else {
-        // Fallback: reply to the zap receipt
-        await this.postReply(evt, `${thanks}`);
+        // Fallback: reply to the zap receipt; no extra reaction
+        await this.postReply(evt, `${thanks}`, { skipReaction: true });
       }
 
       // Persist interaction memory (best-effort)

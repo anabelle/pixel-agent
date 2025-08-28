@@ -1481,6 +1481,9 @@ class NostrService {
           const timer = setTimeout(async () => {
             this.pendingReplyTimers.delete(pubkey);
             try {
+              logger.info(
+                `[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`
+              );
               // If we already replied in this room since, skip
               try {
                 const recent = await this.runtime.getMemories({
@@ -1567,8 +1570,11 @@ class NostrService {
       const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
       const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
       if (delayMs > 0) {
-        logger.debug(`[NOSTR] Thinking for ~${delayMs}ms before replying...`);
+        logger.info(`[NOSTR] Preparing reply; thinking for ~${delayMs}ms`);
         await new Promise((r) => setTimeout(r, delayMs));
+      }
+      else {
+        logger.info(`[NOSTR] Preparing immediate reply (no delay)`);
       }
       const replyText = await this.generateReplyTextLLM(evt, roomId);
       logger.info(

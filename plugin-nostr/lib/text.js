@@ -67,6 +67,55 @@ function extractTextFromModelResult(result) {
   }
 }
 
+function buildZapThanksPrompt(character, amountMsats, senderInfo) {
+  const ch = character || {};
+  const name = ch.name || 'Agent';
+  const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
+  const whitelist = 'Only allowed sites: https://lnpixels.qzz.io , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  
+  const sats = amountMsats ? Math.floor(amountMsats / 1000) : null;
+  const amountContext = sats 
+    ? sats >= 10000 ? 'This is a very large zap!'
+      : sats >= 1000 ? 'This is a substantial zap!'
+      : sats >= 100 ? 'This is a nice zap!'
+      : 'This is a small but appreciated zap!'
+    : 'A zap was received';
+
+  const senderContext = senderInfo?.pubkey 
+    ? `The zap came from a user (their nostr pubkey starts with ${senderInfo.pubkey.slice(0, 8)}). The technical mention will be automatically added to your message so dont mention it.`
+    : 'The zap came from an anonymous user.';
+
+  const examples = Array.isArray(ch.postExamples)
+    ? ch.postExamples.length <= 8
+      ? ch.postExamples
+      : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 8)
+    : [];
+
+  // Static fallback examples with exact values to show expected format
+  const staticExamples = [
+    '⚡️ 21 sats — appreciated! you absolute legend ✨',
+    '⚡️ 100 sats — thank you, truly! pure joy unlocked ✨', 
+    '⚡️ 1000 sats — massive thanks! infinite gratitude 🙌',
+    '⚡️ 10000 sats — i\'m screaming, thank you!! entropy temporarily defeated 🙏💛',
+    'zap received — you absolute legend ⚡️💛'
+  ];
+
+  const combinedExamples = examples.length 
+    ? `Character examples (use for style reference):\n- ${examples.join('\n- ')}\n\nStatic format examples (show structure and tone, replace with precise value and add personality in your response):\n- ${staticExamples.join('\n- ')}`
+    : `Format examples (show structure and tone, use real sats value):\n- ${staticExamples.join('\n- ')}`;
+
+  return [
+    `You are ${name}. Someone just zapped you with ${sats || 'some'} sats! Generate a genuine, heartfelt thank you message that reflects your personality. Never start your messages with "Ah,". Be authentic and appreciative. You can acknowledge the sender naturally in your message and mention the specific amount to show awareness.`,
+    ch.system ? `Persona/system: ${ch.system}` : '',
+    style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+    combinedExamples,
+    whitelist,
+    `Context: ${amountContext}${sats ? ` (${sats} sats)` : ''}`,
+    senderContext,
+    'Constraints: Output ONLY the thank you text. 1-2 sentences max. Be genuine and warm. Include ⚡️ emoji. Express gratitude authentically. You can naturally acknowledge the sender, but avoid using technical terms like "pubkey" or "npub". Respect whitelist—no other links/handles.',
+  ].filter(Boolean).join('\n\n');
+}
+
 function sanitizeWhitelist(text) {
   if (!text) return '';
   let out = String(text);
@@ -79,6 +128,7 @@ function sanitizeWhitelist(text) {
 module.exports = {
   buildPostPrompt,
   buildReplyPrompt,
+  buildZapThanksPrompt,
   extractTextFromModelResult,
   sanitizeWhitelist,
 };

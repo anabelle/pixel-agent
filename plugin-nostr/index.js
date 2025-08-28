@@ -14,7 +14,7 @@ const {
   pickRangeWithJitter,
 } = require('./lib/utils');
 const { _scoreEventForEngagement, _isQualityContent } = require('./lib/scoring');
-const { buildPostPrompt, buildReplyPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
+const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./lib/text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./lib/nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./lib/zaps');
 
@@ -940,6 +940,34 @@ class NostrService {
     }
   }
 
+  _buildZapThanksPrompt(amountMsats, senderInfo) {
+    return buildZapThanksPrompt(this.runtime.character, amountMsats, senderInfo);
+  }
+
+  async generateZapThanksTextLLM(amountMsats, senderInfo) {
+    const prompt = this._buildZapThanksPrompt(amountMsats, senderInfo);
+    const type = this._getLargeModelType();
+    try {
+      if (!this.runtime?.useModel) throw new Error("useModel missing");
+      const res = await this.runtime.useModel(type, {
+        prompt,
+        maxTokens: 128,
+        temperature: 0.8,
+      });
+      const text = this._sanitizeWhitelist(
+        this._extractTextFromModelResult(res)
+      );
+      // Ensure not empty, fallback to static generation
+      return text || generateThanksText(amountMsats);
+    } catch (err) {
+      logger?.warn?.(
+        "[NOSTR] LLM zap thanks generation failed, falling back to static:",
+        err?.message || err
+      );
+      return generateThanksText(amountMsats);
+    }
+  }
+
   async generateReplyTextLLM(evt, roomId) {
     // Collect recent messages from this room for richer context
     let recent = [];
@@ -1588,7 +1616,8 @@ class NostrService {
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
       const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
 
-      const thanks = generateThanksText(amountMsats);
+      // Generate LLM-based thanks message
+      const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
       // Add a NIP-27 mention so clients visibly link the zapper
       let thanksWithMention = thanks;
       try {
@@ -1606,7 +1635,7 @@ class NostrService {
       } else {
         // Fallback: reply to the zap receipt; no extra reaction
         logger.info(`[NOSTR] Zap thanks: replying to receipt ${evt.id.slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-  await this.postReply(evt, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
+        await this.postReply(evt, `${thanksWithMention}`, { extraPTags: [sender], skipReaction: true, expectMentionPk: sender });
       }
 
       // Persist interaction memory (best-effort)

@@ -82,7 +82,7 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
     : 'A zap was received';
 
   const senderContext = senderInfo?.pubkey 
-    ? `The zap came from a user (their nostr pubkey starts with ${senderInfo.pubkey.slice(0, 8)}). The technical mention will be automatically added to your message so dont mention it.`
+    ? `The zap came from a known user (their nostr pubkey starts with ${senderInfo.pubkey.slice(0, 8)}). The technical mention and users name will be automatically added to the end of your message as "{{yourmessage}} {{@senderMention}}" so redact with that format in mind.`
     : 'The zap came from an anonymous user.';
 
   const examples = Array.isArray(ch.postExamples)

@@ -162,6 +162,8 @@ class NostrService {
   this._pixelLastPostAt = 0; // timestamp of last successful pixel post
   this._pixelPostMinIntervalMs = Number(process.env.LNPIXELS_POST_MIN_INTERVAL_MS || 3600000); // default 1 hour
   this._pixelInFlight = new Set(); // keys currently being processed to prevent concurrent dupes
+  // Track last received pixel event to suppress nearby scheduled posts
+  this._pixelLastEventAt = 0;
 
     // Bridge: allow external modules to request a post
     try {
@@ -178,6 +180,8 @@ class NostrService {
   emitter.on('pixel.bought', async (payload) => {
           try {
             const activity = payload?.activity || payload;
+            // Record last event time ASAP to suppress scheduled posts racing ahead
+            this._pixelLastEventAt = Date.now();
             // Build a stable key for dedupe: prefer payment_hash, else id, else coords+created_at
             const key = activity?.payment_hash || activity?.event_id || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
             // In-flight dedupe within this process
@@ -835,14 +839,28 @@ class NostrService {
     // Avoid posting a generic scheduled note immediately after a pixel post
     if (!content) {
       const now = Date.now();
+      // Hard suppression if a pixel post occurred recently
       if (now - (this._pixelLastPostAt || 0) < (this._pixelPostMinIntervalMs || 0)) {
         logger.info('[NOSTR] Skipping scheduled post (recent pixel post within interval)');
+        return false;
+      }
+      // Also suppress if any pixel event was just received (race with generator)
+      const suppressWindowMs = Number(process.env.LNPIXELS_SUPPRESS_WINDOW_MS || 15000);
+      if (this._pixelLastEventAt && (now - this._pixelLastEventAt) < suppressWindowMs) {
+        logger.info('[NOSTR] Skipping scheduled post (nearby pixel event)');
         return false;
       }
     }
     let text = content?.trim?.();
     if (!text) { text = await this.generatePostTextLLM(); if (!text) text = this.pickPostText(); }
     text = text || 'hello, nostr';
+    // Extra safety: if this is a scheduled post (no content provided), strip accidental pixel-like patterns
+    if (!content) {
+      try {
+        // Remove coordinates like (23,17) and hex colors like #ff5500 to avoid "fake pixel" notes
+        text = text.replace(/\(\s*-?\d+\s*,\s*-?\d+\s*\)/g, '').replace(/#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g, '').replace(/\s+/g, ' ').trim();
+      } catch {}
+    }
     const evtTemplate = buildTextNote(text);
     try {
       const signed = finalizeEvent(evtTemplate, this.sk);

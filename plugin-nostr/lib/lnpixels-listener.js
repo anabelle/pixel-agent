@@ -213,7 +213,20 @@ function startLNPixelsListener(runtime) {
   function validateActivity(a) {
     if (!a || typeof a !== 'object') return false;
     // Skip non-pixel activities (like payment confirmations)
-    if (a.type === 'payment' || (!a.x && !a.y && !a.color)) return false;
+    if (a.type === 'payment' && !a.metadata?.pixelUpdates) return false;
+    // For bulk purchases with metadata.pixelUpdates, allow them through but mark as bulk
+    if (a.metadata?.pixelUpdates && Array.isArray(a.metadata.pixelUpdates) && a.metadata.pixelUpdates.length > 0) {
+      // Transform to bulk purchase format
+      a.type = 'bulk_purchase';
+      a.summary = `${a.metadata.pixelUpdates.length} pixels`;
+      // Don't use individual pixel coordinates for bulk purchases
+      delete a.x;
+      delete a.y;
+      delete a.color;
+      return true;
+    }
+    // Regular single pixel validation
+    if (!a.x && !a.y && !a.color) return false;
     if (a.x !== undefined && (typeof a.x !== 'number' || a.x < -1000 || a.x > 1000)) return false;
     if (a.y !== undefined && (typeof a.y !== 'number' || a.y < -1000 || a.y > 1000)) return false;
     if (a.sats !== undefined && (typeof a.sats !== 'number' || a.sats < 0 || a.sats > 1000000)) return false;

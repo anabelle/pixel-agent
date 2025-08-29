@@ -156,6 +156,10 @@ class NostrService {
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
 
+  // Dedupe cache for pixel.bought events (cross-listener safety)
+  this._pixelSeen = new Map(); // key -> timestamp
+  this._pixelSeenTTL = 5 * 60 * 1000; // 5 minutes
+
     // Bridge: allow external modules to request a post
     try {
       const { emitter } = require('./bridge');
@@ -171,9 +175,29 @@ class NostrService {
         emitter.on('pixel.bought', async (payload) => {
           try {
             const activity = payload?.activity || payload;
+            // Build a stable key for dedupe: prefer payment_hash, else id, else coords+created_at
+            const key = activity?.payment_hash || activity?.event_id || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
+            // Cleanup expired entries
+            const nowTs = Date.now();
+            if (this._pixelSeen.size && (this._pixelSeen.size > 1000 || Math.random() < 0.1)) {
+              const cutoff = nowTs - this._pixelSeenTTL;
+              for (const [k, t] of this._pixelSeen) { if (t < cutoff) this._pixelSeen.delete(k); }
+            }
+            if (key) {
+              if (this._pixelSeen.has(key)) { return; }
+              this._pixelSeen.set(key, nowTs);
+            }
             const text = await this.generatePixelBoughtTextLLM(activity);
             if (!text) return;
-            await this.postOnce(text);
+            const ok = await this.postOnce(text);
+            // Create LNPixels memory record on success
+            if (ok) {
+              try {
+                const { createLNPixelsMemory } = require('./lnpixels-listener');
+                const traceId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
+                await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console);
+              } catch {}
+            }
           } catch {}
         });
       }
@@ -706,7 +730,7 @@ class NostrService {
     const prompt = this._buildPixelBoughtPrompt(activity);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
-    const text = await generateWithModelOrFallback(
+    let text = await generateWithModelOrFallback(
       this.runtime,
       type,
       prompt,
@@ -721,6 +745,20 @@ class NostrService {
         return `fresh pixel on the canvas at (${x},${y}) — ${sats} sats. place yours: https://lnpixels.qzz.io`;
       }
     );
+    // Enrich text if missing coords/color (keep within whitelist)
+    try {
+      const hasCoords = /\(\s*[-]?\d+\s*,\s*[-]?\d+\s*\)/.test(text || '');
+      const hasColor = /#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/.test(text || '');
+      const parts = [text || ''];
+      const xOk = typeof activity?.x === 'number' && Math.abs(activity.x) <= 10000;
+      const yOk = typeof activity?.y === 'number' && Math.abs(activity.y) <= 10000;
+      const colorOk = typeof activity?.color === 'string' && /^#?[0-9a-fA-F]{6}$/i.test(activity.color.replace('#',''));
+      if (!hasCoords && xOk && yOk) parts.push(`(${activity.x},${activity.y})`);
+      if (!hasColor && colorOk) parts.push(`#${activity.color.replace('#','')}`);
+      text = parts.join(' ').replace(/\s+/g, ' ').trim();
+      // sanitize again in case of additions
+      text = this._sanitizeWhitelist(text);
+    } catch {}
     return text || '';
   }
 

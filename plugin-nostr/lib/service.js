@@ -161,6 +161,7 @@ class NostrService {
   this._pixelSeenTTL = 5 * 60 * 1000; // 5 minutes
   this._pixelLastPostAt = 0; // timestamp of last successful pixel post
   this._pixelPostMinIntervalMs = Number(process.env.LNPIXELS_POST_MIN_INTERVAL_MS || 3600000); // default 1 hour
+  this._pixelInFlight = new Set(); // keys currently being processed to prevent concurrent dupes
 
     // Bridge: allow external modules to request a post
     try {
@@ -179,6 +180,12 @@ class NostrService {
             const activity = payload?.activity || payload;
             // Build a stable key for dedupe: prefer payment_hash, else id, else coords+created_at
             const key = activity?.payment_hash || activity?.event_id || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
+            // In-flight dedupe within this process
+            if (key) {
+              if (this._pixelInFlight.has(key)) return;
+              this._pixelInFlight.add(key);
+            }
+            const cleanupInFlight = () => { try { if (key) this._pixelInFlight.delete(key); } catch {} };
             // Cleanup expired entries
             const nowTs = Date.now();
             if (this._pixelSeen.size && (this._pixelSeen.size > 1000 || Math.random() < 0.1)) {
@@ -191,7 +198,7 @@ class NostrService {
             }
 
       // Cross-process persistent dedupe using a lock memory (create-only)
-            try {
+      try {
               if (key) {
                 const { createMemorySafe, ensureLNPixelsContext } = require('./context');
                 // Ensure LNPixels rooms/world exist before writing lock memory
@@ -200,9 +207,11 @@ class NostrService {
                 const entityId = ctx.entityId || createUniqueUuid(this.runtime, 'lnpixels:system');
                 const roomId = ctx.locksRoomId || createUniqueUuid(this.runtime, 'lnpixels:locks');
                 // Single-attempt; treat duplicate constraint as success inside createMemorySafe
-                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'message', 1, this.runtime?.logger || console);
+        const lockRes = await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 1, this.runtime?.logger || console);
+        // If lock already exists (duplicate), skip further processing
+        if (lockRes === true) { cleanupInFlight(); return; }
               }
-            } catch {}
+      } catch { cleanupInFlight(); return; }
             // Throttle: only one pixel post per configured interval
             const now = Date.now();
             const interval = this._pixelPostMinIntervalMs;
@@ -216,7 +225,7 @@ class NostrService {
             }
 
       const text = await this.generatePixelBoughtTextLLM(activity);
-            if (!text) return;
+            if (!text) { cleanupInFlight(); return; }
             const ok = await this.postOnce(text);
             // Create LNPixels memory record on success
             if (ok) {
@@ -227,6 +236,7 @@ class NostrService {
                 await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console, { retries: 1 });
               } catch {}
             }
+            cleanupInFlight();
           } catch {}
         });
       }

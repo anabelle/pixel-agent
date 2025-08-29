@@ -187,6 +187,19 @@ class NostrService {
               if (this._pixelSeen.has(key)) { return; }
               this._pixelSeen.set(key, nowTs);
             }
+
+            // Cross-process persistent dedupe using a lock memory
+            try {
+              if (key && typeof this.runtime?.getMemoryById === 'function') {
+                const lockId = `lnpixels:lock:${key}`;
+                const existing = await this.runtime.getMemoryById(lockId).catch(() => null);
+                if (existing) { return; }
+                const { createMemorySafe } = require('./context');
+                const entityId = createUniqueUuid(this.runtime, 'lnpixels');
+                const roomId = createUniqueUuid(this.runtime, 'lnpixels:locks');
+                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 3, this.runtime?.logger || console);
+              }
+            } catch {}
             const text = await this.generatePixelBoughtTextLLM(activity);
             if (!text) return;
             const ok = await this.postOnce(text);

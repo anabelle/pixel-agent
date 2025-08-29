@@ -68,6 +68,40 @@ async function ensureDeps() {
 function parseSk(input) { return parseSkHelper(input, nip19); }
 function parsePk(input) { return parsePkHelper(input, nip19); }
 
+class DiscoveryMetrics {
+  constructor() {
+    this.roundsWithoutQuality = 0;
+    this.averageQualityScore = 0.5;
+    this.totalRounds = 0;
+    this.successfulRounds = 0;
+  }
+
+  recordRound(qualityInteractions, totalInteractions, avgScore) {
+    this.totalRounds++;
+    if (qualityInteractions > 0) {
+      this.successfulRounds++;
+      this.roundsWithoutQuality = 0;
+    } else {
+      this.roundsWithoutQuality++;
+    }
+
+    if (avgScore > 0) {
+      this.averageQualityScore = (this.averageQualityScore + avgScore) / 2;
+    }
+  }
+
+  shouldLowerThresholds() {
+    return this.roundsWithoutQuality > 2;
+  }
+
+  getAdaptiveThreshold(baseThreshold) {
+    if (this.shouldLowerThresholds()) {
+      return Math.max(0.3, baseThreshold - 0.2);
+    }
+    return baseThreshold;
+  }
+}
+
 class NostrService {
   static serviceType = 'nostr';
   capabilityDescription = 'Nostr connectivity: post notes and subscribe to mentions';
@@ -94,6 +128,12 @@ class NostrService {
     this.discoveryMaxSec = 1800;
     this.discoveryMaxReplies = 5;
     this.discoveryMaxFollows = 5;
+    this.discoveryMetrics = new DiscoveryMetrics();
+    this.discoveryMinQualityInteractions = 1;
+    this.discoveryMaxSearchRounds = 3;
+    this.discoveryStartingThreshold = 0.6;
+    this.discoveryThresholdDecrement = 0.05;
+    this.discoveryQualityStrictness = 'normal';
   }
 
   static async start(runtime) {
@@ -119,6 +159,11 @@ class NostrService {
     const discoveryMax = normalizeSeconds(runtime.getSetting('NOSTR_DISCOVERY_INTERVAL_MAX') ?? '1800', 'NOSTR_DISCOVERY_INTERVAL_MAX');
     const discoveryMaxReplies = Number(runtime.getSetting('NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN') ?? '5');
     const discoveryMaxFollows = Number(runtime.getSetting('NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN') ?? '5');
+    const discoveryMinQualityInteractions = Number(runtime.getSetting('NOSTR_DISCOVERY_MIN_QUALITY_INTERACTIONS') ?? '1');
+    const discoveryMaxSearchRounds = Number(runtime.getSetting('NOSTR_DISCOVERY_MAX_SEARCH_ROUNDS') ?? '3');
+    const discoveryStartingThreshold = Number(runtime.getSetting('NOSTR_DISCOVERY_STARTING_THRESHOLD') ?? '0.6');
+    const discoveryThresholdDecrement = Number(runtime.getSetting('NOSTR_DISCOVERY_THRESHOLD_DECREMENT') ?? '0.05');
+    const discoveryQualityStrictness = runtime.getSetting('NOSTR_DISCOVERY_QUALITY_STRICTNESS') ?? 'normal';
 
     svc.relays = relays;
     svc.sk = sk;
@@ -135,8 +180,13 @@ class NostrService {
     svc.discoveryMaxSec = discoveryMax;
     svc.discoveryMaxReplies = discoveryMaxReplies;
     svc.discoveryMaxFollows = discoveryMaxFollows;
+    svc.discoveryMinQualityInteractions = discoveryMinQualityInteractions;
+    svc.discoveryMaxSearchRounds = discoveryMaxSearchRounds;
+    svc.discoveryStartingThreshold = discoveryStartingThreshold;
+    svc.discoveryThresholdDecrement = discoveryThresholdDecrement;
+    svc.discoveryQualityStrictness = discoveryQualityStrictness;
 
-    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows}`);
+    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
@@ -203,15 +253,42 @@ class NostrService {
 
   _pickDiscoveryTopics() { return pickDiscoveryTopics(); }
 
-  async _listEventsByTopic(topic) {
+  _expandTopicSearch() {
+    // If initial topics didn't yield results, try broader/related topics
+    const fallbackTopics = [
+      'nostr', 'bitcoin', 'art', 'technology', 'community',
+      'collaboration', 'creative', 'open source', 'lightning',
+      'value4value', 'decentralized', 'freedom'
+    ];
+
+    // Return 2-3 random fallback topics
+    const shuffled = [...fallbackTopics].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, Math.floor(Math.random() * 2) + 2);
+  }
+
+  _expandSearchParameters(round) {
+    const expansions = {
+      1: { timeRange: 8 * 3600, limit: 50 },  // Round 1: broader time range
+      2: { timeRange: 12 * 3600, limit: 100 }, // Round 2: even broader
+      3: { includeGeneralTopics: true }       // Round 3: include general topics
+    };
+
+    return expansions[round] || {};
+  }
+
+  async _listEventsByTopic(topic, searchParams = {}) {
     if (!this.pool) return [];
     const { listEventsByTopic } = require('./discoveryList');
     try {
+      const now = Math.floor(Date.now() / 1000);
+      const strictness = searchParams.strictness || this.discoveryQualityStrictness;
+
       const relevant = await listEventsByTopic(this.pool, this.relays, topic, {
         listFn: async (pool, relays, filters) => this._list.call(this, relays, filters),
         isSemanticMatch: (c, t) => this._isSemanticMatch(c, t),
-        isQualityContent: (e, t) => this._isQualityContent(e, t),
-        now: Math.floor(Date.now() / 1000),
+        isQualityContent: (e, t) => this._isQualityContent(e, t, strictness),
+        now: now,
+        ...searchParams
       });
       logger.info(`[NOSTR] Discovery "${topic}": relevant ${relevant.length}`);
       return relevant;
@@ -227,9 +304,86 @@ class NostrService {
   return isSemanticMatch(content, topic);
   }
 
-  _isQualityContent(event, topic) { return _isQualityContent(event, topic); }
+  _isQualityContent(event, topic, strictness = null) {
+    if (!event || !event.content) return false;
+    const content = event.content;
+    const contentLength = content.length;
 
-  async _filterByAuthorQuality(events) {
+    // Use instance strictness if not specified
+    const qualityStrictness = strictness || this.discoveryQualityStrictness;
+
+    // Base requirements (always enforced)
+    if (contentLength < 5) return false; // Relaxed from 10
+    if (contentLength > 2000) return false;
+
+    // Bot pattern checks (always enforced)
+    const botPatterns = [
+      /^(gm|good morning|hello|hi)\s*$/i,
+      /follow me|follow back|mutual follow/i,
+      /check out my|visit my|buy my/i,
+      /click here|link in bio/i,
+      /\$\d+.*(?:airdrop|giveaway|free)/i,
+      /(?:join|buy|sell).*(?:telegram|discord)/i,
+      /(?:pump|moon|lambo|hodl)\s*$/i,
+      /^\d+\s*(?:sats|btc|bitcoin)\s*$/i,
+      /(?:repost|rt|share)\s+if/i,
+      /\b(?:dm|pm)\s+me\b/i,
+      /(?:free|earn).*(?:bitcoin|crypto|money)/i,
+    ];
+    if (botPatterns.some((pattern) => pattern.test(content))) return false;
+
+    // Adjust requirements based on strictness
+    const minWordCount = qualityStrictness === 'strict' ? 3 : 2;
+    const minWordVariety = qualityStrictness === 'strict' ? 0.5 : 0.3;
+    const requiredQualityScore = qualityStrictness === 'strict' ? 2 : 1;
+
+    const wordCount = content.split(/\s+/).length;
+    if (wordCount < minWordCount) return false;
+
+    const uniqueWords = new Set(content.toLowerCase().split(/\s+/)).size;
+    const wordVariety = uniqueWords / wordCount;
+    if (wordVariety < minWordVariety && wordCount > 5) return false;
+
+    const qualityIndicators = [
+      /\?/,
+      /[.!?]{2,}/,
+      /(?:think|feel|believe|wonder|curious)/i,
+      /(?:create|build|make|design|art|work)/i,
+      /(?:experience|learn|try|explore)/i,
+      /(?:community|together|collaborate|share)/i,
+      /(?:nostr|bitcoin|lightning|zap|sat)/i,
+    ];
+
+    let qualityScore = qualityIndicators.reduce((score, indicator) => score + (indicator.test(content) ? 1 : 0), 0);
+
+    const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(topic.toLowerCase());
+    const isTechTopic = /dev|code|programming|node|typescript|docker/.test(topic.toLowerCase());
+
+    if (isArtTopic) {
+      const artTerms = /(?:color|paint|draw|sketch|canvas|brush|pixel|create|art|design|visual|aesthetic)/i;
+      if (artTerms.test(content)) qualityScore += 1;
+    }
+
+    if (isTechTopic) {
+      const techTerms = /(?:code|program|build|develop|deploy|server|node|docker|git|open source)/i;
+      if (techTerms.test(content)) qualityScore += 1;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const age = now - (event.created_at || 0);
+    const ageHours = age / 3600;
+
+    // Relax age requirements for non-strict mode
+    const minAgeHours = qualityStrictness === 'strict' ? 0.5 : 0.25;
+    const maxAgeHours = qualityStrictness === 'strict' ? 12 : 24;
+
+    if (ageHours < minAgeHours) return false;
+    if (ageHours > maxAgeHours) qualityScore -= 1;
+
+    return qualityScore >= requiredQualityScore;
+  }
+
+  async _filterByAuthorQuality(events, strictness = null) {
     if (!events.length) return [];
     const authorEvents = new Map();
     events.forEach(event => { if (!event.pubkey) return; if (!authorEvents.has(event.pubkey)) authorEvents.set(event.pubkey, []); authorEvents.get(event.pubkey).push(event); });
@@ -285,29 +439,113 @@ class NostrService {
   async discoverOnce() {
     if (!this.pool || !this.sk || !this.relays.length) return false;
     const canReply = !!this.replyEnabled;
-    const topics = this._pickDiscoveryTopics();
-    if (!topics.length) return false;
-    logger.info(`[NOSTR] Discovery run: topics=${topics.join(', ')}`);
-    const buckets = await Promise.all(topics.map((t) => this._listEventsByTopic(t)));
-    const all = buckets.flat();
-    const qualityEvents = await this._filterByAuthorQuality(all);
-    const scored = qualityEvents.map((e) => ({ evt: e, score: this._scoreEventForEngagement(e) })).filter(({ score }) => score > 0.2).sort((a, b) => b.score - a.score);
-    logger.info(`[NOSTR] Discovery: ${all.length} total -> ${qualityEvents.length} quality -> ${scored.length} scored events`);
-    let replies = 0; const usedAuthors = new Set(); const usedTopics = new Set();
-    for (const { evt, score } of scored) {
-      if (replies >= this.discoveryMaxReplies) break;
+
+    let totalReplies = 0;
+    let qualityInteractions = 0;
+    let allScoredEvents = [];
+    const usedAuthors = new Set();
+    const usedTopics = new Set();
+
+    logger.info(`[NOSTR] Discovery run: maxRounds=${this.discoveryMaxSearchRounds}, minQuality=${this.discoveryMinQualityInteractions}`);
+
+    // Multi-round search until we achieve quality interactions
+    for (let round = 0; round < this.discoveryMaxSearchRounds && qualityInteractions < this.discoveryMinQualityInteractions; round++) {
+      logger.info(`[NOSTR] Discovery round ${round + 1}/${this.discoveryMaxSearchRounds}`);
+
+      // Choose topics based on round
+      const topics = round === 0 ? this._pickDiscoveryTopics() : this._expandTopicSearch();
+      if (!topics.length) continue;
+
+      logger.info(`[NOSTR] Round ${round + 1} topics: ${topics.join(', ')}`);
+
+      // Get search parameters for this round
+      const searchParams = this._expandSearchParameters(round);
+
+      // Search for events with expanded parameters
+      const buckets = await Promise.all(topics.map((t) => this._listEventsByTopic(t, searchParams)));
+      const all = buckets.flat();
+
+      // Adjust quality strictness based on round and metrics
+      const strictness = round > 0 ? 'relaxed' : this.discoveryQualityStrictness;
+      const qualityEvents = await this._filterByAuthorQuality(all, strictness);
+
+      const scored = qualityEvents
+        .map((e) => ({ evt: e, score: this._scoreEventForEngagement(e) }))
+        .filter(({ score }) => score > 0.1) // Lower threshold for initial filtering
+        .sort((a, b) => b.score - a.score);
+
+      allScoredEvents = [...allScoredEvents, ...scored];
+
+      logger.info(`[NOSTR] Round ${round + 1}: ${all.length} total -> ${qualityEvents.length} quality -> ${scored.length} scored events`);
+
+      // Process events for replies in this round
+      const roundReplies = await this._processDiscoveryReplies(
+        scored,
+        usedAuthors,
+        usedTopics,
+        canReply,
+        totalReplies,
+        round
+      );
+
+      totalReplies += roundReplies.replies;
+      qualityInteractions += roundReplies.qualityInteractions;
+
+      // Record metrics for this round
+      const avgScore = scored.length > 0 ? scored.reduce((sum, s) => sum + s.score, 0) / scored.length : 0;
+      this.discoveryMetrics.recordRound(roundReplies.qualityInteractions, roundReplies.replies, avgScore);
+    }
+
+    // Sort all collected events by score for following decisions
+    allScoredEvents.sort((a, b) => b.score - a.score);
+
+    // Attempt to follow new authors based on all collected quality events
+    try {
+      const current = await this._loadCurrentContacts();
+      const followCandidates = this._selectFollowCandidates(allScoredEvents, current);
+      if (followCandidates.length > 0) {
+        const toAdd = followCandidates.slice(0, this.discoveryMaxFollows);
+        const newSet = new Set([...current, ...toAdd]);
+        await this._publishContacts(newSet);
+        logger.info(`[NOSTR] Discovery: following ${toAdd.length} new accounts`);
+      }
+    } catch (err) { logger.debug('[NOSTR] Discovery follow error:', err?.message || err); }
+
+    const success = qualityInteractions >= this.discoveryMinQualityInteractions;
+    logger.info(`[NOSTR] Discovery run complete: rounds=${this.discoveryMaxSearchRounds}, replies=${totalReplies}, quality=${qualityInteractions}, success=${success}`);
+    return success;
+  }
+
+  async _processDiscoveryReplies(scoredEvents, usedAuthors, usedTopics, canReply, currentTotalReplies, round) {
+    let replies = 0;
+    let qualityInteractions = 0;
+
+    for (const { evt, score } of scoredEvents) {
+      if (currentTotalReplies + replies >= this.discoveryMaxReplies) break;
       if (!evt || !evt.id || !evt.pubkey) continue;
       if (this.handledEventIds.has(evt.id)) continue;
       if (usedAuthors.has(evt.pubkey)) continue;
       if (evt.pubkey === this.pkHex) continue;
       if (!canReply) continue;
-      const last = this.lastReplyByUser.get(evt.pubkey) || 0; const now = Date.now(); const cooldownMs = this.replyThrottleSec * 1000;
-      if (now - last < cooldownMs) { logger.debug(`[NOSTR] Discovery skipping ${evt.pubkey.slice(0, 8)} due to cooldown (${Math.round((cooldownMs - (now - last)) / 1000)}s left)`); continue; }
+
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      const cooldownMs = this.replyThrottleSec * 1000;
+      if (now - last < cooldownMs) {
+        logger.debug(`[NOSTR] Discovery skipping ${evt.pubkey.slice(0, 8)} due to cooldown (${Math.round((cooldownMs - (now - last)) / 1000)}s left)`);
+        continue;
+      }
+
       const eventTopics = this._extractTopicsFromEvent(evt);
       const hasUsedTopic = eventTopics.some(topic => usedTopics.has(topic));
       if (hasUsedTopic && usedTopics.size > 0 && Math.random() < 0.7) { continue; }
-      const qualityThreshold = Math.max(0.3, 0.8 - (replies * 0.1));
+
+      // Adaptive quality threshold based on metrics and round
+      const baseThreshold = this.discoveryMetrics.getAdaptiveThreshold(this.discoveryStartingThreshold);
+      const qualityThreshold = Math.max(0.3, baseThreshold - (replies * this.discoveryThresholdDecrement));
+
       if (score < qualityThreshold) continue;
+
       try {
         const convId = this._getConversationIdFromEvent(evt);
         const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
@@ -319,22 +557,13 @@ class NostrService {
           this.lastReplyByUser.set(evt.pubkey, Date.now());
           eventTopics.forEach(topic => usedTopics.add(topic));
           replies++;
-          logger.info(`[NOSTR] Discovery reply ${replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)})`);
+          qualityInteractions++; // Count all successful replies as quality interactions for now
+          logger.info(`[NOSTR] Discovery reply ${currentTotalReplies + replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1})`);
         }
       } catch (err) { logger.debug('[NOSTR] Discovery reply error:', err?.message || err); }
     }
-    try {
-      const current = await this._loadCurrentContacts();
-      const followCandidates = this._selectFollowCandidates(scored, current);
-      if (followCandidates.length > 0) {
-        const toAdd = followCandidates.slice(0, this.discoveryMaxFollows);
-        const newSet = new Set([...current, ...toAdd]);
-        await this._publishContacts(newSet);
-        logger.info(`[NOSTR] Discovery: following ${toAdd.length} new accounts`);
-      }
-    } catch (err) { logger.debug('[NOSTR] Discovery follow error:', err?.message || err); }
-    logger.info(`[NOSTR] Discovery run complete: replies=${replies}, topics=${topics.join(',')}`);
-    return true;
+
+    return { replies, qualityInteractions };
   }
 
   pickPostText() {

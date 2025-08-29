@@ -34,19 +34,40 @@ async function ensureDeps() {
     ModelType = core.ModelType || core.ModelClass || { TEXT_SMALL: 'TEXT_SMALL' };
   }
   const WebSocket = (await import('ws')).default || require('ws');
+
+  // Wrap WebSocket constructor to set maxListeners and prevent MaxListenersExceededWarning
+  const WebSocketWrapper = class extends WebSocket {
+    constructor(...args) {
+      super(...args);
+      // Set max listeners to prevent MaxListenersExceededWarning for pong events
+      const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 64);
+      if (Number.isFinite(max) && max > 0 && typeof this.setMaxListeners === 'function') {
+        this.setMaxListeners(max);
+      }
+    }
+  };
+
+  // Copy static properties from original WebSocket
+  Object.setPrototypeOf(WebSocketWrapper, WebSocket);
+  for (const key of Object.getOwnPropertyNames(WebSocket)) {
+    if (!(key in WebSocketWrapper)) {
+      WebSocketWrapper[key] = WebSocket[key];
+    }
+  }
+
   try {
     const poolMod = await import('@nostr/tools/pool');
     if (typeof poolMod.useWebSocketImplementation === 'function') {
-      poolMod.useWebSocketImplementation(WebSocket);
+      poolMod.useWebSocketImplementation(WebSocketWrapper);
     } else if (wsInjector) {
-      wsInjector(WebSocket);
+      wsInjector(WebSocketWrapper);
     }
   } catch {
     if (wsInjector) {
-      try { wsInjector(WebSocket); } catch {}
+      try { wsInjector(WebSocketWrapper); } catch {}
     }
   }
-  if (!globalThis.WebSocket) globalThis.WebSocket = WebSocket;
+  if (!globalThis.WebSocket) globalThis.WebSocket = WebSocketWrapper;
   if (!nip10Parse) {
     try {
       const nip10 = await import('@nostr/tools/nip10');

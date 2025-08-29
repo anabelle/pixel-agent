@@ -128,12 +128,24 @@ function buildPixelBoughtPrompt(character, activity) {
   const letter = typeof activity?.letter === 'string' && activity.letter ? `letter "${activity.letter}"` : 'a pixel';
   const color = activity?.color ? ` with color ${activity.color}` : '';
   const sats = typeof activity?.sats === 'number' && activity.sats >= 0 ? `${activity.sats} sats` : 'some sats';
-
+  
+  // Check if this is a bulk purchase
+  const isBulk = activity?.type === 'bulk_purchase';
+  const bulkSummary = activity?.summary || '';
+  
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 8
       ? ch.postExamples
       : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 8)
     : [];
+
+  const eventDescription = isBulk 
+    ? `BULK PURCHASE: ${bulkSummary} for ${sats}! This is a major canvas expansion - show excitement for the scale and ambition.`
+    : `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`;
+
+  const bulkGuidance = isBulk 
+    ? 'Bulk purchases are rare and exciting! Express enthusiasm about the scale, the ambition, the canvas transformation. Use words like "explosion," "takeover," "canvas revolution," "pixel storm," etc.'
+    : '';
 
   return [
     `You are ${name}. Generate a single short, on-character Nostr post reacting to a confirmed pixel purchase on a Lightning-powered canvas. Never start your messages with "Ah,". Be witty, fun, and invite others to join.`,
@@ -141,9 +153,10 @@ function buildPixelBoughtPrompt(character, activity) {
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style only, do not copy verbatim):\n- ${examples.join('\n- ')}` : '',
     whitelist,
-  `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`,
-  'Must include coordinates and color if available (format like: (x,y) #ffeeaa) exactly once in the text AND/OR do a comment about it, color, position, etc)',
-  'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
+    eventDescription,
+    bulkGuidance,
+    'Must include coordinates and color if available (format like: (x,y) #ffeeaa) exactly once in the text AND/OR do a comment about it, color, position, etc)',
+    'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
   ].filter(Boolean).join('\n\n');
 }
 

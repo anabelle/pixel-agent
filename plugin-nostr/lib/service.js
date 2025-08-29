@@ -781,11 +781,16 @@ class NostrService {
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => {
-        // Simple fallback if LLM fails
+        // Enhanced fallback with bulk purchase support
         const x = typeof activity?.x === 'number' ? activity.x : '?';
         const y = typeof activity?.y === 'number' ? activity.y : '?';
         const sats = typeof activity?.sats === 'number' ? activity.sats : 'some';
         const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
+        const isBulk = activity?.type === 'bulk_purchase';
+        
+        if (isBulk && activity?.summary) {
+          return `${activity.summary} explosion at (${x},${y})${color}! canvas revolution for ${sats} sats: https://lnpixels.qzz.io`;
+        }
         return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://lnpixels.qzz.io`;
       }
     );

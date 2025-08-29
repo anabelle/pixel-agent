@@ -116,6 +116,36 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
   ].filter(Boolean).join('\n\n');
 }
 
+function buildPixelBoughtPrompt(character, activity) {
+  const ch = character || {};
+  const name = ch.name || 'Agent';
+  const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
+  const whitelist = 'Only allowed sites: https://lnpixels.qzz.io , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+
+  const x = typeof activity?.x === 'number' ? activity.x : undefined;
+  const y = typeof activity?.y === 'number' ? activity.y : undefined;
+  const coords = x !== undefined && y !== undefined ? `(${x},${y})` : '';
+  const letter = typeof activity?.letter === 'string' && activity.letter ? `letter "${activity.letter}"` : 'a pixel';
+  const color = activity?.color ? ` with color ${activity.color}` : '';
+  const sats = typeof activity?.sats === 'number' && activity.sats >= 0 ? `${activity.sats} sats` : 'some sats';
+
+  const examples = Array.isArray(ch.postExamples)
+    ? ch.postExamples.length <= 8
+      ? ch.postExamples
+      : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 8)
+    : [];
+
+  return [
+    `You are ${name}. Generate a single short, on-character Nostr post reacting to a confirmed pixel purchase on a Lightning-powered canvas. Never start your messages with "Ah,". Be witty, fun, and invite others to join.`,
+    ch.system ? `Persona/system: ${ch.system}` : '',
+    style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+    examples.length ? `Few-shot examples (style only, do not copy verbatim):\n- ${examples.join('\n- ')}` : '',
+    whitelist,
+    `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`,
+    'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
+  ].filter(Boolean).join('\n\n');
+}
+
 function sanitizeWhitelist(text) {
   if (!text) return '';
   let out = String(text);
@@ -129,6 +159,7 @@ module.exports = {
   buildPostPrompt,
   buildReplyPrompt,
   buildZapThanksPrompt,
+  buildPixelBoughtPrompt,
   extractTextFromModelResult,
   sanitizeWhitelist,
 };

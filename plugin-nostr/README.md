@@ -34,16 +34,15 @@ Notes:
 - We store best-effort memories for posts and replies to help future context.
 - If you prefer a different model type, set `OPENROUTER_*` or provider envs as usual; the plugin uses the runtime’s configured handler.
 
-## Realtime LNPixels → LLM → Nostr + Memory
+## Realtime LNPixels → plugin‑nostr → Nostr + Memory
 
 This plugin now includes a realtime listener that reacts to LNPixels purchase confirmations, posts auto‑generated, on‑brand notes to Nostr, and persists all activity to ElizaOS memory for agent reasoning.
 
 How it works:
 - The LNPixels API emits Socket.IO events (`activity.append`) when purchases are confirmed.
-- `lib/lnpixels-listener.js` connects to that WebSocket, builds a short prompt with event details (coords, letter, sats), and calls `runtime.useModel('TEXT_SMALL', …)` to generate a one‑liner.
-- The result is sanitized against a strict whitelist, then sent to the Nostr service via an internal bridge (`lib/bridge.js`) as `external.post`.
-- `lib/service.js` listens for `external.post` and calls `postOnce(text)` to publish.
-- **Memory Integration**: Every generated post is automatically saved to ElizaOS memory with pixel coordinates, sats, colors, and metadata for future agent reasoning.
+- `lib/lnpixels-listener.js` connects to that WebSocket, validates/filters/rate‑limits events, and emits a `pixel.bought` event on the internal bridge (`lib/bridge.js`).
+- `lib/service.js` listens for `pixel.bought`, builds a character‑aware prompt, generates text via the configured model with fallback, sanitizes it, and calls `postOnce(text)` to publish.
+- **Memory Integration**: Posts and triggers are saved to ElizaOS memory with pixel coordinates, sats, colors, and metadata for future agent reasoning.
 
 Configure:
 - Character settings include `LNPIXELS_WS_URL` (defaults to `http://localhost:3000`).
@@ -83,8 +82,8 @@ Example memory structure:
 
 Files:
 - `lib/bridge.js` — EventEmitter bridge for external posts with validation
-- `lib/lnpixels-listener.js` — WebSocket listener + LLM generation + memory integration  
-- `lib/service.js` — NostrService (starts listener and posts on bridge events)
+- `lib/lnpixels-listener.js` — WebSocket listener that delegates to plugin‑nostr via `pixel.bought`
+- `lib/service.js` — NostrService (starts listener and handles bridge events including `external.post` and `pixel.bought`)
 
 Testing:
 - `test-basic.js` — Bridge validation, rate limiting, input validation
@@ -94,3 +93,14 @@ Testing:
 - `test-eliza-integration.js` — ElizaOS memory compatibility and query patterns
 
 Status: ✅ Production ready with comprehensive testing and memory integration
+
+### Pixel purchase delegation usage
+
+If you have an external producer for pixel events, you can trigger a post via:
+
+```js
+const { emitter } = require('./lib/bridge');
+emitter.emit('pixel.bought', { activity: { x: 10, y: 20, sats: 42, letter: 'A', color: '#fff' } });
+```
+
+The service handles text generation and posting. See `test/service.pixelBought.test.js`.

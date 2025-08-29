@@ -213,7 +213,21 @@ function startLNPixelsListener(runtime) {
   function validateActivity(a) {
     if (!a || typeof a !== 'object') return false;
     
-    // Handle bulk purchases first (they have type='payment' but also pixelUpdates)
+    // Debug logging to see what events we're getting
+    const log = console;
+    log.info?.(`[LNPIXELS-LISTENER] Validating activity:`, {
+      type: a.type,
+      hasPixelUpdates: !!a.metadata?.pixelUpdates,
+      pixelUpdatesLength: a.metadata?.pixelUpdates?.length || 0,
+      hasXYColor: !!(a.x !== undefined && a.y !== undefined && a.color),
+      hasSummary: !!a.summary,
+      x: a.x,
+      y: a.y,
+      color: a.color,
+      sats: a.sats
+    });
+    
+    // Handle bulk purchases ONLY if they have metadata.pixelUpdates (the summary event)
     if (a.metadata?.pixelUpdates && Array.isArray(a.metadata.pixelUpdates) && a.metadata.pixelUpdates.length > 0) {
       // Transform to bulk purchase format
       a.type = 'bulk_purchase';
@@ -222,18 +236,33 @@ function startLNPixelsListener(runtime) {
       delete a.x;
       delete a.y;
       delete a.color;
+      log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Bulk purchase summary with ${a.metadata.pixelUpdates.length} pixels`);
       return true;
     }
     
-    // Skip ALL payment activities that are not bulk purchases (these are payment confirmations)
-    if (a.type === 'payment') return false;
+    // Reject ALL bulk_purchase events without metadata.pixelUpdates (individual pixels)
+    if (a.type === 'bulk_purchase') {
+      log.info?.(`[LNPIXELS-LISTENER] REJECTED: Individual bulk_purchase pixel (no metadata)`);
+      return false;
+    }
+    
+    // Skip ALL payment activities 
+    if (a.type === 'payment') {
+      log.info?.(`[LNPIXELS-LISTENER] REJECTED: Payment event`);
+      return false;
+    }
     
     // Regular single pixel validation
-    if (!a.x && !a.y && !a.color) return false;
+    if (!a.x && !a.y && !a.color) {
+      log.info?.(`[LNPIXELS-LISTENER] REJECTED: Missing x, y, or color`);
+      return false;
+    }
     if (a.x !== undefined && (typeof a.x !== 'number' || a.x < -1000 || a.x > 1000)) return false;
     if (a.y !== undefined && (typeof a.y !== 'number' || a.y < -1000 || a.y > 1000)) return false;
     if (a.sats !== undefined && (typeof a.sats !== 'number' || a.sats < 0 || a.sats > 1000000)) return false;
     if (a.letter !== undefined && a.letter !== null && (typeof a.letter !== 'string' || a.letter.length > 10)) return false;
+    
+    log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Single pixel at (${a.x},${a.y}) ${a.color} for ${a.sats} sats`);
     return true;
   }
 

@@ -20,10 +20,10 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
   logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
       await runtime.createMemory(memory, tableName);
   logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
-      return true;
+  return { created: true };
     } catch (err) {
       lastErr = err; const msg = String(err?.message || err || '');
-  if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return true; }
+  if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return { created: false, exists: true }; }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }
   }

@@ -190,11 +190,11 @@ class NostrService {
               this._pixelSeen.set(key, nowTs);
             }
 
-            // Cross-process persistent dedupe using a lock memory (create-only, no pre-read to reduce SELECT noise)
+      // Cross-process persistent dedupe using a lock memory (create-only)
             try {
               if (key) {
                 const { createMemorySafe } = require('./context');
-                const lockId = `lnpixels:lock:${key}`;
+        const lockId = createUniqueUuid(this.runtime, `lnpixels:lock:${key}`);
                 const entityId = createUniqueUuid(this.runtime, 'lnpixels');
                 const roomId = createUniqueUuid(this.runtime, 'lnpixels:locks');
                 // Single-attempt; treat duplicate constraint as success inside createMemorySafe
@@ -208,7 +208,7 @@ class NostrService {
               try {
                 const { createLNPixelsEventMemory } = require('./lnpixels-listener');
                 const traceId = `${now.toString(36)}${Math.random().toString(36).slice(2,6)}`;
-        await createLNPixelsEventMemory(this.runtime, activity, traceId, this.runtime?.logger || console, { retries: 1 });
+                await createLNPixelsEventMemory(this.runtime, activity, traceId, this.runtime?.logger || console, { retries: 1 });
               } catch {}
               return; // skip posting, store only
             }
@@ -222,7 +222,7 @@ class NostrService {
               try {
                 const { createLNPixelsMemory } = require('./lnpixels-listener');
                 const traceId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
-        await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console, { retries: 1 });
+                await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console, { retries: 1 });
               } catch {}
             }
           } catch {}

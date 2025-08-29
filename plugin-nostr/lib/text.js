@@ -155,7 +155,7 @@ function buildPixelBoughtPrompt(character, activity) {
     whitelist,
     eventDescription,
     bulkGuidance,
-    'Must include coordinates and color if available (format like: (x,y) #ffeeaa) exactly once in the text AND/OR do a comment about it, color, position, etc)',
+    'IF NOT BULK Must include coordinates and color if available (format like: (x,y) #ffeeaa) in the text AND/OR do a comment about it, color, position, etc) IF BULK THEN No details are available so do not make them up, celebrate volume/scale/etc instead.',
     'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
   ].filter(Boolean).join('\n\n');
 }

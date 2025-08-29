@@ -21,17 +21,21 @@ async function listEventsByTopic(pool, relays, topic, opts = {}) {
   const isSemanticMatch = opts.isSemanticMatch || ((content, t) => false);
   const isQualityContent = opts.isQualityContent || ((event, t) => true);
 
+  // Use expanded search parameters if provided
+  const timeRange = opts.timeRange || 4 * 3600; // Default 4 hours
+  const limit = opts.limit || 20; // Default limit
+
   const filters = [];
-  filters.push({ kinds: [1], search: topic, limit: 20, since: now - 4 * 3600 });
+  filters.push({ kinds: [1], search: topic, limit: limit, since: now - timeRange });
   const t = String(topic || '').toLowerCase();
   const isBitcoinTopic = /bitcoin|lightning|sats|zap|value4value/.test(t);
   const isNostrTopic = /nostr|relay|nip|damus|primal/.test(t);
   if (/art|pixel|creative|canvas|design|visual/.test(t) || isBitcoinTopic || isNostrTopic) {
     const hashtag = t.startsWith('#') ? t.slice(1) : t.replace(/\s+/g, '');
-    filters.push({ kinds: [1], '#t': [hashtag.toLowerCase()], limit: 15, since: now - 6 * 3600 });
+    filters.push({ kinds: [1], '#t': [hashtag.toLowerCase()], limit: Math.floor(limit * 0.75), since: now - (timeRange * 1.5) });
   }
-  filters.push({ kinds: [1], since: now - 3 * 3600, limit: 100 });
-  filters.push({ kinds: [1], since: now - 8 * 3600, limit: 50 });
+  filters.push({ kinds: [1], since: now - (timeRange * 0.75), limit: limit * 5 });
+  filters.push({ kinds: [1], since: now - (timeRange * 2), limit: Math.floor(limit * 2.5) });
 
   const searchResults = await Promise.all(
     filters.map(filter => listImpl(pool, targetRelays, [filter]).catch(() => []))

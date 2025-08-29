@@ -184,6 +184,7 @@ class NostrService {
             this._pixelLastEventAt = Date.now();
             // Build a stable key for dedupe: match listener priority exactly
             const key = activity?.event_id || activity?.payment_hash || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
+            logger.info(`[NOSTR] pixel.bought handler - key: ${key}, activity.id: ${activity?.id}, payment_hash: ${activity?.payment_hash}, event_id: ${activity?.event_id}`);
             // In-flight dedupe within this process
             if (key) {
               if (this._pixelInFlight.has(key)) return;
@@ -854,11 +855,16 @@ class NostrService {
     let text = content?.trim?.();
     if (!text) { text = await this.generatePostTextLLM(); if (!text) text = this.pickPostText(); }
     text = text || 'hello, nostr';
+    logger.info(`[NOSTR] About to post: "${text}" (scheduled: ${!content})`);
     // Extra safety: if this is a scheduled post (no content provided), strip accidental pixel-like patterns
     if (!content) {
       try {
         // Remove coordinates like (23,17) and hex colors like #ff5500 to avoid "fake pixel" notes
+        const originalText = text;
         text = text.replace(/\(\s*-?\d+\s*,\s*-?\d+\s*\)/g, '').replace(/#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/g, '').replace(/\s+/g, ' ').trim();
+        if (originalText !== text) {
+          logger.info(`[NOSTR] Sanitized scheduled post: "${originalText}" -> "${text}"`);
+        }
       } catch {}
     }
     const evtTemplate = buildTextNote(text);

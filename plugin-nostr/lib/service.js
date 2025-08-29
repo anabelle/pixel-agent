@@ -450,16 +450,26 @@ class NostrService {
 
     // Multi-round search until we achieve quality interactions
     for (let round = 0; round < this.discoveryMaxSearchRounds && qualityInteractions < this.discoveryMinQualityInteractions; round++) {
+      if (round > 0) {
+        logger.info(`[NOSTR] Continuing to round ${round + 1}: ${qualityInteractions}/${this.discoveryMinQualityInteractions} quality interactions achieved`);
+      }
       logger.info(`[NOSTR] Discovery round ${round + 1}/${this.discoveryMaxSearchRounds}`);
 
       // Choose topics based on round
       const topics = round === 0 ? this._pickDiscoveryTopics() : this._expandTopicSearch();
-      if (!topics.length) continue;
+      if (!topics.length) {
+        logger.debug(`[NOSTR] Round ${round + 1}: no topics available, skipping`);
+        continue;
+      }
 
-      logger.info(`[NOSTR] Round ${round + 1} topics: ${topics.join(', ')}`);
+      const topicSource = round === 0 ? 'primary' : 'fallback';
+      logger.info(`[NOSTR] Round ${round + 1} topics (${topicSource}): ${topics.join(', ')}`);
 
       // Get search parameters for this round
       const searchParams = this._expandSearchParameters(round);
+      if (Object.keys(searchParams).length > 0) {
+        logger.debug(`[NOSTR] Round ${round + 1} expanded search params: ${JSON.stringify(searchParams)}`);
+      }
 
       // Search for events with expanded parameters
       const buckets = await Promise.all(topics.map((t) => this._listEventsByTopic(t, searchParams)));
@@ -467,6 +477,9 @@ class NostrService {
 
       // Adjust quality strictness based on round and metrics
       const strictness = round > 0 ? 'relaxed' : this.discoveryQualityStrictness;
+      if (strictness !== this.discoveryQualityStrictness) {
+        logger.debug(`[NOSTR] Round ${round + 1}: using relaxed quality strictness due to round > 0`);
+      }
       const qualityEvents = await this._filterByAuthorQuality(all, strictness);
 
       const scored = qualityEvents
@@ -494,6 +507,20 @@ class NostrService {
       // Record metrics for this round
       const avgScore = scored.length > 0 ? scored.reduce((sum, s) => sum + s.score, 0) / scored.length : 0;
       this.discoveryMetrics.recordRound(roundReplies.qualityInteractions, roundReplies.replies, avgScore);
+
+      logger.debug(`[NOSTR] Round ${round + 1} metrics: quality=${roundReplies.qualityInteractions}, replies=${roundReplies.replies}, avgScore=${avgScore.toFixed(3)}, roundsWithoutQuality=${this.discoveryMetrics.roundsWithoutQuality}`);
+
+      // Log adaptive threshold adjustments
+      if (this.discoveryMetrics.shouldLowerThresholds()) {
+        const adaptiveThreshold = this.discoveryMetrics.getAdaptiveThreshold(this.discoveryStartingThreshold);
+        logger.info(`[NOSTR] Round ${round + 1}: adaptive threshold activated (${this.discoveryStartingThreshold.toFixed(2)} -> ${adaptiveThreshold.toFixed(2)}) due to ${this.discoveryMetrics.roundsWithoutQuality} rounds without quality`);
+      }
+
+      // Check if we've reached our quality target
+      if (qualityInteractions >= this.discoveryMinQualityInteractions) {
+        logger.info(`[NOSTR] Quality target reached (${qualityInteractions}/${this.discoveryMinQualityInteractions}) after round ${round + 1}, stopping early`);
+        break;
+      }
     }
 
     // Sort all collected events by score for following decisions
@@ -512,7 +539,11 @@ class NostrService {
     } catch (err) { logger.debug('[NOSTR] Discovery follow error:', err?.message || err); }
 
     const success = qualityInteractions >= this.discoveryMinQualityInteractions;
-    logger.info(`[NOSTR] Discovery run complete: rounds=${this.discoveryMaxSearchRounds}, replies=${totalReplies}, quality=${qualityInteractions}, success=${success}`);
+    if (!success) {
+      logger.warn(`[NOSTR] Discovery run failed: only ${qualityInteractions}/${this.discoveryMinQualityInteractions} quality interactions after ${this.discoveryMaxSearchRounds} rounds`);
+    } else {
+      logger.info(`[NOSTR] Discovery run complete: rounds=${this.discoveryMaxSearchRounds}, replies=${totalReplies}, quality=${qualityInteractions}, success=${success}`);
+    }
     return success;
   }
 
@@ -544,7 +575,10 @@ class NostrService {
       const baseThreshold = this.discoveryMetrics.getAdaptiveThreshold(this.discoveryStartingThreshold);
       const qualityThreshold = Math.max(0.3, baseThreshold - (replies * this.discoveryThresholdDecrement));
 
-      if (score < qualityThreshold) continue;
+      if (score < qualityThreshold) {
+        logger.debug(`[NOSTR] Reply skipped: score ${score.toFixed(3)} < threshold ${qualityThreshold.toFixed(3)} (base: ${baseThreshold.toFixed(3)}, decrement: ${this.discoveryThresholdDecrement.toFixed(3)})`);
+        continue;
+      }
 
       try {
         const convId = this._getConversationIdFromEvent(evt);

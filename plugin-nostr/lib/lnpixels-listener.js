@@ -11,8 +11,11 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
 
     // Generate consistent IDs using ElizaOS pattern
   const { createUniqueUuid } = require('@elizaos/core');
-  const roomId = createUniqueUuid(runtime, 'lnpixels:canvas');
-  const entityId = createUniqueUuid(runtime, 'lnpixels:system');
+  const { ensureLNPixelsContext, createMemorySafe } = require('./context');
+  // Ensure rooms/world exist
+  const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid, ChannelType: (await import('@elizaos/core')).ChannelType, logger: log });
+  const roomId = ctx.canvasRoomId || createUniqueUuid(runtime, 'lnpixels:canvas');
+  const entityId = ctx.entityId || createUniqueUuid(runtime, 'lnpixels:system');
   const memoryId = createUniqueUuid(runtime, `lnpixels:post:${activity.event_id || activity.created_at || Date.now()}:${traceId}`);
 
     const memory = {
@@ -44,22 +47,28 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
     };
 
     // Prefer context-aware safe creation if available
+    let res = null;
     try {
-      const { createMemorySafe } = require('./context');
       if (typeof createMemorySafe === 'function') {
         const retries = Number(opts.retries ?? 3);
-        await createMemorySafe(runtime, memory, 'messages', retries, log);
+  res = await createMemorySafe(runtime, memory, 'message', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'messages');
+        await runtime.createMemory(memory, 'message');
+        res = { created: true };
       }
     } catch (e) {
       if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'messages');
+        await runtime.createMemory(memory, 'message');
+        res = { created: true };
       } else {
         throw e;
       }
     }
-  log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
+  if (res && (res.created || res.exists)) {
+    log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
+  } else {
+    log?.warn?.('Failed to create LNPixels memory');
+  }
     return true;
 
   } catch (error) {
@@ -77,8 +86,10 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
     }
 
   const { createUniqueUuid } = require('@elizaos/core');
-  const roomId = createUniqueUuid(runtime, 'lnpixels:canvas');
-  const entityId = createUniqueUuid(runtime, 'lnpixels:system');
+  const { ensureLNPixelsContext, createMemorySafe } = require('./context');
+  const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid, ChannelType: (await import('@elizaos/core')).ChannelType, logger: log });
+  const roomId = ctx.canvasRoomId || createUniqueUuid(runtime, 'lnpixels:canvas');
+  const entityId = ctx.entityId || createUniqueUuid(runtime, 'lnpixels:system');
     const key = activity?.payment_hash || activity?.event_id || activity?.id || (activity?.x !== undefined && activity?.y !== undefined && activity?.created_at ? `${activity.x},${activity.y},${activity.created_at}` : Date.now());
   const memoryId = createUniqueUuid(runtime, `lnpixels:event:${key}:${traceId}`);
 
@@ -113,16 +124,15 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
     };
 
     try {
-      const { createMemorySafe } = require('./context');
+      const retries = Number(opts.retries ?? 3);
       if (typeof createMemorySafe === 'function') {
-        const retries = Number(opts.retries ?? 3);
-        await createMemorySafe(runtime, memory, 'messages', retries, log);
+        await createMemorySafe(runtime, memory, 'message', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'messages');
+        await runtime.createMemory(memory, 'message');
       }
     } catch (e) {
       if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'messages');
+        await runtime.createMemory(memory, 'message');
       } else {
         throw e;
       }

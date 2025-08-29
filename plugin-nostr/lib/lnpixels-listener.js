@@ -10,9 +10,10 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
     }
 
     // Generate consistent IDs using ElizaOS pattern
-    const roomId = `lnpixels:canvas`;
-    const entityId = `lnpixels:system`;
-    const memoryId = `lnpixels:post:${activity.event_id || activity.created_at || Date.now()}:${traceId}`;
+  const { createUniqueUuid } = require('@elizaos/core');
+  const roomId = createUniqueUuid(runtime, 'lnpixels:canvas');
+  const entityId = createUniqueUuid(runtime, 'lnpixels:system');
+  const memoryId = createUniqueUuid(runtime, `lnpixels:post:${activity.event_id || activity.created_at || Date.now()}:${traceId}`);
 
     const memory = {
       id: memoryId,
@@ -58,7 +59,7 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
         throw e;
       }
     }
-    log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
+  log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
     return true;
 
   } catch (error) {
@@ -75,10 +76,11 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
       return false;
     }
 
-    const roomId = `lnpixels:canvas`;
-    const entityId = `lnpixels:system`;
+  const { createUniqueUuid } = require('@elizaos/core');
+  const roomId = createUniqueUuid(runtime, 'lnpixels:canvas');
+  const entityId = createUniqueUuid(runtime, 'lnpixels:system');
     const key = activity?.payment_hash || activity?.event_id || activity?.id || (activity?.x !== undefined && activity?.y !== undefined && activity?.created_at ? `${activity.x},${activity.y},${activity.created_at}` : Date.now());
-    const memoryId = `lnpixels:event:${key}:${traceId}`;
+  const memoryId = createUniqueUuid(runtime, `lnpixels:event:${key}:${traceId}`);
 
     const memory = {
       id: memoryId,

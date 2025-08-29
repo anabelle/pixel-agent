@@ -1,5 +1,6 @@
 // Slim index: export plugin with service from extracted core
 const { NostrService } = require('./lib/service');
+const { emitter } = require('./lib/bridge');
 
 const nostrPlugin = {
   name: "@pixel/plugin-nostr",
@@ -10,3 +11,4 @@ const nostrPlugin = {
 module.exports = nostrPlugin;
 module.exports.nostrPlugin = nostrPlugin;
 module.exports.default = nostrPlugin;
+module.exports.nostrBridge = emitter;

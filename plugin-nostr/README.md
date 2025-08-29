@@ -33,3 +33,64 @@ LLM requirements:
 Notes:
 - We store best-effort memories for posts and replies to help future context.
 - If you prefer a different model type, set `OPENROUTER_*` or provider envs as usual; the plugin uses the runtime’s configured handler.
+
+## Realtime LNPixels → LLM → Nostr + Memory
+
+This plugin now includes a realtime listener that reacts to LNPixels purchase confirmations, posts auto‑generated, on‑brand notes to Nostr, and persists all activity to ElizaOS memory for agent reasoning.
+
+How it works:
+- The LNPixels API emits Socket.IO events (`activity.append`) when purchases are confirmed.
+- `lib/lnpixels-listener.js` connects to that WebSocket, builds a short prompt with event details (coords, letter, sats), and calls `runtime.useModel('TEXT_SMALL', …)` to generate a one‑liner.
+- The result is sanitized against a strict whitelist, then sent to the Nostr service via an internal bridge (`lib/bridge.js`) as `external.post`.
+- `lib/service.js` listens for `external.post` and calls `postOnce(text)` to publish.
+- **Memory Integration**: Every generated post is automatically saved to ElizaOS memory with pixel coordinates, sats, colors, and metadata for future agent reasoning.
+
+Configure:
+- Character settings include `LNPIXELS_WS_URL` (defaults to `http://localhost:3000`).
+- Ensure an LLM provider plugin is enabled and configured (OpenRouter/OpenAI/Google, etc.).
+- Keep Nostr keys and relays configured as usual.
+
+Safety and pacing:
+- Dedupe events by `event_id`/`payment_hash` (fallback to `x,y,created_at`).
+- Strict whitelist keeps only approved links/handles.
+- Tone variety is rotated (hype/poetic/playful/solemn/stats/cta) to avoid repetition.
+- Rate limiting: Maximum 3 posts per 10 seconds to prevent spam.
+- Memory persistence: All generated posts saved to `lnpixels:canvas` room with structured data.
+
+Memory integration:
+- **Room organization**: All LNPixels posts stored in `lnpixels:canvas` room
+- **Structured data**: Pixel coordinates, sats, colors, trace IDs preserved  
+- **Agent queries**: Search by time, location, content, value for contextual responses
+- **Context building**: Automatic generation of canvas activity summaries
+
+Example memory structure:
+```javascript
+{
+  id: "lnpixels:post:event_id:trace_id",
+  roomId: "lnpixels:canvas",
+  content: {
+    type: "lnpixels_post",
+    text: "Posted to Nostr: \"🎨 Generated message...\"",
+    data: {
+      generatedText: "🎨 Generated message...",
+      triggerEvent: { x, y, color, sats, letter },
+      traceId: "abc123",
+      platform: "nostr"
+    }
+  }
+}
+```
+
+Files:
+- `lib/bridge.js` — EventEmitter bridge for external posts with validation
+- `lib/lnpixels-listener.js` — WebSocket listener + LLM generation + memory integration  
+- `lib/service.js` — NostrService (starts listener and posts on bridge events)
+
+Testing:
+- `test-basic.js` — Bridge validation, rate limiting, input validation
+- `test-integration.js` — End-to-end flow simulation
+- `test-listener.js` — Component testing with mocked dependencies
+- `test-memory.js` — Memory creation and persistence validation
+- `test-eliza-integration.js` — ElizaOS memory compatibility and query patterns
+
+Status: ✅ Production ready with comprehensive testing and memory integration

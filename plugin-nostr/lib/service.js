@@ -782,33 +782,38 @@ class NostrService {
       (s) => this._sanitizeWhitelist(s),
       () => {
         // Enhanced fallback with bulk purchase support
-        const x = typeof activity?.x === 'number' ? activity.x : '?';
-        const y = typeof activity?.y === 'number' ? activity.y : '?';
         const sats = typeof activity?.sats === 'number' ? activity.sats : 'some';
-        const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
         const isBulk = activity?.type === 'bulk_purchase';
         
         if (isBulk && activity?.summary) {
-          return `${activity.summary} explosion at (${x},${y})${color}! canvas revolution for ${sats} sats: https://lnpixels.qzz.io`;
+          return `${activity.summary} explosion! canvas revolution for ${sats} sats: https://lnpixels.qzz.io`;
         }
+        
+        // Single pixel fallback
+        const x = typeof activity?.x === 'number' ? activity.x : '?';
+        const y = typeof activity?.y === 'number' ? activity.y : '?';
+        const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
         return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://lnpixels.qzz.io`;
       }
     );
-    // Enrich text if missing coords/color (keep within whitelist)
+    // Enrich text if missing coords/color (keep within whitelist) - but NOT for bulk purchases
     try {
-      const hasCoords = /\(\s*[-]?\d+\s*,\s*[-]?\d+\s*\)/.test(text || '');
-      const hasColor = /#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/.test(text || '');
-      const parts = [text || ''];
-      const xOk = typeof activity?.x === 'number' && Math.abs(activity.x) <= 10000;
-      const yOk = typeof activity?.y === 'number' && Math.abs(activity.y) <= 10000;
-      const colorOk = typeof activity?.color === 'string' && /^#?[0-9a-fA-F]{6}$/i.test(activity.color.replace('#',''));
-      if (!hasCoords && xOk && yOk) parts.push(`(${activity.x},${activity.y})`);
-      if (!hasColor && colorOk) parts.push(`#${activity.color.replace('#','')}`);
-      // For bulk purchases, add summary badge if provided
-      if (activity?.type === 'bulk_purchase' && activity?.summary && !/\b\d+\s+pixels?\b/i.test(text)) {
-        parts.push(`• ${activity.summary}`);
+      const isBulk = activity?.type === 'bulk_purchase';
+      if (!isBulk) {
+        const hasCoords = /\(\s*[-]?\d+\s*,\s*[-]?\d+\s*\)/.test(text || '');
+        const hasColor = /#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/.test(text || '');
+        const parts = [text || ''];
+        const xOk = typeof activity?.x === 'number' && Math.abs(activity.x) <= 10000;
+        const yOk = typeof activity?.y === 'number' && Math.abs(activity.y) <= 10000;
+        const colorOk = typeof activity?.color === 'string' && /^#?[0-9a-fA-F]{6}$/i.test(activity.color.replace('#',''));
+        if (!hasCoords && xOk && yOk) parts.push(`(${activity.x},${activity.y})`);
+        if (!hasColor && colorOk) parts.push(`#${activity.color.replace('#','')}`);
+        text = parts.join(' ').replace(/\s+/g, ' ').trim();
       }
-      text = parts.join(' ').replace(/\s+/g, ' ').trim();
+      // For bulk purchases, add summary badge if provided and not already in text
+      if (isBulk && activity?.summary && !/\b\d+\s+pixels?\b/i.test(text)) {
+        text = `${text} • ${activity.summary}`.replace(/\s+/g, ' ').trim();
+      }
       // sanitize again in case of additions
       text = this._sanitizeWhitelist(text);
     } catch {}

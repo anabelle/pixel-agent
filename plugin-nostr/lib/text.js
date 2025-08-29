@@ -141,17 +141,21 @@ function buildPixelBoughtPrompt(character, activity) {
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style only, do not copy verbatim):\n- ${examples.join('\n- ')}` : '',
     whitelist,
-    `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`,
-    'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
+  `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`,
+  'Must include coordinates and color if available (format like: (x,y) #ffeeaa) exactly once in the text AND/OR do a comment about it, color, position, etc)',
+  'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://lnpixels.qzz.io',
   ].filter(Boolean).join('\n\n');
 }
 
 function sanitizeWhitelist(text) {
   if (!text) return '';
   let out = String(text);
+  // Preserve only approved site links
   out = out.replace(/https?:\/\/[^\s)]+/gi, (m) => {
     return m.startsWith('https://lnpixels.qzz.io') || m.startsWith('https://pixel.xx.kg') ? m : '';
   });
+  // Keep coords like (x,y) and hex colors; they are not URLs so just ensure spacing is normalized later
+  out = out.replace(/\s+/g, ' ').trim();
   return out.trim();
 }
 

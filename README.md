@@ -274,14 +274,18 @@ export const customPlugin: Plugin = {
 - `LOAD_DOCS_ON_STARTUP`: Enable knowledge plugin
 - `KNOWLEDGE_PATH`: Custom knowledge base location
  - `LNPIXELS_WS_URL`: WebSocket base URL for LNPixels activity stream (default `http://localhost:3000`)
+ - `LNPIXELS_POST_MIN_INTERVAL_MS`: Minimum interval between Nostr posts about canvas activity (default `3600000` = 1 hour)
+ - `LNPIXELS_CREATE_DELEGATION_MEMORY`: When `true`, the listener writes a small delegation memory; posting memory is always created by the service (default `false`)
 
-### Realtime LNPixels → LLM → Nostr
+### Realtime LNPixels → plugin‑nostr → Nostr + Memory
 
-Pixel reacts to confirmed pixel purchases in real time:
-- The agent connects to the LNPixels Socket.IO endpoint and listens for `activity.append` events.
-- For each confirmed purchase, it builds a short prompt (coords/letter/sats), generates text via the configured LLM, sanitizes per whitelist, and posts to Nostr through the custom plugin.
+Pixel reacts to confirmed pixel purchases in real time, delegating text generation and posting to the `@pixel/plugin-nostr` service:
+- The listener connects to the LNPixels Socket.IO endpoint and emits `pixel.bought` events on an internal bridge.
+- The plugin service handles dedupe and a cross‑process lock, builds a character‑aware prompt, generates text via the configured LLM with fallback, sanitizes output, and posts once.
+- Anti‑spam: at most one canvas post per hour by default (configurable via `LNPIXELS_POST_MIN_INTERVAL_MS`). Non‑posted events are still persisted as throttled memories.
+- Memory: after a successful post, a structured `lnpixels_post` memory is created with coords, color, sats, and metadata. Throttled events are stored as `lnpixels_event` with `throttled: true`.
 
-No extra ports or webhooks are required. Set `LNPIXELS_WS_URL` if your API is not on localhost.
+No extra ports or webhooks are required. Set `LNPIXELS_WS_URL` if your API is not on localhost; optionally enable `LNPIXELS_CREATE_DELEGATION_MEMORY` if you want the listener to also record a small delegation memory.
 
 ## 🎭 Pixel's Personality & Behavior
 

@@ -2,7 +2,7 @@ const { io } = require('socket.io-client');
 const { emitter: nostrBridge } = require('./bridge');
 
 // Create memory record for LNPixels generated posts
-async function createLNPixelsMemory(runtime, text, activity, traceId, log) {
+async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts = {}) {
   try {
     if (!runtime?.createMemory) {
       log?.debug?.('Runtime.createMemory not available, skipping memory creation');
@@ -46,7 +46,8 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log) {
     try {
       const { createMemorySafe } = require('./context');
       if (typeof createMemorySafe === 'function') {
-        await createMemorySafe(runtime, memory, 'messages', 3, log);
+        const retries = Number(opts.retries ?? 3);
+        await createMemorySafe(runtime, memory, 'messages', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
         await runtime.createMemory(memory, 'messages');
       }
@@ -67,7 +68,7 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log) {
 }
 
 // Create memory record for LNPixels events when not posting (throttled or skipped)
-async function createLNPixelsEventMemory(runtime, activity, traceId, log) {
+async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts = {}) {
   try {
     if (!runtime?.createMemory && !runtime?.databaseAdapter) {
       log?.debug?.('Runtime memory APIs not available, skipping event memory');
@@ -112,7 +113,8 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log) {
     try {
       const { createMemorySafe } = require('./context');
       if (typeof createMemorySafe === 'function') {
-        await createMemorySafe(runtime, memory, 'messages', 3, log);
+        const retries = Number(opts.retries ?? 3);
+        await createMemorySafe(runtime, memory, 'messages', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
         await runtime.createMemory(memory, 'messages');
       }

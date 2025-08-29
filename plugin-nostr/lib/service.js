@@ -174,7 +174,7 @@ class NostrService {
           } catch {}
         });
         // New: pixel purchase event delegates text generation + posting here
-        emitter.on('pixel.bought', async (payload) => {
+  emitter.on('pixel.bought', async (payload) => {
           try {
             const activity = payload?.activity || payload;
             // Build a stable key for dedupe: prefer payment_hash, else id, else coords+created_at
@@ -190,31 +190,30 @@ class NostrService {
               this._pixelSeen.set(key, nowTs);
             }
 
-            // Cross-process persistent dedupe using a lock memory
+            // Cross-process persistent dedupe using a lock memory (create-only, no pre-read to reduce SELECT noise)
             try {
-              if (key && typeof this.runtime?.getMemoryById === 'function') {
-                const lockId = `lnpixels:lock:${key}`;
-                const existing = await this.runtime.getMemoryById(lockId).catch(() => null);
-                if (existing) { return; }
+              if (key) {
                 const { createMemorySafe } = require('./context');
+                const lockId = `lnpixels:lock:${key}`;
                 const entityId = createUniqueUuid(this.runtime, 'lnpixels');
                 const roomId = createUniqueUuid(this.runtime, 'lnpixels:locks');
-                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 3, this.runtime?.logger || console);
+                // Single-attempt; treat duplicate constraint as success inside createMemorySafe
+                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 1, this.runtime?.logger || console);
               }
             } catch {}
             // Throttle: only one pixel post per configured interval
             const now = Date.now();
             const interval = this._pixelPostMinIntervalMs;
-            if (now - this._pixelLastPostAt < interval) {
+      if (now - this._pixelLastPostAt < interval) {
               try {
                 const { createLNPixelsEventMemory } = require('./lnpixels-listener');
                 const traceId = `${now.toString(36)}${Math.random().toString(36).slice(2,6)}`;
-                await createLNPixelsEventMemory(this.runtime, activity, traceId, this.runtime?.logger || console);
+        await createLNPixelsEventMemory(this.runtime, activity, traceId, this.runtime?.logger || console, { retries: 1 });
               } catch {}
               return; // skip posting, store only
             }
 
-            const text = await this.generatePixelBoughtTextLLM(activity);
+      const text = await this.generatePixelBoughtTextLLM(activity);
             if (!text) return;
             const ok = await this.postOnce(text);
             // Create LNPixels memory record on success
@@ -223,7 +222,7 @@ class NostrService {
               try {
                 const { createLNPixelsMemory } = require('./lnpixels-listener');
                 const traceId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
-                await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console);
+        await createLNPixelsMemory(this.runtime, text, activity, traceId, this.runtime?.logger || console, { retries: 1 });
               } catch {}
             }
           } catch {}
@@ -770,7 +769,8 @@ class NostrService {
         const x = typeof activity?.x === 'number' ? activity.x : '?';
         const y = typeof activity?.y === 'number' ? activity.y : '?';
         const sats = typeof activity?.sats === 'number' ? activity.sats : 'some';
-        return `fresh pixel on the canvas at (${x},${y}) — ${sats} sats. place yours: https://lnpixels.qzz.io`;
+        const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
+        return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://lnpixels.qzz.io`;
       }
     );
     // Enrich text if missing coords/color (keep within whitelist)
@@ -783,6 +783,10 @@ class NostrService {
       const colorOk = typeof activity?.color === 'string' && /^#?[0-9a-fA-F]{6}$/i.test(activity.color.replace('#',''));
       if (!hasCoords && xOk && yOk) parts.push(`(${activity.x},${activity.y})`);
       if (!hasColor && colorOk) parts.push(`#${activity.color.replace('#','')}`);
+      // For bulk purchases, add summary badge if provided
+      if (activity?.type === 'bulk_purchase' && activity?.summary && !/\b\d+\s+pixels?\b/i.test(text)) {
+        parts.push(`• ${activity.summary}`);
+      }
       text = parts.join(' ').replace(/\s+/g, ' ').trim();
       // sanitize again in case of additions
       text = this._sanitizeWhitelist(text);

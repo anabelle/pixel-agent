@@ -17,13 +17,13 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
   let lastErr = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      logger?.info?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
+  logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
       await runtime.createMemory(memory, tableName);
-      logger?.info?.(`[NOSTR] Memory created id=${memory.id}`);
+  logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
       return true;
     } catch (err) {
       lastErr = err; const msg = String(err?.message || err || '');
-      if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.info?.('[NOSTR] Memory already exists, skipping'); return true; }
+  if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return true; }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }
   }

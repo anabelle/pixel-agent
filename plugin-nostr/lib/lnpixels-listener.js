@@ -149,7 +149,7 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
 // Delegate text generation to plugin-nostr service
 
 function makeKey(a) {
-  return a?.event_id || a?.payment_hash || (a?.x !== undefined && a?.y !== undefined && a?.created_at ? `${a.x},${a.y},${a.created_at}` : undefined);
+  return a?.event_id || a?.payment_hash || a?.id || (a?.x !== undefined && a?.y !== undefined && a?.created_at ? `${a.x},${a.y},${a.created_at}` : undefined);
 }
 
 function startLNPixelsListener(runtime) {

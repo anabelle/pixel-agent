@@ -12,7 +12,7 @@ const {
 const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
 const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('./discovery');
-const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
+const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildContacts } = require('./eventFactory');
@@ -165,6 +165,15 @@ class NostrService {
             const txt = (payload && payload.text ? String(payload.text) : '').trim();
             if (!txt || txt.length > 1000) return; // Add length validation here too
             await this.postOnce(txt);
+          } catch {}
+        });
+        // New: pixel purchase event delegates text generation + posting here
+        emitter.on('pixel.bought', async (payload) => {
+          try {
+            const activity = payload?.activity || payload;
+            const text = await this.generatePixelBoughtTextLLM(activity);
+            if (!text) return;
+            await this.postOnce(text);
           } catch {}
         });
       }
@@ -675,6 +684,8 @@ class NostrService {
 
   _buildZapThanksPrompt(amountMsats, senderInfo) { return buildZapThanksPrompt(this.runtime.character, amountMsats, senderInfo); }
 
+  _buildPixelBoughtPrompt(activity) { return buildPixelBoughtPrompt(this.runtime.character, activity); }
+
   async generateZapThanksTextLLM(amountMsats, senderInfo) {
     const prompt = this._buildZapThanksPrompt(amountMsats, senderInfo);
     const type = this._getLargeModelType();
@@ -689,6 +700,28 @@ class NostrService {
       () => generateThanksText(amountMsats)
     );
     return text || generateThanksText(amountMsats);
+  }
+
+  async generatePixelBoughtTextLLM(activity) {
+    const prompt = this._buildPixelBoughtPrompt(activity);
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 220, temperature: 0.9 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => {
+        // Simple fallback if LLM fails
+        const x = typeof activity?.x === 'number' ? activity.x : '?';
+        const y = typeof activity?.y === 'number' ? activity.y : '?';
+        const sats = typeof activity?.sats === 'number' ? activity.sats : 'some';
+        return `fresh pixel on the canvas at (${x},${y}) — ${sats} sats. place yours: https://lnpixels.qzz.io`;
+      }
+    );
+    return text || '';
   }
 
   async generateReplyTextLLM(evt, roomId) {

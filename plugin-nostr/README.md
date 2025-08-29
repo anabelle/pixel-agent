@@ -104,3 +104,7 @@ emitter.emit('pixel.bought', { activity: { x: 10, y: 20, sats: 42, letter: 'A', 
 ```
 
 The service handles text generation and posting. See `test/service.pixelBought.test.js`.
+
+Notes:
+- Pixel events are deduplicated within the service (5‑minute TTL) using `payment_hash` → `event_id`/`id` → `x,y,created_at` as the key.
+- To disable delegation memory writes in the listener, set `LNPIXELS_CREATE_DELEGATION_MEMORY=false` (default); set to `true` to persist a small reference memory.

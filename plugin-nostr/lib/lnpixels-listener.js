@@ -42,7 +42,21 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log) {
       createdAt: Date.now()
     };
 
-    await runtime.createMemory(memory, 'messages');
+    // Prefer context-aware safe creation if available
+    try {
+      const { createMemorySafe } = require('./context');
+      if (typeof createMemorySafe === 'function') {
+        await createMemorySafe(runtime, memory, 'messages', 3, log);
+      } else if (typeof runtime?.createMemory === 'function') {
+        await runtime.createMemory(memory, 'messages');
+      }
+    } catch (e) {
+      if (typeof runtime?.createMemory === 'function') {
+        await runtime.createMemory(memory, 'messages');
+      } else {
+        throw e;
+      }
+    }
     log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
     return true;
 
@@ -175,11 +189,16 @@ function startLNPixelsListener(runtime) {
         return;
       }
 
-      // Success path (we still store a memory referencing the trigger)
+      // Success path (optionally store a memory referencing the trigger)
       health.totalPosts++;
       health.consecutiveErrors = 0;
       log.info?.('Delegated pixel.bought event to plugin-nostr', { traceId, sats: a.sats });
-      await createLNPixelsMemory(runtime, '[delegated to plugin-nostr]', a, traceId, log);
+      try {
+        const enableMem = String(process.env.LNPIXELS_CREATE_DELEGATION_MEMORY ?? 'false').toLowerCase() === 'true';
+        if (enableMem) {
+          await createLNPixelsMemory(runtime, '[delegated to plugin-nostr]', a, traceId, log);
+        }
+      } catch {}
 
       // Internal broadcast for other plugins (no generated text here)
       try {
@@ -231,4 +250,4 @@ function startLNPixelsListener(runtime) {
   return socket;
 }
 
-module.exports = { startLNPixelsListener };
+module.exports = { startLNPixelsListener, createLNPixelsMemory };

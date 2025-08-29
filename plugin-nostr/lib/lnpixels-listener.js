@@ -212,6 +212,8 @@ function startLNPixelsListener(runtime) {
   
   function validateActivity(a) {
     if (!a || typeof a !== 'object') return false;
+    // Skip non-pixel activities (like payment confirmations)
+    if (a.type === 'payment' || (!a.x && !a.y && !a.color)) return false;
     if (a.x !== undefined && (typeof a.x !== 'number' || a.x < -1000 || a.x > 1000)) return false;
     if (a.y !== undefined && (typeof a.y !== 'number' || a.y < -1000 || a.y > 1000)) return false;
     if (a.sats !== undefined && (typeof a.sats !== 'number' || a.sats < 0 || a.sats > 1000000)) return false;
@@ -256,7 +258,6 @@ function startLNPixelsListener(runtime) {
       
       // Deduplication
       const key = makeKey(a);
-      log.info?.('Listener deduplication check:', { traceId, key, eventId: a?.event_id, paymentHash: a?.payment_hash, id: a?.id });
       if (dedupe(key)) {
         log.debug?.('Duplicate event ignored:', { traceId, key });
         return;

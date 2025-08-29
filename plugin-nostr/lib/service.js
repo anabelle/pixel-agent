@@ -159,6 +159,8 @@ class NostrService {
   // Dedupe cache for pixel.bought events (cross-listener safety)
   this._pixelSeen = new Map(); // key -> timestamp
   this._pixelSeenTTL = 5 * 60 * 1000; // 5 minutes
+  this._pixelLastPostAt = 0; // timestamp of last successful pixel post
+  this._pixelPostMinIntervalMs = Number(process.env.LNPIXELS_POST_MIN_INTERVAL_MS || 3600000); // default 1 hour
 
     // Bridge: allow external modules to request a post
     try {
@@ -200,11 +202,24 @@ class NostrService {
                 await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 3, this.runtime?.logger || console);
               }
             } catch {}
+            // Throttle: only one pixel post per configured interval
+            const now = Date.now();
+            const interval = this._pixelPostMinIntervalMs;
+            if (now - this._pixelLastPostAt < interval) {
+              try {
+                const { createLNPixelsEventMemory } = require('./lnpixels-listener');
+                const traceId = `${now.toString(36)}${Math.random().toString(36).slice(2,6)}`;
+                await createLNPixelsEventMemory(this.runtime, activity, traceId, this.runtime?.logger || console);
+              } catch {}
+              return; // skip posting, store only
+            }
+
             const text = await this.generatePixelBoughtTextLLM(activity);
             if (!text) return;
             const ok = await this.postOnce(text);
             // Create LNPixels memory record on success
             if (ok) {
+              this._pixelLastPostAt = now;
               try {
                 const { createLNPixelsMemory } = require('./lnpixels-listener');
                 const traceId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;

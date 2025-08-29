@@ -66,6 +66,72 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log) {
   }
 }
 
+// Create memory record for LNPixels events when not posting (throttled or skipped)
+async function createLNPixelsEventMemory(runtime, activity, traceId, log) {
+  try {
+    if (!runtime?.createMemory && !runtime?.databaseAdapter) {
+      log?.debug?.('Runtime memory APIs not available, skipping event memory');
+      return false;
+    }
+
+    const roomId = `lnpixels:canvas`;
+    const entityId = `lnpixels:system`;
+    const key = activity?.payment_hash || activity?.event_id || activity?.id || (activity?.x !== undefined && activity?.y !== undefined && activity?.created_at ? `${activity.x},${activity.y},${activity.created_at}` : Date.now());
+    const memoryId = `lnpixels:event:${key}:${traceId}`;
+
+    const memory = {
+      id: memoryId,
+      entityId,
+      agentId: runtime.agentId,
+      roomId,
+      content: {
+        type: 'lnpixels_event',
+        source: 'lnpixels-listener',
+        data: {
+          triggerEvent: {
+            x: activity?.x,
+            y: activity?.y,
+            color: activity?.color,
+            sats: activity?.sats,
+            letter: activity?.letter,
+            event_id: activity?.event_id,
+            payment_hash: activity?.payment_hash,
+            created_at: activity?.created_at,
+            type: activity?.type,
+            summary: activity?.summary
+          },
+          traceId,
+          platform: 'nostr',
+          timestamp: Date.now(),
+          throttled: true
+        }
+      },
+      createdAt: Date.now()
+    };
+
+    try {
+      const { createMemorySafe } = require('./context');
+      if (typeof createMemorySafe === 'function') {
+        await createMemorySafe(runtime, memory, 'messages', 3, log);
+      } else if (typeof runtime?.createMemory === 'function') {
+        await runtime.createMemory(memory, 'messages');
+      }
+    } catch (e) {
+      if (typeof runtime?.createMemory === 'function') {
+        await runtime.createMemory(memory, 'messages');
+      } else {
+        throw e;
+      }
+    }
+
+    log?.info?.('Created LNPixels event memory (throttled)', { traceId, memoryId, roomId });
+    return true;
+  } catch (error) {
+    log?.warn?.('Failed to create LNPixels event memory:', { traceId, error: error.message });
+    return false;
+  }
+}
+
 // Delegate text generation to plugin-nostr service
 
 function makeKey(a) {
@@ -250,4 +316,4 @@ function startLNPixelsListener(runtime) {
   return socket;
 }
 
-module.exports = { startLNPixelsListener, createLNPixelsMemory };
+module.exports = { startLNPixelsListener, createLNPixelsMemory, createLNPixelsEventMemory };

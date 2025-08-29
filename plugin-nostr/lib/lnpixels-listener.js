@@ -51,14 +51,14 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
     try {
       if (typeof createMemorySafe === 'function') {
         const retries = Number(opts.retries ?? 3);
-  res = await createMemorySafe(runtime, memory, 'message', retries, log);
+  res = await createMemorySafe(runtime, memory, 'messages', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'message');
+        await runtime.createMemory(memory, 'messages');
         res = { created: true };
       }
     } catch (e) {
       if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'message');
+        await runtime.createMemory(memory, 'messages');
         res = { created: true };
       } else {
         throw e;
@@ -126,13 +126,13 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
     try {
       const retries = Number(opts.retries ?? 3);
       if (typeof createMemorySafe === 'function') {
-        await createMemorySafe(runtime, memory, 'message', retries, log);
+        await createMemorySafe(runtime, memory, 'messages', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'message');
+        await runtime.createMemory(memory, 'messages');
       }
     } catch (e) {
       if (typeof runtime?.createMemory === 'function') {
-        await runtime.createMemory(memory, 'message');
+        await runtime.createMemory(memory, 'messages');
       } else {
         throw e;
       }

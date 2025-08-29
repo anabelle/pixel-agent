@@ -13,25 +13,25 @@ async function ensureNostrContext(runtime, userPubkey, usernameLike, conversatio
   return { worldId, roomId, entityId };
 }
 
-// Ensure LNPixels system context (world, rooms, connection) exists
+// Ensure LNPixels system context (world, room, connection) exists
 async function ensureLNPixelsContext(runtime, deps) {
   const { createUniqueUuid, ChannelType, logger } = deps;
   const worldId = createUniqueUuid(runtime, 'lnpixels');
   const canvasRoomId = createUniqueUuid(runtime, 'lnpixels:canvas');
-  const locksRoomId = createUniqueUuid(runtime, 'lnpixels:locks');
   const entityId = createUniqueUuid(runtime, 'lnpixels:system');
   try {
     logger?.info?.('[NOSTR] Ensuring LNPixels context (world/rooms/connection)');
     await runtime.ensureWorldExists({ id: worldId, name: 'LNPixels', agentId: runtime.agentId, serverId: 'lnpixels', metadata: { system: true, source: 'lnpixels' } }).catch(() => {});
     await runtime.ensureRoomExists({ id: canvasRoomId, name: 'LNPixels Canvas', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'lnpixels:canvas', serverId: 'lnpixels', worldId, }).catch(() => {});
-    await runtime.ensureRoomExists({ id: locksRoomId, name: 'LNPixels Locks', source: 'lnpixels', type: ChannelType ? ChannelType.DIRECT : undefined, channelId: 'lnpixels:locks', serverId: 'lnpixels', worldId, }).catch(() => {});
     await runtime.ensureConnection({ entityId, roomId: canvasRoomId, userName: 'lnpixels', name: 'LNPixels System', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => {});
-    logger?.info?.(`[NOSTR] LNPixels context ensured world=${worldId} canvasRoom=${canvasRoomId} locksRoom=${locksRoomId} entity=${entityId}`);
+    logger?.info?.(`[NOSTR] LNPixels context ensured world=${worldId} canvasRoom=${canvasRoomId} entity=${entityId}`);
   } catch {}
+  // Use canvas room as the locks room as well (avoids schema issues for extra room types)
+  const locksRoomId = canvasRoomId;
   return { worldId, canvasRoomId, locksRoomId, entityId };
 }
 
-async function createMemorySafe(runtime, memory, tableName = 'message', maxRetries = 3, logger) {
+async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetries = 3, logger) {
   let lastErr = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -56,7 +56,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
       const roomId = createUniqueUuid(runtime, getConversationIdFromEvent(evt));
       const id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
       const entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
-  return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content: { type: 'social_interaction', source: 'nostr', data: body, }, createdAt: Date.now(), }, 'message');
+  return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content: { type: 'social_interaction', source: 'nostr', data: body, }, createdAt: Date.now(), }, 'messages');
     } catch (e) { logger?.debug?.('[NOSTR] saveInteractionMemory fallback:', e?.message || e); }
   }
   if (runtime.databaseAdapter && typeof runtime.databaseAdapter.createMemory === 'function') {

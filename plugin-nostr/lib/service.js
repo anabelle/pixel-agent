@@ -193,12 +193,14 @@ class NostrService {
       // Cross-process persistent dedupe using a lock memory (create-only)
             try {
               if (key) {
-                const { createMemorySafe } = require('./context');
-        const lockId = createUniqueUuid(this.runtime, `lnpixels:lock:${key}`);
-                const entityId = createUniqueUuid(this.runtime, 'lnpixels');
-                const roomId = createUniqueUuid(this.runtime, 'lnpixels:locks');
+                const { createMemorySafe, ensureLNPixelsContext } = require('./context');
+                // Ensure LNPixels rooms/world exist before writing lock memory
+                const ctx = await ensureLNPixelsContext(this.runtime, { createUniqueUuid, ChannelType, logger });
+                const lockId = createUniqueUuid(this.runtime, `lnpixels:lock:${key}`);
+                const entityId = ctx.entityId || createUniqueUuid(this.runtime, 'lnpixels:system');
+                const roomId = ctx.locksRoomId || createUniqueUuid(this.runtime, 'lnpixels:locks');
                 // Single-attempt; treat duplicate constraint as success inside createMemorySafe
-                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 1, this.runtime?.logger || console);
+                await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'message', 1, this.runtime?.logger || console);
               }
             } catch {}
             // Throttle: only one pixel post per configured interval
@@ -798,7 +800,7 @@ class NostrService {
     let recent = [];
     try {
       if (this.runtime?.getMemories && roomId) {
-        const rows = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 12 });
+  const rows = await this.runtime.getMemories({ tableName: 'message', roomId, count: 12 });
         const ordered = Array.isArray(rows) ? rows.slice().reverse() : [];
         recent = ordered.map((m) => ({ role: m.agentId && this.runtime && m.agentId === this.runtime.agentId ? 'agent' : 'user', text: String(m.content?.text || '').slice(0, 220) })).filter((x) => x.text);
       }
@@ -820,6 +822,14 @@ class NostrService {
 
   async postOnce(content) {
     if (!this.pool || !this.sk || !this.relays.length) return false;
+    // Avoid posting a generic scheduled note immediately after a pixel post
+    if (!content) {
+      const now = Date.now();
+      if (now - (this._pixelLastPostAt || 0) < (this._pixelPostMinIntervalMs || 0)) {
+        logger.info('[NOSTR] Skipping scheduled post (recent pixel post within interval)');
+        return false;
+      }
+    }
     let text = content?.trim?.();
     if (!text) { text = await this.generatePostTextLLM(); if (!text) text = this.pickPostText(); }
     text = text || 'hello, nostr';
@@ -833,7 +843,7 @@ class NostrService {
         const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
         const roomId = createUniqueUuid(runtime, 'nostr:posts');
         const entityId = createUniqueUuid(runtime, this.pkHex || 'nostr');
-        await this._createMemorySafe({ id, entityId, agentId: runtime.agentId, roomId, content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined }, createdAt: Date.now(), }, 'messages');
+  await this._createMemorySafe({ id, entityId, agentId: runtime.agentId, roomId, content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined }, createdAt: Date.now(), }, 'message');
       } catch {}
       return true;
     } catch (err) { logger.error('[NOSTR] Post failed:', err?.message || err); return false; }
@@ -849,7 +859,7 @@ class NostrService {
   return ensureNostrContext(this.runtime, userPubkey, usernameLike, conversationId, { createUniqueUuid, ChannelType, logger });
   }
 
-  async _createMemorySafe(memory, tableName = 'messages', maxRetries = 3) {
+  async _createMemorySafe(memory, tableName = 'message', maxRetries = 3) {
   const { createMemorySafe } = require('./context');
   return createMemorySafe(this.runtime, memory, tableName, maxRetries, logger);
   }
@@ -868,9 +878,9 @@ class NostrService {
       try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; logger.info(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } } catch {}
       const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
       const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: evt.content || '', source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
-      if (!alreadySaved) { logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); await this._createMemorySafe(memory, 'messages'); }
+  if (!alreadySaved) { logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); await this._createMemorySafe(memory, 'message'); }
       try {
-        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
+  const recent = await runtime.getMemories({ tableName: 'message', roomId, count: 10 });
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
         if (hasReply) { logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); return; }
       } catch {}
@@ -889,7 +899,7 @@ class NostrService {
             try {
               logger.info(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`);
               try {
-                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 10 });
+                const recent = await this.runtime.getMemories({ tableName: 'message', roomId: capturedRoomId, count: 10 });
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) { logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); return; }
               } catch {}
@@ -901,7 +911,7 @@ class NostrService {
               const ok = await this.postReply(parentEvt, replyText);
               if (ok) {
                 const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${now2}:scheduled`);
-                await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: now2, }, 'messages').catch(() => {});
+                await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: now2, }, 'message').catch(() => {});
               }
             } catch (e) { logger.warn('[NOSTR] Scheduled reply failed:', e?.message || e); }
           }, waitMs);
@@ -921,7 +931,7 @@ class NostrService {
       if (replyOk) {
         logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
         const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId, }, createdAt: now, };
-        await this._createMemorySafe(replyMemory, 'messages');
+  await this._createMemorySafe(replyMemory, 'message');
       }
     } catch (err) { logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
   }

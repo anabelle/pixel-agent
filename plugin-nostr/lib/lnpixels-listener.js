@@ -212,9 +212,8 @@ function startLNPixelsListener(runtime) {
   
   function validateActivity(a) {
     if (!a || typeof a !== 'object') return false;
-    // Skip non-pixel activities (like payment confirmations)
-    if (a.type === 'payment' && !a.metadata?.pixelUpdates) return false;
-    // For bulk purchases with metadata.pixelUpdates, allow them through but mark as bulk
+    
+    // Handle bulk purchases first (they have type='payment' but also pixelUpdates)
     if (a.metadata?.pixelUpdates && Array.isArray(a.metadata.pixelUpdates) && a.metadata.pixelUpdates.length > 0) {
       // Transform to bulk purchase format
       a.type = 'bulk_purchase';
@@ -225,6 +224,10 @@ function startLNPixelsListener(runtime) {
       delete a.color;
       return true;
     }
+    
+    // Skip ALL payment activities that are not bulk purchases (these are payment confirmations)
+    if (a.type === 'payment') return false;
+    
     // Regular single pixel validation
     if (!a.x && !a.y && !a.color) return false;
     if (a.x !== undefined && (typeof a.x !== 'number' || a.x < -1000 || a.x > 1000)) return false;

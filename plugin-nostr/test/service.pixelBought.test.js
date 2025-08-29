@@ -51,4 +51,26 @@ describe('NostrService pixel.bought flow', () => {
     const [textArg] = service.postOnce.mock.calls[0];
     expect(textArg).toMatch(/fresh pixel/i);
   });
+
+  it('generates excited response for bulk purchases', async () => {
+    const { emitter } = require('../lib/bridge.js');
+    emitter.emit('pixel.bought', { 
+      activity: { 
+        x: 5, 
+        y: 10, 
+        color: '#ff0000',
+        sats: 50,
+        type: 'bulk_purchase',
+        summary: '5 pixels purchased'
+      } 
+    });
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(service.postOnce).toHaveBeenCalledTimes(1);
+    const [textArg] = service.postOnce.mock.calls[0];
+    expect(typeof textArg).toBe('string');
+    expect(textArg).toContain('https://lnpixels.qzz.io');
+    // Should either contain "5 pixels" in model result or "explosion" in fallback
+    expect(textArg).toMatch(/(5 pixels|explosion)/i);
+  });
 });

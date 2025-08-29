@@ -182,8 +182,8 @@ class NostrService {
             const activity = payload?.activity || payload;
             // Record last event time ASAP to suppress scheduled posts racing ahead
             this._pixelLastEventAt = Date.now();
-            // Build a stable key for dedupe: prefer payment_hash, else id, else coords+created_at
-            const key = activity?.payment_hash || activity?.event_id || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
+            // Build a stable key for dedupe: match listener priority exactly
+            const key = activity?.event_id || activity?.payment_hash || activity?.id || ((typeof activity?.x==='number' && typeof activity?.y==='number' && activity?.created_at) ? `${activity.x},${activity.y},${activity.created_at}` : null);
             // In-flight dedupe within this process
             if (key) {
               if (this._pixelInFlight.has(key)) return;

@@ -155,6 +155,20 @@ class NostrService {
     this.discoveryStartingThreshold = 0.6;
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
+
+    // Bridge: allow external modules to request a post
+    try {
+      const { emitter } = require('./bridge');
+      if (emitter && typeof emitter.on === 'function') {
+        emitter.on('external.post', async (payload) => {
+          try {
+            const txt = (payload && payload.text ? String(payload.text) : '').trim();
+            if (!txt || txt.length > 1000) return; // Add length validation here too
+            await this.postOnce(txt);
+          } catch {}
+        });
+      }
+    } catch {}
   }
 
   static async start(runtime) {
@@ -253,6 +267,12 @@ class NostrService {
 
     if (postEnabled && sk) svc.scheduleNextPost(minSec, maxSec);
     if (svc.discoveryEnabled && sk) svc.scheduleNextDiscovery();
+
+    // Start LNPixels listener for external-triggered posts
+    try {
+      const { startLNPixelsListener } = require('./lnpixels-listener');
+      if (typeof startLNPixelsListener === 'function') startLNPixelsListener(svc.runtime);
+    } catch {}
 
     logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled}`);
     return svc;

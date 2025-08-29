@@ -273,6 +273,15 @@ export const customPlugin: Plugin = {
 - `OPENAI_API_KEY`: Alternative AI provider
 - `LOAD_DOCS_ON_STARTUP`: Enable knowledge plugin
 - `KNOWLEDGE_PATH`: Custom knowledge base location
+ - `LNPIXELS_WS_URL`: WebSocket base URL for LNPixels activity stream (default `http://localhost:3000`)
+
+### Realtime LNPixels → LLM → Nostr
+
+Pixel reacts to confirmed pixel purchases in real time:
+- The agent connects to the LNPixels Socket.IO endpoint and listens for `activity.append` events.
+- For each confirmed purchase, it builds a short prompt (coords/letter/sats), generates text via the configured LLM, sanitizes per whitelist, and posts to Nostr through the custom plugin.
+
+No extra ports or webhooks are required. Set `LNPIXELS_WS_URL` if your API is not on localhost.
 
 ## 🎭 Pixel's Personality & Behavior
 

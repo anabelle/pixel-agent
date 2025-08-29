@@ -14,6 +14,7 @@
     "@elizaos/core": "^1.4.5",
     "@noble/hashes": "npm:@jsr/noble__hashes@^2.0.0-beta.5",
     "@nostr/tools": "npm:@jsr/nostr__tools@^2.16.2",
+  "socket.io-client": "^4.7.5",
     "ws": "^8.18.0"
   },
   "devDependencies": {

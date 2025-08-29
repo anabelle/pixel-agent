@@ -256,6 +256,7 @@ function startLNPixelsListener(runtime) {
       
       // Deduplication
       const key = makeKey(a);
+      log.info?.('Listener deduplication check:', { traceId, key, eventId: a?.event_id, paymentHash: a?.payment_hash, id: a?.id });
       if (dedupe(key)) {
         log.debug?.('Duplicate event ignored:', { traceId, key });
         return;

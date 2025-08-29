@@ -679,7 +679,7 @@ export const character: Character = {
     NOSTR_MESSAGE_CUTOFF_DATE:
       process.env.NOSTR_MESSAGE_CUTOFF_DATE || "2025-08-28T00:00:00Z",
   // LNPixels WS for activity stream
-  LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "http://localhost:3000",
+  LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "https://lnpixels.qzz.io",
     // Shell plugin settings
     SHELL_ENABLED: process.env.SHELL_ENABLED || "true",
     SHELL_ALLOWED_DIRECTORY: process.env.SHELL_ALLOWED_DIRECTORY || "/home/pixel",

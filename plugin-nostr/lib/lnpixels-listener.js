@@ -203,18 +203,53 @@ function startLNPixelsListener(runtime) {
       const prompt = buildPrompt(runtime, a);
       let text = '';
       
+      // Debug logging for text generation
+      log.info?.('Debug: Starting text generation:', { 
+        traceId, 
+        prompt: prompt.slice(0, 200) + '...', 
+        hasRuntime: !!runtime,
+        hasUseModel: !!runtime?.useModel,
+        runtimeType: typeof runtime,
+        useModelType: typeof runtime?.useModel
+      });
+      
       try {
-        const res = await runtime?.useModel?.('TEXT_SMALL', { prompt, maxTokens: 220, temperature: 0.9 });
-        const raw = typeof res === 'string' ? res : (res?.text || res?.content || res?.choices?.[0]?.message?.content || '');
+        // Fix: Remove optional chaining on method call - that was the real bug!
+        if (!runtime?.useModel) {
+          throw new Error('runtime.useModel is not available');
+        }
+        
+        // Use TEXT_SMALL as originally configured (OpenRouter models)
+        const res = await runtime.useModel('TEXT_SMALL', { prompt, maxTokens: 220, temperature: 0.9 });
+        
+        log.info?.('Debug: LLM response received:', { 
+          traceId, 
+          responseType: typeof res,
+          responseKeys: res ? Object.keys(res) : 'null',
+          isString: typeof res === 'string',
+          rawResponse: JSON.stringify(res).slice(0, 300) + '...'
+        });
+        
+        const raw = typeof res === 'string' ? res : (res?.text || res?.content || res?.choices?.[0]?.message?.content || res?.response || res?.output || '');
         text = String(raw || '').trim().slice(0, 240);
+        
+        log.info?.('Debug: Text extraction result:', { 
+          traceId, 
+          rawType: typeof raw,
+          rawValue: raw,
+          rawLength: raw ? raw.length : 0,
+          finalText: text,
+          finalTextLength: text.length
+        });
+        
       } catch (llmError) {
-        log.error?.('LLM generation failed:', { traceId, error: llmError.message, activity: a });
+        log.error?.('LLM generation failed:', { traceId, error: llmError.message, stack: llmError.stack, activity: a });
         health.totalErrors++;
         return;
       }
       
       if (!text) {
-        log.warn?.('Empty text generated:', { traceId, activity: a });
+        log.warn?.('Empty text generated:', { traceId, activity: a, promptLength: prompt.length });
         return;
       }
 

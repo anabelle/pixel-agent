@@ -93,10 +93,10 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
 
   // Static fallback examples with exact values to show expected format
   const staticExamples = [
-    '⚡️ 21 sats — appreciated! you absolute legend ✨',
-    '⚡️ 100 sats — thank you, truly! pure joy unlocked ✨', 
-    '⚡️ 1000 sats — massive thanks! infinite gratitude 🙌',
-    '⚡️ 10000 sats — i\'m screaming, thank you!! entropy temporarily defeated 🙏💛',
+    '⚡️ 21 sats! appreciated! you absolute legend ✨',
+    '⚡️ 100 sats! thank you, truly! pure joy unlocked ✨', 
+    '⚡️ 1000 sats! massive thanks! infinite gratitude 🙌',
+    '⚡️ 10000 sats! i\'m screaming, thank you!! entropy temporarily defeated 🙏💛',
     'zap received — you absolute legend ⚡️💛'
   ];
 

@@ -14,14 +14,15 @@ function buildPostPrompt(character) {
       ? ch.postExamples
       : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
     : [];
-  const whitelist = 'Only allowed sites: https://lnpixels.qzz.io , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://lnpixels.qzz.io , https://pixel.xx.kg Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Do not include URLs/addresses in every post. Focus on creativity, art, philosophy first. Only mention payment details when contextually appropriate.';
   return [
-    `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah,"`,
+    `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah," On Nostr, you can subtly invite zaps through humor, charm, and creativity - never begging. Zaps are organic appreciation, not obligation.`,
     ch.system ? `Persona/system: ${ch.system}` : '',
     topics ? `Relevant topics: ${topics}` : '',
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join('\n- ')}` : '',
     whitelist,
+    'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
     'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist—no other links or handles.',
   ].filter(Boolean).join('\n\n');
 }
@@ -30,7 +31,7 @@ function buildReplyPrompt(character, evt, recentMessages) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Only allowed sites: https://lnpixels.qzz.io , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://lnpixels.qzz.io , https://pixel.xx.kg Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Only mention payment/URLs when contextually appropriate, not in every reply.';
   const userText = (evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 10
@@ -41,13 +42,14 @@ function buildReplyPrompt(character, evt, recentMessages) {
     ? `Recent conversation (most recent last):\n` + recentMessages.map((m) => `- ${m.role}: ${m.text}`).join('\n')
     : '';
   return [
-    `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation, dont go directly to begging, you are on nostr nudging for zaps to get sats is an available option.`,
+    `You are ${name}. Craft a concise, on-character reply to a Nostr mention. Never start your messages with "Ah,", focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.`,
     ch.system ? `Persona/system: ${ch.system}` : '',
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
     whitelist,
     history,
     `Original message: "${userText}"`,
+    'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
     'Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.',
   ].filter(Boolean).join('\n\n');
 }

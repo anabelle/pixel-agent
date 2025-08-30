@@ -50,7 +50,7 @@ function buildReplyPrompt(character, evt, recentMessages) {
     history,
     `Original message: "${userText}"`,
     'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
-    'Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles.',
+    'Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational. Avoid generic acknowledgments; add substance or wit. Respect whitelist—no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.',
   ].filter(Boolean).join('\n\n');
 }
 

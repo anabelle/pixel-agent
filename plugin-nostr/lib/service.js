@@ -1,6 +1,6 @@
 // Full NostrService extracted from index.js for testability
 let logger, createUniqueUuid, ChannelType, ModelType;
-let SimplePool, nip19, finalizeEvent, getPublicKey;
+let SimplePool, nip19, nip04, finalizeEvent, getPublicKey;
 let wsInjector;
 let nip10Parse;
 
@@ -22,6 +22,7 @@ async function ensureDeps() {
     const tools = await import('@nostr/tools');
     SimplePool = tools.SimplePool;
     nip19 = tools.nip19;
+    nip04 = tools.nip04;
     finalizeEvent = tools.finalizeEvent;
     getPublicKey = tools.getPublicKey;
     wsInjector = tools.setWebSocketConstructor || tools.useWebSocketImplementation;
@@ -1112,9 +1113,31 @@ class NostrService {
       const recipientPubkey = recipientEvt.pubkey;
       const createdAtSec = Math.floor(Date.now() / 1000);
 
-      // Build the DM event
+      // Encrypt the DM content using manual NIP-04 encryption
+      const { encryptNIP04Manual } = require('./nostr');
+      let encryptedContent;
+
+      try {
+        encryptedContent = await encryptNIP04Manual(this.sk, recipientPubkey, text.trim());
+      } catch (encryptError) {
+        logger.warn('[NOSTR] Manual encryption failed, trying nostr-tools:', encryptError.message);
+        // Fallback to nostr-tools encryption
+        if (nip04?.encrypt) {
+          encryptedContent = await nip04.encrypt(this.sk, recipientPubkey, text.trim());
+        } else {
+          logger.warn('[NOSTR] No encryption method available, cannot send DM');
+          return false;
+        }
+      }
+
+      if (!encryptedContent) {
+        logger.warn('[NOSTR] Failed to encrypt DM content');
+        return false;
+      }
+
+      // Build the DM event with encrypted content
       const { buildDirectMessage } = require('./eventFactory');
-      const evtTemplate = buildDirectMessage(recipientPubkey, text.trim(), createdAtSec);
+      const evtTemplate = buildDirectMessage(recipientPubkey, encryptedContent, createdAtSec);
 
       if (!evtTemplate) return false;
 
@@ -1169,7 +1192,7 @@ class NostrService {
 
       // Decrypt the DM content
       const { decryptDirectMessage } = require('./nostr');
-      const decryptedContent = await decryptDirectMessage(evt, this.sk, this.pkHex, this.runtime?.nip19?.decrypt || null);
+      const decryptedContent = await decryptDirectMessage(evt, this.sk, this.pkHex, nip04?.decrypt || null);
       if (!decryptedContent) {
         logger.warn('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8));
         return;

@@ -51,16 +51,60 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
     const senderPubkey = evt.pubkey;
 
     // Determine which key to use for decryption
-    // If we're the sender, use recipient's pubkey; if we're the recipient, use sender's pubkey
+    // If we're the recipient, use sender's pubkey; if we're the sender, use recipient's pubkey
     const peerPubkey = (recipientPubkey === publicKey) ? senderPubkey : recipientPubkey;
 
-    if (!decryptFn) return null;
+    // Try manual NIP-04 decryption first
+    try {
+      const decrypted = await decryptNIP04Manual(privateKey, peerPubkey, evt.content);
+      if (decrypted) return decrypted;
+    } catch (manualError) {
+      console.warn('[NOSTR] Manual NIP-04 decryption failed:', manualError.message);
+    }
 
-    const decrypted = await decryptFn(privateKey, peerPubkey, evt.content);
-    return decrypted;
+    // Fallback to nostr-tools if available
+    if (decryptFn) {
+      const decrypted = await decryptFn(privateKey, peerPubkey, evt.content);
+      return decrypted;
+    }
+
+    return null;
   } catch (error) {
     console.warn('[NOSTR] Failed to decrypt DM:', error.message);
     return null;
+  }
+}
+
+// Manual NIP-04 encryption implementation
+async function encryptNIP04Manual(privateKey, peerPubkey, message) {
+  try {
+    const crypto = require('crypto');
+    const secp = require('@noble/secp256k1');
+
+    // Calculate shared secret
+    const sharedPoint = secp.getSharedSecret(privateKey, "02" + peerPubkey);
+    const sharedX = sharedPoint.substr(2, 64);
+
+    // Generate random IV
+    const iv = crypto.randomBytes(16);
+
+    // Create cipher
+    const cipher = crypto.createCipheriv(
+      "aes-256-cbc",
+      Buffer.from(sharedX, "hex"),
+      iv
+    );
+
+    // Encrypt the message
+    let encrypted = cipher.update(message, "utf8", "base64");
+    encrypted += cipher.final("base64");
+
+    // Combine encrypted message and IV
+    const encryptedContent = `${encrypted}?iv=${iv.toString("base64")}`;
+
+    return encryptedContent;
+  } catch (error) {
+    throw new Error(`Manual NIP-04 encryption failed: ${error.message}`);
   }
 }
 
@@ -69,4 +113,6 @@ module.exports = {
   extractTopicsFromEvent,
   isSelfAuthor,
   decryptDirectMessage,
+  decryptNIP04Manual,
+  encryptNIP04Manual,
 };

@@ -40,8 +40,33 @@ function isSelfAuthor(evt, selfPkHex) {
   }
 }
 
+async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
+  if (!evt || evt.kind !== 4 || !privateKey || !publicKey) return null;
+  try {
+    // Find the recipient pubkey from tags
+    const recipientTag = evt.tags.find(tag => tag[0] === 'p');
+    if (!recipientTag || !recipientTag[1]) return null;
+
+    const recipientPubkey = recipientTag[1];
+    const senderPubkey = evt.pubkey;
+
+    // Determine which key to use for decryption
+    // If we're the sender, use recipient's pubkey; if we're the recipient, use sender's pubkey
+    const peerPubkey = (recipientPubkey === publicKey) ? senderPubkey : recipientPubkey;
+
+    if (!decryptFn) return null;
+
+    const decrypted = await decryptFn(privateKey, peerPubkey, evt.content);
+    return decrypted;
+  } catch (error) {
+    console.warn('[NOSTR] Failed to decrypt DM:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
   getConversationIdFromEvent,
   extractTopicsFromEvent,
   isSelfAuthor,
+  decryptDirectMessage,
 };

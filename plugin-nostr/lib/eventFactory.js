@@ -100,4 +100,14 @@ function buildContacts(pubkeys) {
   };
 }
 
-module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts };
+function buildDirectMessage(recipientPubkey, text, createdAtSec) {
+  if (!recipientPubkey) return null;
+  return {
+    kind: 4,
+    created_at: createdAtSec ?? Math.floor(Date.now() / 1000),
+    tags: [['p', recipientPubkey]],
+    content: String(text ?? ''),
+  };
+}
+
+module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildDirectMessage };

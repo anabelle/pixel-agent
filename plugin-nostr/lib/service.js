@@ -143,6 +143,11 @@ class NostrService {
     this.lastReplyByUser = new Map();
     this.pendingReplyTimers = new Map();
     this.zapCooldownByUser = new Map();
+
+    // DM (Direct Message) configuration
+    this.dmEnabled = true;
+    this.dmReplyEnabled = true;
+    this.dmThrottleSec = 60;
     this.discoveryEnabled = true;
     this.discoveryTimer = null;
     this.discoveryMinSec = 900;
@@ -303,6 +308,11 @@ class NostrService {
     const unfollowMinPostsThreshold = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_POSTS_THRESHOLD') ?? '5');
     const unfollowCheckIntervalHours = Number(runtime.getSetting('NOSTR_UNFOLLOW_CHECK_INTERVAL_HOURS') ?? '24');
 
+    // DM (Direct Message) configuration
+    const dmVal = runtime.getSetting('NOSTR_DM_ENABLE');
+    const dmReplyVal = runtime.getSetting('NOSTR_DM_REPLY_ENABLE');
+    const dmThrottleVal = runtime.getSetting('NOSTR_DM_THROTTLE_SEC');
+
     svc.relays = relays;
     svc.sk = sk;
     svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
@@ -337,6 +347,11 @@ class NostrService {
     svc.unfollowMinPostsThreshold = Math.max(1, Math.min(100, unfollowMinPostsThreshold));
     svc.unfollowCheckIntervalHours = Math.max(1, Math.min(168, unfollowCheckIntervalHours)); // 1 hour to 1 week
 
+    // DM (Direct Message) configuration
+    svc.dmEnabled = String(dmVal ?? 'true').toLowerCase() === 'true';
+    svc.dmReplyEnabled = String(dmReplyVal ?? 'true').toLowerCase() === 'true';
+    svc.dmThrottleSec = normalizeSeconds(dmThrottleVal ?? '60', 'NOSTR_DM_THROTTLE_SEC');
+
     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}`);
 
     if (!relays.length) {
@@ -364,12 +379,14 @@ class NostrService {
           relays,
           [
             { kinds: [1], '#p': [svc.pkHex] },
+            { kinds: [4], '#p': [svc.pkHex] },
             { kinds: [9735], authors: undefined, limit: 0, '#p': [svc.pkHex] },
           ],
           {
             onevent(evt) {
               logger.info(`[NOSTR] Mention from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
               if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+              if (evt.kind === 4) { svc.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
               if (evt.kind === 9735) { svc.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
               svc.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err));
             },
@@ -1086,6 +1103,32 @@ class NostrService {
     } catch (err) { logger.debug('[NOSTR] Reaction failed:', err?.message || err); return false; }
   }
 
+  async postDM(recipientEvt, text) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!recipientEvt || !recipientEvt.pubkey) return false;
+      if (!text || !text.trim()) return false;
+
+      const recipientPubkey = recipientEvt.pubkey;
+      const createdAtSec = Math.floor(Date.now() / 1000);
+
+      // Build the DM event
+      const { buildDirectMessage } = require('./eventFactory');
+      const evtTemplate = buildDirectMessage(recipientPubkey, text.trim(), createdAtSec);
+
+      if (!evtTemplate) return false;
+
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+
+      logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
+      return true;
+    } catch (err) {
+      logger.warn('[NOSTR] DM send failed:', err?.message || err);
+      return false;
+    }
+  }
+
   async saveInteractionMemory(kind, evt, extra) {
   const { saveInteractionMemory } = require('./context');
   return saveInteractionMemory(this.runtime, createUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
@@ -1112,6 +1155,150 @@ class NostrService {
   await this.postReply(prepared.parent, prepared.text, prepared.options);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => {});
     } catch (err) { logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
+  }
+
+  async handleDM(evt) {
+    try {
+      if (!evt || evt.kind !== 4) return;
+      if (!this.pkHex) return;
+      if (isSelfAuthor(evt, this.pkHex)) return;
+      if (!this.dmEnabled) { logger.info('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); return; }
+      if (!this.dmReplyEnabled) { logger.info('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); return; }
+      if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to DM'); return; }
+      if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send DM reply'); return; }
+
+      // Decrypt the DM content
+      const { decryptDirectMessage } = require('./nostr');
+      const decryptedContent = await decryptDirectMessage(evt, this.sk, this.pkHex, this.runtime?.nip19?.decrypt || null);
+      if (!decryptedContent) {
+        logger.warn('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8));
+        return;
+      }
+
+      logger.info(`[NOSTR] DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+
+      // Check for duplicate handling
+      if (this.handledEventIds.has(evt.id)) {
+        logger.info(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`);
+        return;
+      }
+      this.handledEventIds.add(evt.id);
+
+      // Save DM as memory
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
+
+      const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
+      const memory = {
+        id: eventMemoryId,
+        entityId,
+        agentId: runtime.agentId,
+        roomId,
+        content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } },
+        createdAt: createdAtMs,
+      };
+      await this._createMemorySafe(memory, 'messages');
+      logger.info(`[NOSTR] Saved DM as memory id=${eventMemoryId}`);
+
+      // Check for existing reply
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
+        const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) {
+          logger.info(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`);
+          return;
+        }
+      } catch {}
+
+      // Check throttling
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.dmThrottleSec * 1000) {
+        const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          logger.info(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`);
+          const pubkey = evt.pubkey;
+          const parentEvt = { ...evt };
+          const capturedRoomId = roomId;
+          const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              logger.info(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
+              try {
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 10 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
+                if (hasReply) {
+                  logger.info(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
+                  return;
+                }
+              } catch {}
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0;
+              const now2 = Date.now();
+              if (now2 - lastNow < this.dmThrottleSec * 1000) {
+                logger.info(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
+                return;
+              }
+              this.lastReplyByUser.set(pubkey, now2);
+              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+              logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
+              const ok = await this.postDM(parentEvt, replyText);
+              if (ok) {
+                const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
+                await this._createMemorySafe({
+                  id: linkId,
+                  entityId,
+                  agentId: this.runtime.agentId,
+                  roomId: capturedRoomId,
+                  content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId },
+                  createdAt: now2,
+                }, 'messages').catch(() => {});
+              }
+            } catch (e) {
+              logger.warn('[NOSTR] Scheduled DM reply failed:', e?.message || e);
+            }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        } else {
+          logger.debug(`[NOSTR] DM reply already scheduled for ${evt.pubkey.slice(0, 8)}`);
+        }
+        return;
+      }
+
+      this.lastReplyByUser.set(evt.pubkey, now);
+
+      // Add initial delay
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) {
+        logger.info(`[NOSTR] Preparing DM reply; thinking for ~${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        logger.info(`[NOSTR] Preparing immediate DM reply (no delay)`);
+      }
+
+      const replyText = await this.generateReplyTextLLM(evt, roomId);
+      logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
+      const replyOk = await this.postDM(evt, replyText);
+      if (replyOk) {
+        logger.info(`[NOSTR] DM reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
+        const replyMemory = {
+          id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`),
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId },
+          createdAt: now,
+        };
+        await this._createMemorySafe(replyMemory, 'messages');
+      }
+    } catch (err) {
+      logger.warn('[NOSTR] handleDM failed:', err?.message || err);
+    }
   }
 
   async stop() {

@@ -678,6 +678,10 @@ export const character: Character = {
     // Time-based filtering for old messages (ISO 8601 format)
     NOSTR_MESSAGE_CUTOFF_DATE:
       process.env.NOSTR_MESSAGE_CUTOFF_DATE || "2025-08-28T00:00:00Z",
+    // DM (Direct Message) settings
+    NOSTR_DM_ENABLE: process.env.NOSTR_DM_ENABLE || "true",
+    NOSTR_DM_REPLY_ENABLE: process.env.NOSTR_DM_REPLY_ENABLE || "true",
+    NOSTR_DM_THROTTLE_SEC: process.env.NOSTR_DM_THROTTLE_SEC || "60",
   // LNPixels WS for activity stream
   LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "https://lnpixels.qzz.io",
     // Shell plugin settings

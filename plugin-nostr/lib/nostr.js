@@ -40,6 +40,35 @@ function isSelfAuthor(evt, selfPkHex) {
   }
 }
 
+function _bytesToHex(bytes) {
+  if (!bytes || typeof bytes.length !== 'number') return '';
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function _normalizePrivKeyHex(privateKey) {
+  if (!privateKey) return null;
+  if (typeof privateKey === 'string') return privateKey.toLowerCase();
+  if (privateKey instanceof Uint8Array || Array.isArray(privateKey)) return _bytesToHex(privateKey);
+  // Try Buffer
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer && Buffer.isBuffer(privateKey)) return privateKey.toString('hex');
+  return null;
+}
+
+function _getSharedXHex(privateKey, peerPubkeyHex) {
+  const secp = require('@noble/secp256k1');
+  const shared = secp.getSharedSecret(privateKey, '02' + peerPubkeyHex); // compressed
+  if (typeof shared === 'string') {
+    // Drop prefix byte (2 chars) and keep next 64 chars (32 bytes X)
+    return shared.length >= 66 ? shared.slice(2, 66) : shared;
+  }
+  // Uint8Array: first byte is prefix, next 32 bytes are X
+  if (shared && shared.length >= 33) {
+    const xBytes = shared.length === 32 ? shared : shared.slice(1, 33);
+    return _bytesToHex(xBytes);
+  }
+  return _bytesToHex(shared);
+}
+
 async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
   if (!evt || evt.kind !== 4 || !privateKey || !publicKey) return null;
   try {
@@ -47,12 +76,13 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
     const recipientTag = evt.tags.find(tag => tag[0] === 'p');
     if (!recipientTag || !recipientTag[1]) return null;
 
-    const recipientPubkey = recipientTag[1];
-    const senderPubkey = evt.pubkey;
+  const recipientPubkey = String(recipientTag[1]).toLowerCase();
+  const senderPubkey = String(evt.pubkey).toLowerCase();
+  const selfPubkey = String(publicKey).toLowerCase();
 
     // Determine which key to use for decryption
     // If we're the recipient, use sender's pubkey; if we're the sender, use recipient's pubkey
-    const peerPubkey = (recipientPubkey === publicKey) ? senderPubkey : recipientPubkey;
+  const peerPubkey = (recipientPubkey === selfPubkey) ? senderPubkey : recipientPubkey;
 
     // Try manual NIP-04 decryption first
     try {
@@ -64,7 +94,8 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
 
     // Fallback to nostr-tools if available
     if (decryptFn) {
-      const decrypted = await decryptFn(privateKey, peerPubkey, evt.content);
+      const privHex = _normalizePrivKeyHex(privateKey) || privateKey;
+      const decrypted = await decryptFn(privHex, peerPubkey, evt.content);
       return decrypted;
     }
 
@@ -79,11 +110,8 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
 async function encryptNIP04Manual(privateKey, peerPubkey, message) {
   try {
     const crypto = require('crypto');
-    const secp = require('@noble/secp256k1');
-
-    // Calculate shared secret
-    const sharedPoint = secp.getSharedSecret(privateKey, "02" + peerPubkey);
-    const sharedX = sharedPoint.substr(2, 64);
+  const priv = _normalizePrivKeyHex(privateKey) || privateKey;
+  const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
 
     // Generate random IV
     const iv = crypto.randomBytes(16);
@@ -105,6 +133,43 @@ async function encryptNIP04Manual(privateKey, peerPubkey, message) {
     return encryptedContent;
   } catch (error) {
     throw new Error(`Manual NIP-04 encryption failed: ${error.message}`);
+  }
+}
+
+// Manual NIP-04 decryption implementation
+async function decryptNIP04Manual(privateKey, peerPubkey, encryptedContent) {
+  try {
+    const crypto = require('crypto');
+
+    if (!encryptedContent || typeof encryptedContent !== 'string') {
+      throw new Error('Missing encrypted content');
+    }
+
+    const [ciphertextB64, ivPart] = encryptedContent.split('?iv=');
+    if (!ciphertextB64 || !ivPart) {
+      throw new Error('Invalid NIP-04 payload format');
+    }
+
+    const iv = Buffer.from(ivPart, 'base64');
+    if (iv.length !== 16) {
+      throw new Error('Invalid IV length');
+    }
+
+  // Calculate shared secret
+  const priv = _normalizePrivKeyHex(privateKey) || privateKey;
+  const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
+
+    const decipher = crypto.createDecipheriv(
+      'aes-256-cbc',
+      Buffer.from(sharedX, 'hex'),
+      iv
+    );
+
+    let decrypted = decipher.update(ciphertextB64, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (error) {
+    throw new Error(`Manual NIP-04 decryption failed: ${error.message}`);
   }
 }
 

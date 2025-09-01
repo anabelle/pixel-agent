@@ -169,10 +169,10 @@ class NostrService {
     this.homeFeedUnsub = null;
 
     // Unfollow configuration
-    this.unfollowEnabled = false; // Disabled by default to prevent mass unfollows
-    this.unfollowMinQualityScore = 0.1; // Lower threshold to be less aggressive
+    this.unfollowEnabled = true; // Disabled by default to prevent mass unfollows
+    this.unfollowMinQualityScore = 0.2; // Lower threshold to be less aggressive
     this.unfollowMinPostsThreshold = 10; // Higher threshold - need more posts before considering
-    this.unfollowCheckIntervalHours = 168; // Weekly checks instead of daily
+    this.unfollowCheckIntervalHours = 12; // Bi-daily checks instead of daily
     this.userQualityScores = new Map(); // Track quality scores per user
     this.userPostCounts = new Map(); // Track post counts per user
     this.lastUnfollowCheck = 0; // Timestamp of last unfollow check

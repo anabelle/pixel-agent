@@ -1120,7 +1120,7 @@ class NostrService {
       try {
         encryptedContent = await encryptNIP04Manual(this.sk, recipientPubkey, text.trim());
       } catch (encryptError) {
-        logger.warn('[NOSTR] Manual encryption failed, trying nostr-tools:', encryptError.message);
+        logger.info('[NOSTR] Using nostr-tools for DM encryption (manual unavailable):', encryptError?.message || encryptError);
         // Fallback to nostr-tools encryption
         if (nip04?.encrypt) {
           encryptedContent = await nip04.encrypt(this.sk, recipientPubkey, text.trim());

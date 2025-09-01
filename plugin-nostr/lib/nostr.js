@@ -55,7 +55,7 @@ function _normalizePrivKeyHex(privateKey) {
 }
 
 function _getSharedXHex(privateKey, peerPubkeyHex) {
-  const secp = require('@noble/secp256k1');
+  const secp = _getSecpOptional();
   const shared = secp.getSharedSecret(privateKey, '02' + peerPubkeyHex); // compressed
   if (typeof shared === 'string') {
     // Drop prefix byte (2 chars) and keep next 64 chars (32 bytes X)
@@ -84,19 +84,20 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
     // If we're the recipient, use sender's pubkey; if we're the sender, use recipient's pubkey
   const peerPubkey = (recipientPubkey === selfPubkey) ? senderPubkey : recipientPubkey;
 
-    // Try manual NIP-04 decryption first
+    // Prefer nostr-tools if available
+    if (decryptFn) {
+      const privHex = _normalizePrivKeyHex(privateKey) || privateKey;
+      const decrypted = await decryptFn(privHex, peerPubkey, evt.content);
+      if (decrypted) return decrypted;
+    }
+
+    // Fallback to manual NIP-04 decryption (optional)
     try {
       const decrypted = await decryptNIP04Manual(privateKey, peerPubkey, evt.content);
       if (decrypted) return decrypted;
     } catch (manualError) {
-      console.warn('[NOSTR] Manual NIP-04 decryption failed:', manualError.message);
-    }
-
-    // Fallback to nostr-tools if available
-    if (decryptFn) {
-      const privHex = _normalizePrivKeyHex(privateKey) || privateKey;
-      const decrypted = await decryptFn(privHex, peerPubkey, evt.content);
-      return decrypted;
+      // Keep this quiet in production; tools path usually works and we don't want noisy logs
+      console.debug?.('[NOSTR] Manual NIP-04 decryption failed (optional):', manualError.message);
     }
 
     return null;
@@ -170,6 +171,15 @@ async function decryptNIP04Manual(privateKey, peerPubkey, encryptedContent) {
     return decrypted;
   } catch (error) {
     throw new Error(`Manual NIP-04 decryption failed: ${error.message}`);
+  }
+}
+
+// Internal: optional noble require via shared-secret helper
+function _getSecpOptional() {
+  try {
+    return require('@noble/secp256k1');
+  } catch (e) {
+    throw new Error('SECP256K1_NOT_AVAILABLE');
   }
 }
 

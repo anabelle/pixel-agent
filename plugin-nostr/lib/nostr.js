@@ -65,7 +65,6 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
     // Fallback to nostr-tools if available
     if (decryptFn) {
       const decrypted = await decryptFn(privateKey, peerPubkey, evt.content);
-      console.info('[NOSTR] Fallback NIP-04 decryption succeeded');
       return decrypted;
     }
 

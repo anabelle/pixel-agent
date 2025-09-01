@@ -64,6 +64,29 @@ function buildReaction(parentEvt, symbol = '+') {
   };
 }
 
+function buildRepost(parentEvt) {
+  if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
+  const created_at = Math.floor(Date.now() / 1000);
+  return {
+    kind: 6,
+    created_at,
+    tags: [ ['e', parentEvt.id], ['p', parentEvt.pubkey] ],
+    content: JSON.stringify(parentEvt),
+  };
+}
+
+function buildQuoteRepost(parentEvt, quoteText) {
+  if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
+  const created_at = Math.floor(Date.now() / 1000);
+  const content = quoteText ? `${quoteText}\n\nReposted from: ${JSON.stringify(parentEvt)}` : JSON.stringify(parentEvt);
+  return {
+    kind: 1,
+    created_at,
+    tags: [ ['e', parentEvt.id], ['p', parentEvt.pubkey] ],
+    content,
+  };
+}
+
 function buildContacts(pubkeys) {
   const tags = [];
   for (const pk of pubkeys || []) {
@@ -77,4 +100,4 @@ function buildContacts(pubkeys) {
   };
 }
 
-module.exports = { buildTextNote, buildReplyNote, buildReaction, buildContacts };
+module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts };

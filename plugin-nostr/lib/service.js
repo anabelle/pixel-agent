@@ -15,7 +15,7 @@ const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandi
 const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
-const { buildTextNote, buildReplyNote, buildReaction, buildContacts } = require('./eventFactory');
+const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts } = require('./eventFactory');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -156,6 +156,27 @@ class NostrService {
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
 
+    // Home feed configuration
+    this.homeFeedEnabled = true;
+    this.homeFeedTimer = null;
+    this.homeFeedMinSec = 300; // Check home feed every 5 minutes
+    this.homeFeedMaxSec = 900; // Up to 15 minutes
+    this.homeFeedReactionChance = 0.15; // 15% chance to react to a post
+    this.homeFeedRepostChance = 0.05; // 5% chance to repost
+    this.homeFeedQuoteChance = 0.02; // 2% chance to quote repost
+    this.homeFeedMaxInteractions = 3; // Max interactions per home feed check
+    this.homeFeedProcessedEvents = new Set(); // Track processed events
+    this.homeFeedUnsub = null;
+
+    // Unfollow configuration
+    this.unfollowEnabled = true;
+    this.unfollowMinQualityScore = 0.3; // Minimum quality score to avoid unfollow
+    this.unfollowMinPostsThreshold = 5; // Minimum posts before considering unfollow
+    this.unfollowCheckIntervalHours = 24; // Check for unfollow candidates every 24 hours
+    this.userQualityScores = new Map(); // Track quality scores per user
+    this.userPostCounts = new Map(); // Track post counts per user
+    this.lastUnfollowCheck = 0; // Timestamp of last unfollow check
+
   // Dedupe cache for pixel.bought events (cross-listener safety)
   this._pixelSeen = new Map(); // key -> timestamp
   this._pixelSeenTTL = 5 * 60 * 1000; // 5 minutes
@@ -276,6 +297,19 @@ class NostrService {
     const discoveryThresholdDecrement = Number(runtime.getSetting('NOSTR_DISCOVERY_THRESHOLD_DECREMENT') ?? '0.05');
     const discoveryQualityStrictness = runtime.getSetting('NOSTR_DISCOVERY_QUALITY_STRICTNESS') ?? 'normal';
 
+    const homeFeedVal = runtime.getSetting('NOSTR_HOME_FEED_ENABLE');
+    const homeFeedMin = normalizeSeconds(runtime.getSetting('NOSTR_HOME_FEED_INTERVAL_MIN') ?? '300', 'NOSTR_HOME_FEED_INTERVAL_MIN');
+    const homeFeedMax = normalizeSeconds(runtime.getSetting('NOSTR_HOME_FEED_INTERVAL_MAX') ?? '900', 'NOSTR_HOME_FEED_INTERVAL_MAX');
+    const homeFeedReactionChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REACTION_CHANCE') ?? '0.15');
+    const homeFeedRepostChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REPOST_CHANCE') ?? '0.05');
+    const homeFeedQuoteChance = Number(runtime.getSetting('NOSTR_HOME_FEED_QUOTE_CHANCE') ?? '0.02');
+    const homeFeedMaxInteractions = Number(runtime.getSetting('NOSTR_HOME_FEED_MAX_INTERACTIONS') ?? '3');
+
+    const unfollowVal = runtime.getSetting('NOSTR_UNFOLLOW_ENABLE');
+    const unfollowMinQualityScore = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_QUALITY_SCORE') ?? '0.3');
+    const unfollowMinPostsThreshold = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_POSTS_THRESHOLD') ?? '5');
+    const unfollowCheckIntervalHours = Number(runtime.getSetting('NOSTR_UNFOLLOW_CHECK_INTERVAL_HOURS') ?? '24');
+
     svc.relays = relays;
     svc.sk = sk;
     svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
@@ -297,7 +331,20 @@ class NostrService {
     svc.discoveryThresholdDecrement = discoveryThresholdDecrement;
     svc.discoveryQualityStrictness = discoveryQualityStrictness;
 
-    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}`);
+    svc.homeFeedEnabled = String(homeFeedVal ?? 'true').toLowerCase() === 'true';
+    svc.homeFeedMinSec = homeFeedMin;
+    svc.homeFeedMaxSec = homeFeedMax;
+    svc.homeFeedReactionChance = Math.max(0, Math.min(1, homeFeedReactionChance));
+    svc.homeFeedRepostChance = Math.max(0, Math.min(1, homeFeedRepostChance));
+    svc.homeFeedQuoteChance = Math.max(0, Math.min(1, homeFeedQuoteChance));
+    svc.homeFeedMaxInteractions = Math.max(1, Math.min(10, homeFeedMaxInteractions));
+
+    svc.unfollowEnabled = String(unfollowVal ?? 'true').toLowerCase() === 'true';
+    svc.unfollowMinQualityScore = Math.max(0, Math.min(1, unfollowMinQualityScore));
+    svc.unfollowMinPostsThreshold = Math.max(1, Math.min(100, unfollowMinPostsThreshold));
+    svc.unfollowCheckIntervalHours = Math.max(1, Math.min(168, unfollowCheckIntervalHours)); // 1 hour to 1 week
+
+    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
@@ -343,6 +390,7 @@ class NostrService {
 
     if (postEnabled && sk) svc.scheduleNextPost(minSec, maxSec);
     if (svc.discoveryEnabled && sk) svc.scheduleNextDiscovery();
+    if (svc.homeFeedEnabled && sk) svc.startHomeFeed();
 
     // Start LNPixels listener for external-triggered posts
     try {
@@ -350,7 +398,7 @@ class NostrService {
       if (typeof startLNPixelsListener === 'function') startLNPixelsListener(svc.runtime);
     } catch {}
 
-    logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled}`);
+    logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled} homeFeed=${svc.homeFeedEnabled}`);
     return svc;
   }
 
@@ -1065,6 +1113,328 @@ class NostrService {
   async stop() {
     if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+    if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
+    if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
+    if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
+    if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch {} } this.pendingReplyTimers.clear(); }
+    logger.info('[NOSTR] Service stopped');
+  }
+
+  async startHomeFeed() {
+    if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
+
+    try {
+      // Load current contacts (followed users)
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.size) {
+        logger.debug('[NOSTR] No contacts to follow for home feed');
+        return;
+      }
+
+      const authors = Array.from(contacts);
+      logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
+
+      // Subscribe to posts from followed users
+      this.homeFeedUnsub = this.pool.subscribeMany(
+        this.relays,
+        [{ kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 3600 }], // Last hour
+        {
+          onevent: (evt) => {
+            if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
+            if (this.homeFeedProcessedEvents.has(evt.id)) return;
+            this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
+          },
+          oneose: () => { logger.debug('[NOSTR] Home feed subscription OSE'); },
+        }
+      );
+
+      // Schedule periodic home feed processing
+      this.scheduleNextHomeFeedCheck();
+
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to start home feed:', err?.message || err);
+    }
+  }
+
+  scheduleNextHomeFeedCheck() {
+    const jitter = this.homeFeedMinSec + Math.floor(Math.random() * Math.max(1, this.homeFeedMaxSec - this.homeFeedMinSec));
+    if (this.homeFeedTimer) clearTimeout(this.homeFeedTimer);
+    this.homeFeedTimer = setTimeout(() => this.processHomeFeed().finally(() => this.scheduleNextHomeFeedCheck()), jitter * 1000);
+    logger.info(`[NOSTR] Next home feed check in ~${jitter}s`);
+  }
+
+  async processHomeFeed() {
+    if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
+
+    try {
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.size) return;
+
+      const authors = Array.from(contacts);
+      const since = Math.floor(Date.now() / 1000) - 1800; // Last 30 minutes
+
+      // Fetch recent posts from followed users
+      const events = await this._list(this.relays, [{ kinds: [1], authors, limit: 50, since }]);
+
+      if (!events.length) {
+        logger.debug('[NOSTR] No recent posts in home feed');
+        return;
+      }
+
+      // Filter and sort events
+      const qualityEvents = events
+        .filter(evt => !this.homeFeedProcessedEvents.has(evt.id))
+        .filter(evt => this._isQualityContent(evt, 'general', 'relaxed'))
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+        .slice(0, 20); // Process up to 20 recent posts
+
+      if (!qualityEvents.length) {
+        logger.debug('[NOSTR] No quality posts to process in home feed');
+        return;
+      }
+
+      logger.info(`[NOSTR] Processing ${qualityEvents.length} home feed posts`);
+
+      let interactions = 0;
+      for (const evt of qualityEvents) {
+        if (interactions >= this.homeFeedMaxInteractions) break;
+
+        const interactionType = this._chooseInteractionType();
+        if (!interactionType) continue;
+
+        try {
+          let success = false;
+          switch (interactionType) {
+            case 'reaction':
+              success = await this.postReaction(evt, '+');
+              break;
+            case 'repost':
+              success = await this.postRepost(evt);
+              break;
+            case 'quote':
+              success = await this.postQuoteRepost(evt);
+              break;
+          }
+
+          if (success) {
+            this.homeFeedProcessedEvents.add(evt.id);
+            interactions++;
+            logger.info(`[NOSTR] Home feed ${interactionType} to ${evt.pubkey.slice(0, 8)}`);
+          }
+        } catch (err) {
+          logger.debug(`[NOSTR] Home feed ${interactionType} failed:`, err?.message || err);
+        }
+
+        // Small delay between interactions
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+      }
+
+      logger.info(`[NOSTR] Home feed processing complete: ${interactions} interactions`);
+
+      // Check for unfollow candidates periodically
+      await this._checkForUnfollowCandidates();
+
+    } catch (err) {
+      logger.warn('[NOSTR] Home feed processing failed:', err?.message || err);
+    }
+  }
+
+  _chooseInteractionType() {
+    const rand = Math.random();
+    if (rand < this.homeFeedReactionChance) return 'reaction';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) return 'repost';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) return 'quote';
+    return null;
+  }
+
+  async postRepost(parentEvt) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
+
+      const evtTemplate = buildRepost(parentEvt);
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
+      return true;
+    } catch (err) {
+      logger.debug('[NOSTR] Repost failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  async postQuoteRepost(parentEvt) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
+
+      // Generate quote text using LLM
+      const quoteText = await this.generateQuoteTextLLM(parentEvt);
+      if (!quoteText) return false;
+
+      const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
+      return true;
+    } catch (err) {
+      logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  async generateQuoteTextLLM(evt) {
+    const prompt = `Quote and comment on this Nostr post in your unique voice as ${this.runtime.character?.name || 'an AI agent'}:
+
+Original post: "${evt.content}"
+
+Write a brief, engaging quote repost that adds value or provides context. Keep it under 200 characters.`;
+
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 100, temperature: 0.8 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => `Interesting perspective on "${evt.content.slice(0, 1000)}..."`
+    );
+    return text || null;
+  }
+
+  async handleHomeFeedEvent(evt) {
+    // Mark as processed to avoid duplicate processing
+    this.homeFeedProcessedEvents.add(evt.id);
+
+    // Update user quality tracking
+    if (evt.pubkey && evt.content) {
+      this._updateUserQualityScore(evt.pubkey, evt);
+    }
+
+    // Optional: Log home feed events for debugging
+    logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
+  }
+
+  _updateUserQualityScore(pubkey, evt) {
+    if (!pubkey || !evt || !evt.content) return;
+
+    // Increment post count
+    const currentCount = this.userPostCounts.get(pubkey) || 0;
+    this.userPostCounts.set(pubkey, currentCount + 1);
+
+    // Calculate quality score for this post
+    const isQuality = this._isQualityContent(evt, 'general', 'normal');
+    const qualityScore = isQuality ? 1 : 0;
+
+    // Update running average quality score
+    const currentAvgScore = this.userQualityScores.get(pubkey) || 0;
+    const newCount = currentCount + 1;
+    const newAvgScore = ((currentAvgScore * currentCount) + qualityScore) / newCount;
+
+    this.userQualityScores.set(pubkey, newAvgScore);
+
+    logger.debug(`[NOSTR] Updated quality score for ${pubkey.slice(0, 8)}: ${newAvgScore.toFixed(3)} (${newCount} posts)`);
+  }
+
+  async _checkForUnfollowCandidates() {
+    if (!this.unfollowEnabled) return;
+
+    const now = Date.now();
+    const checkIntervalMs = this.unfollowCheckIntervalHours * 60 * 60 * 1000;
+
+    // Only check periodically
+    if (now - this.lastUnfollowCheck < checkIntervalMs) return;
+
+    this.lastUnfollowCheck = now;
+
+    try {
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.size) return;
+
+      const candidates = [];
+      for (const pubkey of contacts) {
+        const postCount = this.userPostCounts.get(pubkey) || 0;
+        const qualityScore = this.userQualityScores.get(pubkey) || 0;
+
+        // Only consider users with enough posts and low quality scores
+        if (postCount >= this.unfollowMinPostsThreshold && qualityScore < this.unfollowMinQualityScore) {
+          candidates.push({ pubkey, postCount, qualityScore });
+        }
+      }
+
+      if (candidates.length === 0) {
+        logger.debug('[NOSTR] No unfollow candidates found');
+        return;
+      }
+
+      // Sort by quality score (worst first) and limit to reasonable number
+      candidates.sort((a, b) => a.qualityScore - b.qualityScore);
+      const toUnfollow = candidates.slice(0, Math.min(5, candidates.length)); // Max 5 unfollows per check
+
+      logger.info(`[NOSTR] Found ${candidates.length} unfollow candidates, processing ${toUnfollow.length}`);
+
+      for (const candidate of toUnfollow) {
+        try {
+          const success = await this._unfollowUser(candidate.pubkey);
+          if (success) {
+            logger.info(`[NOSTR] Unfollowed ${candidate.pubkey.slice(0, 8)} (quality: ${candidate.qualityScore.toFixed(3)}, posts: ${candidate.postCount})`);
+          }
+        } catch (err) {
+          logger.debug(`[NOSTR] Failed to unfollow ${candidate.pubkey.slice(0, 8)}:`, err?.message || err);
+        }
+
+        // Small delay between unfollows
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+      }
+
+    } catch (err) {
+      logger.warn('[NOSTR] Unfollow check failed:', err?.message || err);
+    }
+  }
+
+  async _unfollowUser(pubkey) {
+    if (!pubkey || !this.pool || !this.sk || !this.relays.length || !this.pkHex) return false;
+
+    try {
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.has(pubkey)) {
+        logger.debug(`[NOSTR] User ${pubkey.slice(0, 8)} not in contacts`);
+        return false;
+      }
+
+      // Remove from contacts
+      const newContacts = new Set(contacts);
+      newContacts.delete(pubkey);
+
+      // Publish updated contacts list
+      const success = await this._publishContacts(newContacts);
+
+      if (success) {
+        // Clean up tracking data
+        this.userQualityScores.delete(pubkey);
+        this.userPostCounts.delete(pubkey);
+      }
+
+      return success;
+    } catch (err) {
+      logger.debug(`[NOSTR] Unfollow failed for ${pubkey.slice(0, 8)}:`, err?.message || err);
+      return false;
+    }
+  }
+
+  async stop() {
+    if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
+    if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+    if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
     if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch {} } this.pendingReplyTimers.clear(); }

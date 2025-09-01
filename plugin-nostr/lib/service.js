@@ -980,6 +980,11 @@ class NostrService {
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
         if (hasReply) { logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); return; }
       } catch {}
+      // Check if home feed has already processed this event
+      if (this.homeFeedProcessedEvents && this.homeFeedProcessedEvents.has(evt.id)) {
+        logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (already processed by home feed)`);
+        return;
+      }
       if (!this.replyEnabled) { logger.info('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); return; }
       if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying'); return; }
       if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send reply'); return; }
@@ -999,6 +1004,11 @@ class NostrService {
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) { logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); return; }
               } catch {}
+              // Check if home feed has already processed this event
+              if (this.homeFeedProcessedEvents && this.homeFeedProcessedEvents.has(parentEvt.id)) {
+                logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (already processed by home feed)`);
+                return;
+              }
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
               this.lastReplyByUser.set(pubkey, now2);

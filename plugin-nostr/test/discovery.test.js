@@ -70,7 +70,7 @@ describe('discovery helpers', () => {
       { evt: { pubkey: 'goodUserB' }, score: 0.5 }, // kept
     ];
 
-    const result = selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec);
+    const result = selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, null);
     expect(result).toEqual(['goodUserA', 'goodUserB']);
   });
 });

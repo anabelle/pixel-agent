@@ -169,24 +169,17 @@ class NostrService {
     this.homeFeedUnsub = null;
 
     // Unfollow configuration
-    this.unfollowEnabled = true;
-    this.unfollowMinQualityScore = 0.3; // Minimum quality score to avoid unfollow
-    this.unfollowMinPostsThreshold = 5; // Minimum posts before considering unfollow
-    this.unfollowCheckIntervalHours = 24; // Check for unfollow candidates every 24 hours
+    this.unfollowEnabled = false; // Disabled by default to prevent mass unfollows
+    this.unfollowMinQualityScore = 0.1; // Lower threshold to be less aggressive
+    this.unfollowMinPostsThreshold = 10; // Higher threshold - need more posts before considering
+    this.unfollowCheckIntervalHours = 168; // Weekly checks instead of daily
     this.userQualityScores = new Map(); // Track quality scores per user
     this.userPostCounts = new Map(); // Track post counts per user
     this.lastUnfollowCheck = 0; // Timestamp of last unfollow check
 
-  // Dedupe cache for pixel.bought events (cross-listener safety)
-  this._pixelSeen = new Map(); // key -> timestamp
-  this._pixelSeenTTL = 5 * 60 * 1000; // 5 minutes
-  this._pixelLastPostAt = 0; // timestamp of last successful pixel post
-  this._pixelPostMinIntervalMs = Number(process.env.LNPIXELS_POST_MIN_INTERVAL_MS || 3600000); // default 1 hour
-  this._pixelInFlight = new Set(); // keys currently being processed to prevent concurrent dupes
-  // Track last received pixel event to suppress nearby scheduled posts
-  this._pixelLastEventAt = 0;
-
-    // Bridge: allow external modules to request a post
+    // User social metrics cache (follower/following ratios)
+    this.userSocialMetrics = new Map(); // pubkey -> { followers: number, following: number, ratio: number, lastUpdated: timestamp }
+    this.socialMetricsCacheTTL = 24 * 60 * 60 * 1000; // 24 hours    // Bridge: allow external modules to request a post
     try {
       const { emitter } = require('./bridge');
       if (emitter && typeof emitter.on === 'function') {
@@ -570,6 +563,7 @@ class NostrService {
       this.pkHex,
       this.lastReplyByUser,
       this.replyThrottleSec,
+      this
     );
   }
 
@@ -1331,25 +1325,66 @@ Write a brief, engaging quote repost that adds value or provides context. Keep i
     logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
   }
 
-  _updateUserQualityScore(pubkey, evt) {
-    if (!pubkey || !evt || !evt.content) return;
+  async _getUserSocialMetrics(pubkey) {
+    if (!pubkey || !this.pool) return null;
 
-    // Increment post count
-    const currentCount = this.userPostCounts.get(pubkey) || 0;
-    this.userPostCounts.set(pubkey, currentCount + 1);
+    // Check cache first
+    const cached = this.userSocialMetrics.get(pubkey);
+    const now = Date.now();
+    if (cached && (now - cached.lastUpdated) < this.socialMetricsCacheTTL) {
+      return cached;
+    }
 
-    // Calculate quality score for this post
-    const isQuality = this._isQualityContent(evt, 'general', 'normal');
-    const qualityScore = isQuality ? 1 : 0;
+    try {
+      // Fetch user's contact list (kind 3) to get following count
+      const contactEvents = await this._list(this.relays, [{ kinds: [3], authors: [pubkey], limit: 1 }]);
+      const following = contactEvents.length > 0 && contactEvents[0].tags 
+        ? contactEvents[0].tags.filter(tag => tag[0] === 'p').length 
+        : 0;
 
-    // Update running average quality score
-    const currentAvgScore = this.userQualityScores.get(pubkey) || 0;
-    const newCount = currentCount + 1;
-    const newAvgScore = ((currentAvgScore * currentCount) + qualityScore) / newCount;
+      // Get real follower count by querying contact lists that include this pubkey
+      let followers = 0;
+      try {
+        // Query for contact events that have this pubkey in their p-tags
+        // This gives us users who follow the target user
+        const followerEvents = await this._list(this.relays, [
+          { 
+            kinds: [3], 
+            '#p': [pubkey], 
+            limit: 100 // Limit to avoid excessive queries
+          }
+        ]);
+        
+        // Count unique authors who have this user in their contact list
+        const uniqueFollowers = new Set();
+        for (const event of followerEvents) {
+          if (event.pubkey && event.pubkey !== pubkey) { // Exclude self-follows
+            uniqueFollowers.add(event.pubkey);
+          }
+        }
+        followers = uniqueFollowers.size;
+        
+        logger.debug(`[NOSTR] Real follower count for ${pubkey.slice(0, 8)}: ${followers} (following: ${following})`);
+      } catch (followerErr) {
+        logger.debug(`[NOSTR] Failed to get follower count for ${pubkey.slice(0, 8)}, using following as proxy:`, followerErr?.message || followerErr);
+        followers = following; // Fallback to following count if follower query fails
+      }
 
-    this.userQualityScores.set(pubkey, newAvgScore);
+      const ratio = following > 0 ? followers / following : 0;
 
-    logger.debug(`[NOSTR] Updated quality score for ${pubkey.slice(0, 8)}: ${newAvgScore.toFixed(3)} (${newCount} posts)`);
+      const metrics = {
+        followers,
+        following,
+        ratio,
+        lastUpdated: now
+      };
+
+      this.userSocialMetrics.set(pubkey, metrics);
+      return metrics;
+    } catch (err) {
+      logger.debug(`[NOSTR] Failed to get social metrics for ${pubkey.slice(0, 8)}:`, err?.message || err);
+      return null;
+    }
   }
 
   async _checkForUnfollowCandidates() {

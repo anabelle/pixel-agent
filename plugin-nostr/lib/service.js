@@ -12,7 +12,7 @@ const {
 const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
 const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('./discovery');
-const { buildPostPrompt, buildReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
+const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts } = require('./eventFactory');
@@ -789,7 +789,12 @@ class NostrService {
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt() { return buildPostPrompt(this.runtime.character); }
-  _buildReplyPrompt(evt, recent) { return buildReplyPrompt(this.runtime.character, evt, recent); }
+  _buildReplyPrompt(evt, recent) {
+    if (evt?.kind === 4) {
+      return buildDmReplyPrompt(this.runtime.character, evt, recent);
+    }
+    return buildReplyPrompt(this.runtime.character, evt, recent);
+  }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
 

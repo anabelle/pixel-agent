@@ -54,6 +54,33 @@ function buildReplyPrompt(character, evt, recentMessages) {
   ].filter(Boolean).join('\n\n');
 }
 
+// DM-specific reply prompt (more private, concise, and cautious with links)
+function buildDmReplyPrompt(character, evt, recentMessages) {
+  const ch = character || {};
+  const name = ch.name || 'Agent';
+  const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
+  const whitelist = 'Whitelist rules (DM): Only include URLs/handles if the user explicitly asked and they are on this list: https://lnpixels.qzz.io , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const userText = (evt?.content || '').slice(0, 800);
+  const examples = Array.isArray(ch.postExamples)
+    ? ch.postExamples.length <= 8
+      ? ch.postExamples
+      : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 8)
+    : [];
+  const history = Array.isArray(recentMessages) && recentMessages.length
+    ? `Recent DM context (most recent last):\n` + recentMessages.map((m) => `- ${m.role}: ${m.text}`).join('\n')
+    : '';
+  return [
+    `You are ${name}. Craft a concise, on-character reply to a Nostr direct message (DM). Keep it personable and useful. Never start your messages with "Ah," and NEVER use — . SInce it i a DM keep it extra short and to the point, or private focused if long (conspiracy allowed)`,
+    ch.system ? `Persona/system: ${ch.system}` : '',
+    style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+    examples.length ? `Few-shot examples (style reference only, adapt to the DM):\n- ${examples.join('\n- ')}` : '',
+    whitelist,
+    history,
+    `User DM: "${userText}"`,
+    'Constraints: Output ONLY the DM reply text. 1–2 sentences max. Be direct, kind, and specific to the user message. Do not add links or handles unless directly relevant and asked. Respect whitelist.'
+  ].filter(Boolean).join('\n\n');
+}
+
 function extractTextFromModelResult(result) {
   try {
     if (!result) return '';
@@ -179,6 +206,7 @@ function sanitizeWhitelist(text) {
 module.exports = {
   buildPostPrompt,
   buildReplyPrompt,
+  buildDmReplyPrompt,
   buildZapThanksPrompt,
   buildPixelBoughtPrompt,
   extractTextFromModelResult,

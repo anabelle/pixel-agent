@@ -1260,7 +1260,8 @@ class NostrService {
         if (!existing) {
           logger.info(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`);
           const pubkey = evt.pubkey;
-          const parentEvt = { ...evt };
+          // Carry decrypted content into the scheduled event used for prompt
+          const parentEvt = { ...evt, content: decryptedContent };
           const capturedRoomId = roomId;
           const capturedEventMemoryId = eventMemoryId;
       const timer = setTimeout(async () => {
@@ -1330,7 +1331,9 @@ class NostrService {
         }
       } catch {}
 
-      const replyText = await this.generateReplyTextLLM(evt, roomId);
+  // Use decrypted content for the DM prompt
+  const dmEvt = { ...evt, content: decryptedContent };
+  const replyText = await this.generateReplyTextLLM(dmEvt, roomId);
       logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
       const replyOk = await this.postDM(evt, replyText);
       if (replyOk) {

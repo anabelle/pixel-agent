@@ -169,6 +169,8 @@ function sanitizeWhitelist(text) {
   out = out.replace(/https?:\/\/[^\s)]+/gi, (m) => {
     return m.startsWith('https://lnpixels.qzz.io') || m.startsWith('https://pixel.xx.kg') ? m : '';
   });
+  // Replace emdashes with comma and space to prevent them in Nostr posts
+  out = out.replace(/—/g, ', ');
   // Keep coords like (x,y) and hex colors; they are not URLs so just ensure spacing is normalized later
   out = out.replace(/\s+/g, ' ').trim();
   return out.trim();

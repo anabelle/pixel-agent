@@ -1212,27 +1212,38 @@ class NostrService {
       }
       this.handledEventIds.add(evt.id);
 
-      // Save DM as memory
+      // Save DM as memory (persistent dedup for message itself)
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);
       const conversationId = this._getConversationIdFromEvent(evt);
       const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
 
       const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
-      const memory = {
-        id: eventMemoryId,
-        entityId,
-        agentId: runtime.agentId,
-        roomId,
-        content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } },
-        createdAt: createdAtMs,
-      };
-      await this._createMemorySafe(memory, 'messages');
-      logger.info(`[NOSTR] Saved DM as memory id=${eventMemoryId}`);
+      let alreadySaved = false;
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (existing) {
+          alreadySaved = true;
+          logger.info(`[NOSTR] DM ${evt.id.slice(0, 8)} already in memory (persistent dedup)`);
+        }
+      } catch {}
+
+      if (!alreadySaved) {
+        const memory = {
+          id: eventMemoryId,
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } },
+          createdAt: createdAtMs,
+        };
+        await this._createMemorySafe(memory, 'messages');
+        logger.info(`[NOSTR] Saved DM as memory id=${eventMemoryId}`);
+      }
 
       // Check for existing reply
       try {
-        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
         if (hasReply) {
           logger.info(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`);
@@ -1252,12 +1263,12 @@ class NostrService {
           const parentEvt = { ...evt };
           const capturedRoomId = roomId;
           const capturedEventMemoryId = eventMemoryId;
-          const timer = setTimeout(async () => {
+      const timer = setTimeout(async () => {
             this.pendingReplyTimers.delete(pubkey);
             try {
               logger.info(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
               try {
-                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 10 });
+        const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) {
                   logger.info(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
@@ -1308,6 +1319,16 @@ class NostrService {
       } else {
         logger.info(`[NOSTR] Preparing immediate DM reply (no delay)`);
       }
+
+      // Re-check dedup after think delay in case another process replied meanwhile
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 200 });
+        const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) {
+          logger.info(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} post-think (reply appeared)`);
+          return;
+        }
+      } catch {}
 
       const replyText = await this.generateReplyTextLLM(evt, roomId);
       logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);

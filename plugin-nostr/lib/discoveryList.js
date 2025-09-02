@@ -7,7 +7,8 @@ function chooseRelaysForTopic(defaultRelays, topic) {
   const isArtTopic = /art|pixel|creative|canvas|design|visual/.test(t);
   const isTechTopic = /dev|code|programming|node|typescript|docker/.test(t);
   if (isArtTopic) {
-    return [ 'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social', ...defaultRelays ].slice(0, 4);
+    // Prefer diverse relays; avoid nos.lol to mitigate REQ limits
+    return [ 'wss://relay.damus.io', 'wss://relay.snort.social', ...defaultRelays ].slice(0, 4);
   } else if (isTechTopic) {
     return [ 'wss://relay.damus.io', 'wss://relay.nostr.band', 'wss://relay.snort.social', ...defaultRelays ].slice(0, 4);
   }
@@ -16,7 +17,8 @@ function chooseRelaysForTopic(defaultRelays, topic) {
 
 async function listEventsByTopic(pool, relays, topic, opts = {}) {
   const now = Number.isFinite(opts.now) ? opts.now : Math.floor(Date.now() / 1000);
-  const targetRelays = chooseRelaysForTopic(relays, topic);
+  // Deduplicate relays to avoid duplicate REQs to the same URL
+  const targetRelays = Array.from(new Set(chooseRelaysForTopic(relays, topic)));
   const listImpl = opts.listFn || ((p, r, f) => poolList(p || { list: () => [] }, r, f));
   const isSemanticMatch = opts.isSemanticMatch || ((content, t) => false);
   const isQualityContent = opts.isQualityContent || ((event, t) => true);
@@ -37,10 +39,9 @@ async function listEventsByTopic(pool, relays, topic, opts = {}) {
   filters.push({ kinds: [1], since: now - (timeRange * 0.75), limit: limit * 5 });
   filters.push({ kinds: [1], since: now - (timeRange * 2), limit: Math.floor(limit * 2.5) });
 
-  const searchResults = await Promise.all(
-    filters.map(filter => listImpl(pool, targetRelays, [filter]).catch(() => []))
-  );
-  const allEvents = searchResults.flat().filter(Boolean);
+  // Batch all filters into a single list call to minimize concurrent REQs per relay
+  const batchedResults = await listImpl(pool, targetRelays, filters).catch(() => []);
+  const allEvents = (Array.isArray(batchedResults) ? batchedResults : []).filter(Boolean);
   const uniqueEvents = new Map();
   allEvents.forEach(event => { if (event && event.id && !uniqueEvents.has(event.id)) uniqueEvents.set(event.id, event); });
   const events = Array.from(uniqueEvents.values());

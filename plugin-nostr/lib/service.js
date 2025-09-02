@@ -649,8 +649,14 @@ class NostrService {
         logger.debug(`[NOSTR] Round ${round + 1} expanded search params: ${JSON.stringify(searchParams)}`);
       }
 
-      // Search for events with expanded parameters
-      const buckets = await Promise.all(topics.map((t) => this._listEventsByTopic(t, searchParams)));
+      // Search for events with expanded parameters, serialized to reduce concurrent REQs per relay
+      const buckets = [];
+      for (const topic of topics) {
+        const res = await this._listEventsByTopic(topic, searchParams);
+        buckets.push(res);
+        // Small spacing between requests to avoid hitting relay REQ limits
+        await new Promise((r) => setTimeout(r, 150));
+      }
       const all = buckets.flat();
 
       // Adjust quality strictness based on round and metrics

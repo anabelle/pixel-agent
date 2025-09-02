@@ -41,3 +41,9 @@ Thumbs.db
 
 # ElizaOS database
 .eliza/
+
+# Database backups
+backups/
+*.backup
+*.tar.gz
+backup_summary_*.txt

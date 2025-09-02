@@ -161,6 +161,12 @@ function buildPixelBoughtPrompt(character, activity) {
   // Check if this is a bulk purchase
   const isBulk = activity?.type === 'bulk_purchase';
   const bulkSummary = activity?.summary || '';
+  // Prefer explicit pixelCount from event; fallback to parsing the summary text
+  let pixelCount = typeof activity?.pixelCount === 'number' ? activity.pixelCount : undefined;
+  if (!pixelCount && typeof bulkSummary === 'string') {
+    const m = bulkSummary.match(/(\d+)/);
+    if (m) pixelCount = Number(m[1]);
+  }
   
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 8
@@ -169,11 +175,11 @@ function buildPixelBoughtPrompt(character, activity) {
     : [];
 
   const eventDescription = isBulk 
-    ? `BULK PURCHASE: ${bulkSummary} for ${sats}! This is a major canvas expansion - show excitement for the scale and ambition.`
+    ? `BULK PURCHASE: ${pixelCount ? `${pixelCount} pixels purchased` : (bulkSummary || 'Multiple pixels purchased')}${typeof activity?.totalSats === 'number' ? ` for ${activity.totalSats} sats` : ''}. This is a major canvas expansion—show excitement for the scale and ambition. Do NOT invent coordinates or amounts.`
     : `Event: user placed ${letter}${color}${coords ? ` at ${coords}` : ''} for ${sats}.`;
 
   const bulkGuidance = isBulk 
-    ? 'Bulk purchases are rare and exciting! Express enthusiasm about the scale, the ambition, the canvas transformation. Use words like "explosion," "takeover," "canvas revolution," "pixel storm," etc.'
+    ? `Bulk purchases are rare and exciting! Explicitly mention the total number of pixels${pixelCount ? ` (${pixelCount})` : ''}${typeof activity?.totalSats === 'number' ? ` and acknowledge the total sats (${activity.totalSats})` : ''}. Celebrate the volume/scale and canvas transformation. Use words like "explosion," "takeover," "canvas revolution," "pixel storm," etc.`
     : '';
 
   return [
@@ -184,7 +190,7 @@ function buildPixelBoughtPrompt(character, activity) {
     whitelist,
     eventDescription,
     bulkGuidance,
-    'IF NOT BULK Must include coordinates and color if available (format like: (x,y) #ffeeaa) in the text AND/OR do a comment about it, color, position, etc) IF BULK THEN No details are available so do not make them up, celebrate volume/scale/etc instead.',
+  'IF NOT BULK: Include coords and color if available (e.g., (x,y) #ffeeaa) and/or comment on placement. IF BULK: Do not invent details—celebrate volume/scale. Explicitly mention the total pixel count if known.',
     'Constraints: Output ONLY the post text. 1–2 sentences, ~180 chars max. Avoid generic thank-you. Respect whitelist—no other links/handles. Optional CTA: invite to place just one pixel at https://ln.pixel.xx.kg',
   ].filter(Boolean).join('\n\n');
 }

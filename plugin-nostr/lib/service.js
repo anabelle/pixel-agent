@@ -574,14 +574,15 @@ class NostrService {
 
   _extractTopicsFromEvent(event) { return extractTopicsFromEvent(event); }
 
-  _selectFollowCandidates(scoredEvents, currentContacts) {
-    return selectFollowCandidates(
+  async _selectFollowCandidates(scoredEvents, currentContacts, options = {}) {
+    return await selectFollowCandidates(
       scoredEvents,
       currentContacts,
       this.pkHex,
       this.lastReplyByUser,
       this.replyThrottleSec,
-      this
+      this,
+      options
     );
   }
 
@@ -604,17 +605,8 @@ class NostrService {
     const { publishContacts } = require('./contacts');
     try {
       const ok = await publishContacts(this.pool, this.relays, this.sk, newSet, buildContacts, finalizeEvent);
-      if (ok) {
-        logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
-        // Invalidate social metrics cache for all pubkeys in newSet (force refresh on next access)
-        if (this.userSocialMetrics && typeof this.userSocialMetrics.delete === 'function') {
-          for (const pubkey of newSet) {
-            this.userSocialMetrics.delete(pubkey);
-          }
-        }
-      } else {
-        logger.warn('[NOSTR] Failed to publish contacts (unknown error)');
-      }
+      if (ok) logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
+      else logger.warn('[NOSTR] Failed to publish contacts (unknown error)');
       return ok;
     } catch (err) {
       logger.warn('[NOSTR] Failed to publish contacts:', err?.message || err);
@@ -715,7 +707,9 @@ class NostrService {
     // Attempt to follow new authors based on all collected quality events
     try {
       const current = await this._loadCurrentContacts();
-      const followCandidates = this._selectFollowCandidates(allScoredEvents, current);
+  // Prefer following authors we actually engaged with this run; ignore cooldown for them
+  const ignoreCooldownPks = Array.from(usedAuthors);
+  const followCandidates = await this._selectFollowCandidates(allScoredEvents, current, { ignoreCooldownPks });
       if (followCandidates.length > 0) {
         const toAdd = followCandidates.slice(0, this.discoveryMaxFollows);
         const newSet = new Set([...current, ...toAdd]);

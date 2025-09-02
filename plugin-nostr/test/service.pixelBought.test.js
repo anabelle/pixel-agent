@@ -9,7 +9,7 @@ describe('NostrService pixel.bought flow', () => {
     const { NostrService } = require('../lib/service.js');
     const runtime = {
       character: { name: 'Pixel', style: { post: ['playful'] }, postExamples: ['pixels unite.'] },
-      useModel: async (_t, { prompt }) => ({ text: 'fresh pixel — place yours: https://ln.pixel.xx.kg.io' }),
+      useModel: async (_t, { prompt }) => ({ text: 'fresh pixel — place yours: https://ln.pixel.xx.kg' }),
       getSetting: () => '',
     };
     service = await NostrService.start(runtime);
@@ -28,7 +28,7 @@ describe('NostrService pixel.bought flow', () => {
     expect(service.postOnce).toHaveBeenCalledTimes(1);
     const [textArg] = service.postOnce.mock.calls[0];
     expect(typeof textArg).toBe('string');
-    expect(textArg).toContain('https://ln.pixel.xx.kg.io'); // whitelist respected
+    expect(textArg).toContain('https://ln.pixel.xx.kg'); // whitelist respected
   });
 
   it('falls back when model fails', async () => {
@@ -69,7 +69,7 @@ describe('NostrService pixel.bought flow', () => {
     expect(service.postOnce).toHaveBeenCalledTimes(1);
     const [textArg] = service.postOnce.mock.calls[0];
     expect(typeof textArg).toBe('string');
-    expect(textArg).toContain('https://ln.pixel.xx.kg.io');
+    expect(textArg).toContain('https://ln.pixel.xx.kg');
     // Should either contain "5 pixels" in model result or "explosion" in fallback
     expect(textArg).toMatch(/(5 pixels|explosion)/i);
   });
@@ -109,7 +109,7 @@ describe('NostrService pixel.bought flow', () => {
     expect(service.postOnce).toHaveBeenCalledTimes(1);
     const [textArg] = service.postOnce.mock.calls[0];
     expect(typeof textArg).toBe('string');
-    expect(textArg).toContain('https://ln.pixel.xx.kg.io');
+    expect(textArg).toContain('https://ln.pixel.xx.kg');
     // Should NOT contain individual coordinates for bulk purchases
     expect(textArg).not.toMatch(/\(-5,7\)/);
     expect(textArg).not.toMatch(/#8b5cf6/);

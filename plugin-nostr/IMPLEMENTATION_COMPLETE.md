@@ -90,7 +90,7 @@ LNPixels API → WebSocket → LLM Generation → Bridge → Nostr Service → N
 ### Environment Setup
 ```bash
 # Required environment variable
-export LNPIXELS_WS_URL="wss://ln.pixel.xx.kg.io"
+export LNPIXELS_WS_URL="wss://ln.pixel.xx.kg"
 
 # Install dependencies (already added to package.json)
 npm install socket.io-client

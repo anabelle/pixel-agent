@@ -149,7 +149,17 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
 // Delegate text generation to plugin-nostr service
 
 function makeKey(a) {
-  return a?.event_id || a?.payment_hash || a?.id || (a?.x !== undefined && a?.y !== undefined && a?.created_at ? `${a.x},${a.y},${a.created_at}` : undefined);
+  // Prefer stable identifiers across different event types
+  return (
+    a?.event_id ||
+    a?.payment_hash ||
+    a?.paymentId ||
+    a?.metadata?.quoteId ||
+    a?.id ||
+    (a?.x !== undefined && a?.y !== undefined && a?.created_at
+      ? `${a.x},${a.y},${a.created_at}`
+      : undefined)
+  );
 }
 
 function startLNPixelsListener(runtime) {
@@ -227,26 +237,46 @@ function startLNPixelsListener(runtime) {
       sats: a.sats
     });
     
-    // Handle bulk purchases ONLY if they have metadata.pixelUpdates (the summary event)
+    // Handle bulk purchases
+    // 1) Preferred: metadata.pixelUpdates provided (legacy/server-embedded details)
     if (a.metadata?.pixelUpdates && Array.isArray(a.metadata.pixelUpdates) && a.metadata.pixelUpdates.length > 0) {
-      // Transform to bulk purchase format
       a.type = 'bulk_purchase';
       a.summary = `${a.metadata.pixelUpdates.length} pixels`;
+      a.pixelCount = a.metadata.pixelUpdates.length;
+      a.totalSats = a.metadata.pixelUpdates.reduce((sum, u) => sum + (u?.price || 0), 0);
       // Don't use individual pixel coordinates for bulk purchases
       delete a.x;
       delete a.y;
       delete a.color;
-      log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Bulk purchase summary with ${a.metadata.pixelUpdates.length} pixels`);
+      log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Bulk purchase (with metadata) of ${a.metadata.pixelUpdates.length} pixels`);
       return true;
     }
-    
-    // Reject ALL bulk_purchase events without metadata.pixelUpdates (individual pixels)
+    // 2) Summary-only bulk_purchase events (current server behavior)
     if (a.type === 'bulk_purchase') {
-      log.info?.(`[LNPIXELS-LISTENER] REJECTED: Individual bulk_purchase pixel (no metadata)`);
+      const allowBulkSummary = String(process.env.LNPIXELS_ALLOW_BULK_SUMMARY ?? 'true').toLowerCase() === 'true';
+      if (!allowBulkSummary) {
+        log.info?.(`[LNPIXELS-LISTENER] REJECTED: bulk_purchase summary disabled via env`);
+        return false;
+      }
+      // Accept summary events even without metadata; sanitize pixel fields to avoid implying a single pixel
+      if (typeof a.summary === 'string' && a.summary.toLowerCase().includes('pixel')) {
+  // Try to parse a numeric count, fallback to provided pixelCount
+        if (!a.pixelCount) {
+          const m = a.summary.match(/(\d+)/);
+          if (m) a.pixelCount = Number(m[1]);
+        }
+  // totalSats may be included by server; do not invent it here if missing
+        delete a.x;
+        delete a.y;
+        delete a.color;
+        log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Bulk purchase (summary only): ${a.summary} (count=${a.pixelCount ?? 'n/a'})`);
+        return true;
+      }
+      log.info?.(`[LNPIXELS-LISTENER] REJECTED: bulk_purchase without summary/metadata`);
       return false;
     }
     
-    // Skip ALL payment activities 
+  // Skip ALL payment activities 
     if (a.type === 'payment') {
       log.info?.(`[LNPIXELS-LISTENER] REJECTED: Payment event`);
       return false;

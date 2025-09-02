@@ -5,7 +5,7 @@
 ### ✅ Prerequisites
 ```bash
 # 1. Environment variable
-export LNPIXELS_WS_URL="wss://lnpixels.qzz.io"
+export LNPIXELS_WS_URL="wss://ln.pixel.xx.kg"
 
 # 2. Dependencies already installed
 # socket.io-client is in package.json

@@ -7,7 +7,7 @@ What changed:
 - Falls back to `character.postExamples` only if the LLM is unavailable or errors.
 - Replies are context-aware using the mention content and the character persona/styles.
 - Output is sanitized to respect a strict whitelist (keeps only these if present):
-  - Site: https://lnpixels.qzz.io
+  - Site: https://ln.pixel.xx.kg.io
   - Handle: @PixelSurvivor
   - BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
   - LN: sparepicolo55@walletofsatoshi.com

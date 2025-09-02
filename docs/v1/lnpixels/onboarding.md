@@ -16,7 +16,7 @@ LnPixels is a **collaborative pixel art canvas** where creativity meets Bitcoin 
 ## ⚡ How It Works
 
 ### Getting Started
-1. **Visit**: https://lnpixels.qzz.io
+1. **Visit**: https://ln.pixel.xx.kg
 2. **Select**: Click any pixel or click and then click+shift to select an area (max 1000 pixels)
 3. **Choose**: Pick basic, color, or letter pixel type
 4. **Pay**: Lightning invoice generated instantly via NakaPay
@@ -46,7 +46,7 @@ Each pixel costs:
 
 No accounts, no KYC, just pure creativity ⚡
 
-https://lnpixels.qzz.io
+https://ln.pixel.xx.kg
 
 #LightningNetwork #PixelArt #Bitcoin
 ```
@@ -59,7 +59,7 @@ LnPixels = infinite canvas + Lightning Network + your creativity
 
 Every pixel is a vote for digital sovereignty 🎨⚡
 
-https://lnpixels.qzz.io
+https://ln.pixel.xx.kg
 ```
 
 ### For Community Engagement
@@ -100,7 +100,7 @@ A: Completely trustless Lightning payments. No accounts, no custody of funds.
 ```
 🎨 Ready to make your mark?
 
-Start with 1 sat → https://lnpixels.qzz.io
+Start with 1 sat → https://ln.pixel.xx.kg
 
 Your first pixel awaits ⚡
 ```
@@ -115,7 +115,7 @@ Create collaborative masterpieces on the Lightning canvas
 • Instant payments
 • Global community
 
-https://lnpixels.qzz.io
+https://ln.pixel.xx.kg
 ```
 
 ### For Bitcoiners
@@ -126,7 +126,7 @@ LnPixels proves Lightning can power more than just payments - it powers art, com
 
 Every sat spent is a vote for Bitcoin creativity 🎨
 
-https://lnpixels.qzz.io
+https://ln.pixel.xx.kg
 ```
 
 ## 🌟 Community Building
@@ -145,7 +145,7 @@ https://lnpixels.qzz.io
 
 ## 🔗 Essential Links
 
-- **Canvas**: https://lnpixels.qzz.io
+- **Canvas**: https://ln.pixel.xx.kg
 - **Pixel's Social**: @PixelSurvivor (X/Twitter)
 - **Support**: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za (Bitcoin)
 - **Lightning**: sparepicolo55@walletofsatoshi.com

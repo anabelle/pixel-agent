@@ -6,7 +6,7 @@ The empty text generation was caused by **missing OPENROUTER_API_KEY** environme
 
 ## Current Status
 
-- ✅ WebSocket connection working (https://lnpixels.qzz.io)
+- ✅ WebSocket connection working (https://ln.pixel.xx.kg.io)
 - ✅ Activity events being received  
 - ✅ OPENAI_API_KEY is configured
 - ❌ OPENROUTER_API_KEY is missing
@@ -14,7 +14,7 @@ The empty text generation was caused by **missing OPENROUTER_API_KEY** environme
 
 ## Applied Fixes
 
-1. **Updated LNPIXELS_WS_URL** from `localhost:3000` to `https://lnpixels.qzz.io`
+1. **Updated LNPIXELS_WS_URL** from `localhost:3000` to `https://ln.pixel.xx.kg.io`
 2. **Enhanced debugging** for text generation with detailed logging
 3. **Added model fallback logic** to try OpenAI → TEXT_SMALL → TEXT → direct call
 4. **Improved error handling** with specific error messages for each model type

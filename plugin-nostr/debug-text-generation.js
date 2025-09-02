@@ -33,7 +33,7 @@ function buildPrompt(runtime, a) {
     `Tone mode: ${mode}.`,
     `Goals: be witty, fun, and invite others to place a pixel; avoid repetitive phrasing.`,
     `Constraints: 1–2 sentences, max ~180 chars, respect whitelist (allowed links/handles only), avoid generic thank-you.`,
-    `Optional CTA: invite to place "just one pixel" at https://lnpixels.qzz.io`,
+  `Optional CTA: invite to place "just one pixel" at https://ln.pixel.xx.kg`,
   ].join('\n');
 
   const stylePost = Array.isArray(ch?.style?.post) ? ch.style.post.slice(0, 8).join(' | ') : '';
@@ -44,8 +44,8 @@ function buildPrompt(runtime, a) {
   return [
     base,
     stylePost ? `Style guidelines: ${stylePost}` : '',
-    examples ? `Few-shots (style only, do not copy):\n${examples}` : '',
-    `Whitelist: Only allowed sites: https://lnpixels.qzz.io , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com`,
+  examples ? `Few-shots (style only, do not copy):\n${examples}` : '',
+  `Whitelist: Only allowed sites: https://ln.pixel.xx.kg , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com`,
     `Output: only the post text.`,
   ].filter(Boolean).join('\n\n');
 }

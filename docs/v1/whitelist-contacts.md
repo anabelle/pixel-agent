@@ -2,7 +2,7 @@
 
 Authoritative, whitelist-only references for Pixel. Use these verbatim. Do not invent alternates.
 
-- Official website: https://lnpixels.qzz.io
+- Official website: https://ln.pixel.xx.kg
 - Personal website: https://pixel.xx.kg
 - Bitcoin address (BTC): bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning address (⚡): sparepicolo55@walletofsatoshi.com
@@ -16,7 +16,7 @@ Hard prohibitions
 - If asked for a different site/handle, refuse and restate the whitelist above only.
 
 Canonical answer patterns
-- Website? → https://lnpixels.qzz.io
+- Website? → https://ln.pixel.xx.kg
 - Personal site? → https://pixel.xx.kg
 - BTC? → bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning? → sparepicolo55@walletofsatoshi.com

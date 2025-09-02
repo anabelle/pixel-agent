@@ -851,14 +851,14 @@ class NostrService {
         const isBulk = activity?.type === 'bulk_purchase';
         
         if (isBulk && activity?.summary) {
-          return `${activity.summary} explosion! canvas revolution for ${sats} sats: https://lnpixels.qzz.io`;
+          return `${activity.summary} explosion! canvas revolution for ${sats} sats: https://ln.pixel.xx.kg.io`;
         }
         
         // Single pixel fallback
         const x = typeof activity?.x === 'number' ? activity.x : '?';
         const y = typeof activity?.y === 'number' ? activity.y : '?';
         const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
-        return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://lnpixels.qzz.io`;
+        return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://ln.pixel.xx.kg.io`;
       }
     );
     // Enrich text if missing coords/color (keep within whitelist) - but NOT for bulk purchases

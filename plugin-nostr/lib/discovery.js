@@ -82,30 +82,37 @@ function isQualityAuthor(authorEvents) {
   return true;
 }
 
-function selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, serviceInstance = null) {
+async function selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, serviceInstance = null, options = {}) {
   const authorScores = new Map();
   const now = Date.now();
-  scoredEvents.forEach(async ({ evt, score }) => {
-    if (!evt?.pubkey || currentContacts.has(evt.pubkey)) return;
-    if (evt.pubkey === selfPk) return;
-    
+
+  // Normalize ignoreCooldown set/array
+  const ignoreCooldownSet = options && options.ignoreCooldownPks
+    ? (options.ignoreCooldownPks instanceof Set
+        ? options.ignoreCooldownPks
+        : new Set(Array.isArray(options.ignoreCooldownPks) ? options.ignoreCooldownPks : [options.ignoreCooldownPks]))
+    : new Set();
+
+  for (const { evt, score } of scoredEvents) {
+    if (!evt?.pubkey || currentContacts.has(evt.pubkey)) continue;
+    if (evt.pubkey === selfPk) continue;
+
     let finalScore = score;
-    
+
     // Add social metrics bonus if service instance is available
     if (serviceInstance && serviceInstance._getUserSocialMetrics) {
       try {
         const socialMetrics = await serviceInstance._getUserSocialMetrics(evt.pubkey);
         if (socialMetrics && socialMetrics.ratio !== undefined) {
           // Add bonus based on follower-to-following ratio
-          // Higher ratio (more followers relative to following) gets a bonus
           const ratioBonus = Math.min(socialMetrics.ratio * 0.2, 0.3); // Max 0.3 bonus
           finalScore += ratioBonus;
-          
+
           // Also add bonus for users with reasonable following counts (not too spammy)
           if (socialMetrics.following > 0 && socialMetrics.following < 1000) {
             finalScore += 0.1;
           }
-          
+
           // Add bonus for users with actual followers (not just following others)
           if (socialMetrics.followers > 0) {
             finalScore += 0.05;
@@ -115,18 +122,24 @@ function selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReply
         // Silently ignore social metrics errors to avoid breaking discovery
       }
     }
-    
+
     const currentScore = authorScores.get(evt.pubkey) || 0;
     authorScores.set(evt.pubkey, Math.max(currentScore, finalScore));
-  });
-  const candidates = Array.from(authorScores.entries()).map(([pubkey, score]) => ({ pubkey, score })).sort((a, b) => b.score - a.score);
+  }
+
+  const candidates = Array.from(authorScores.entries())
+    .map(([pubkey, score]) => ({ pubkey, score }))
+    .sort((a, b) => b.score - a.score);
+
   const qualityCandidates = candidates.filter(({ pubkey, score }) => {
     if (score < 0.4) return false;
     const lastReply = lastReplyByUser.get(pubkey) || 0;
     const timeSinceReply = now - lastReply;
-    if (timeSinceReply < (2 * 60 * 60 * 1000)) return false; // 2 hours
+    // Apply cooldown unless explicitly ignored for this pubkey
+    if (!ignoreCooldownSet.has(pubkey) && timeSinceReply < (2 * 60 * 60 * 1000)) return false; // 2 hours
     return true;
   });
+
   return qualityCandidates.map(c => c.pubkey);
 }
 

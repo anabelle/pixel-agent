@@ -53,7 +53,7 @@ describe('discovery helpers', () => {
     expect(isQualityAuthor(varied)).toBe(true);
   });
 
-  it('selectFollowCandidates includes high-score authors and respects cooldown and existing contacts', () => {
+  it('selectFollowCandidates includes high-score authors and respects cooldown and existing contacts', async () => {
     const selfPk = 'selfpkhex';
     const currentContacts = new Set(['alreadyFollowing']);
     const lastReplyByUser = new Map([
@@ -70,7 +70,7 @@ describe('discovery helpers', () => {
       { evt: { pubkey: 'goodUserB' }, score: 0.5 }, // kept
     ];
 
-    const result = selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, null);
+  const result = await selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, null);
     expect(result).toEqual(['goodUserA', 'goodUserB']);
   });
 });

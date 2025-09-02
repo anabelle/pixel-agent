@@ -78,11 +78,30 @@ function buildRepost(parentEvt) {
 function buildQuoteRepost(parentEvt, quoteText) {
   if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
   const created_at = Math.floor(Date.now() / 1000);
-  const content = quoteText ? `${quoteText}\n\nReposted from: ${JSON.stringify(parentEvt)}` : JSON.stringify(parentEvt);
+  // Prefer a clean Primal link rather than embedding raw JSON
+  let ref = '';
+  try {
+    // Lazy require to avoid hard dependency during simple tests
+    const { nip19 } = require('@nostr/tools');
+    try {
+      // Try nevent (includes author); fallback to note if needed
+      const bech = nip19?.neventEncode
+        ? nip19.neventEncode({ id: parentEvt.id, author: parentEvt.pubkey })
+        : (nip19?.noteEncode ? nip19.noteEncode(parentEvt.id) : null);
+      if (bech) ref = `https://primal.net/e/${bech}`;
+    } catch {}
+  } catch {}
+  if (!ref) {
+    // Fallback: widely supported event link service
+    ref = `https://njump.me/${parentEvt.id}`;
+  }
+  const arrow = '↪️';
+  const content = quoteText ? `${String(quoteText)}\n\n${arrow} ${ref}` : `${arrow} ${ref}`;
   return {
     kind: 1,
     created_at,
-    tags: [ ['e', parentEvt.id], ['p', parentEvt.pubkey] ],
+    // Mark the event tag as a mention to indicate a quote reference (NIP-18 compatible)
+    tags: [ ['e', parentEvt.id, '', 'mention'], ['p', parentEvt.pubkey] ],
     content,
   };
 }

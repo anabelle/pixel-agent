@@ -1006,11 +1006,7 @@ class NostrService {
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
         if (hasReply) { logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); return; }
       } catch {}
-      // Check if home feed has already processed this event
-      if (this.homeFeedProcessedEvents && this.homeFeedProcessedEvents.has(evt.id)) {
-        logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (already processed by home feed)`);
-        return;
-      }
+      // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
       if (!this.replyEnabled) { logger.info('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); return; }
       if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying'); return; }
       if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send reply'); return; }
@@ -1030,11 +1026,7 @@ class NostrService {
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) { logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); return; }
               } catch {}
-              // Check if home feed has already processed this event
-              if (this.homeFeedProcessedEvents && this.homeFeedProcessedEvents.has(parentEvt.id)) {
-                logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (already processed by home feed)`);
-                return;
-              }
+              // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
               this.lastReplyByUser.set(pubkey, now2);
@@ -1394,7 +1386,7 @@ class NostrService {
         {
           onevent: (evt) => {
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
-            if (this.homeFeedProcessedEvents.has(evt.id)) return;
+            // Real-time event handling for quality tracking only
             this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
           },
           oneose: () => { logger.debug('[NOSTR] Home feed subscription OSE'); },
@@ -1561,9 +1553,9 @@ Write a brief, engaging quote repost that adds value or provides context. Keep i
   }
 
   async handleHomeFeedEvent(evt) {
-    // Mark as processed to avoid duplicate processing
-    this.homeFeedProcessedEvents.add(evt.id);
-
+    // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
+    // Events should only be marked as processed in processHomeFeed() when we actually interact
+    
     // Update user quality tracking
     if (evt.pubkey && evt.content) {
       this._updateUserQualityScore(evt.pubkey, evt);

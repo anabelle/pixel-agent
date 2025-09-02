@@ -604,8 +604,17 @@ class NostrService {
     const { publishContacts } = require('./contacts');
     try {
       const ok = await publishContacts(this.pool, this.relays, this.sk, newSet, buildContacts, finalizeEvent);
-      if (ok) logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
-      else logger.warn('[NOSTR] Failed to publish contacts (unknown error)');
+      if (ok) {
+        logger.info(`[NOSTR] Published contacts list with ${newSet.size} follows`);
+        // Invalidate social metrics cache for all pubkeys in newSet (force refresh on next access)
+        if (this.userSocialMetrics && typeof this.userSocialMetrics.delete === 'function') {
+          for (const pubkey of newSet) {
+            this.userSocialMetrics.delete(pubkey);
+          }
+        }
+      } else {
+        logger.warn('[NOSTR] Failed to publish contacts (unknown error)');
+      }
       return ok;
     } catch (err) {
       logger.warn('[NOSTR] Failed to publish contacts:', err?.message || err);

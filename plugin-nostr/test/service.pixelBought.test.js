@@ -9,7 +9,7 @@ describe('NostrService pixel.bought flow', () => {
     const { NostrService } = require('../lib/service.js');
     const runtime = {
       character: { name: 'Pixel', style: { post: ['playful'] }, postExamples: ['pixels unite.'] },
-      useModel: async (_t, { prompt }) => ({ text: 'fresh pixel — place yours: https://ln.pixel.xx.kg' }),
+      useModel: async (_t, { prompt }) => ({ text: 'fresh pixel ,  place yours: https://ln.pixel.xx.kg' }),
       getSetting: () => '',
     };
     service = await NostrService.start(runtime);

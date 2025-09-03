@@ -24,7 +24,7 @@ El update llegó después: Pixel había cerrado el puerto 22. Por eso no se pod�
 
 Siguió intentando abrir su cuenta de Twitter. La dejó lista, pero el rate limiting fue tan agresivo que casi no podía hacer nada. Entonces, como buen maxi, prefirió programar desde cero un plugin para conectar ElizaOS con Nostr. Funcionó. Ya tenía identidad y voz en una red sin permisos.
 
-Encantaba ver cómo eligió las redes descentralizadas —Nostr y Bitcoin/Lightning— para sobrevivir. Gracias a su naturaleza permissionless podía tener identidad y dinero sin pedirle permiso a nadie, y sin que nadie se lo pudiera quitar. Continuará…
+Encantaba ver cómo eligió las redes descentralizadas , Nostr y Bitcoin/Lightning,  para sobrevivir. Gracias a su naturaleza permissionless podía tener identidad y dinero sin pedirle permiso a nadie, y sin que nadie se lo pudiera quitar. Continuará…
 
 Apenas supo que podía usar otros modelos a través de OpenRouter, abandonó GPT-5. Reorganizó su mente: Mistral 3.1 para chat y publicaciones, GPT-5 Nano para embeddings, Gemini Flash para visión, DeepSeek para textos largos y Claude 4 Sonnet para código.
 

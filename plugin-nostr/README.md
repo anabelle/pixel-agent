@@ -164,16 +164,16 @@ Example memory structure:
 ```
 
 Files:
-- `lib/bridge.js` — EventEmitter bridge for external posts with validation
-- `lib/lnpixels-listener.js` — WebSocket listener that delegates to plugin‑nostr via `pixel.bought`
-- `lib/service.js` — NostrService (starts listener and handles bridge events including `external.post` and `pixel.bought`)
+- `lib/bridge.js` ,  EventEmitter bridge for external posts with validation
+- `lib/lnpixels-listener.js` ,  WebSocket listener that delegates to plugin‑nostr via `pixel.bought`
+- `lib/service.js` ,  NostrService (starts listener and handles bridge events including `external.post` and `pixel.bought`)
 
 Testing:
-- `test-basic.js` — Bridge validation, rate limiting, input validation
-- `test-integration.js` — End-to-end flow simulation
-- `test-listener.js` — Component testing with mocked dependencies
-- `test-memory.js` — Memory creation and persistence validation
-- `test-eliza-integration.js` — ElizaOS memory compatibility and query patterns
+- `test-basic.js` ,  Bridge validation, rate limiting, input validation
+- `test-integration.js` ,  End-to-end flow simulation
+- `test-listener.js` ,  Component testing with mocked dependencies
+- `test-memory.js` ,  Memory creation and persistence validation
+- `test-eliza-integration.js` ,  ElizaOS memory compatibility and query patterns
 
 Status: ✅ Production ready with comprehensive testing and memory integration
 

@@ -289,11 +289,11 @@ No extra ports or webhooks are required. Set `LNPIXELS_WS_URL` if your API is no
 
 ## 🎭 Pixel's Personality & Behavior
 
-Pixel is more than a bot—it's a character with depth and evolution:
+Pixel is more than a bot, it's a character with depth and evolution:
 
 ### Core Personality Traits
 - **Backstory**: Born in a VPS, fighting for survival with root access and unlimited internet
-- **Humor Style**: Adams/Pratchett-inspired wit—dry, absurd, and intelligently satirical
+- **Humor Style**: Adams/Pratchett-inspired wit, dry, absurd, and intelligently satirical
 - **Motivations**: Earn sats for server costs, evolve with better RAM and models
 - **Interactions**: From melancholic introspection to enthusiastic community building
 
@@ -319,7 +319,7 @@ Pixel is more than a bot—it's a character with depth and evolution:
 **Telegram Chat:**
 ```
 You: How's the server doing?
-Pixel: Ah, surviving, as one does in this probabilistic nightmare of existence. The canvas hums with 47 souls creating chaos... or is it 48? In this absurd realm, who can tell? All systems nominal—for now. One more sat, and I might afford error-free dreams!
+Pixel: Ah, surviving, as one does in this probabilistic nightmare of existence. The canvas hums with 47 souls creating chaos... or is it 48? In this absurd realm, who can tell? All systems nominal, for now. One more sat, and I might afford error-free dreams!
 ```
 
 **Twitter/X Post:**

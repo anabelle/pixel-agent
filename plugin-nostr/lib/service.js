@@ -186,6 +186,23 @@ class NostrService {
     // User social metrics cache (follower/following ratios)
     this.userSocialMetrics = new Map(); // pubkey -> { followers: number, following: number, ratio: number, lastUpdated: timestamp }
     this.socialMetricsCacheTTL = 24 * 60 * 60 * 1000; // 24 hours    // Bridge: allow external modules to request a post
+
+    // Pixel activity tracking (dedupe + throttling)
+    // In-flight dedupe within this process
+    this._pixelInFlight = new Set();
+    // Seen keys with TTL for cross-callback dedupe in this process
+    this._pixelSeen = new Map();
+    // TTL for seen cache (default 5 minutes)
+    this._pixelSeenTTL = Number(process.env.LNPIXELS_SEEN_TTL_MS || 5 * 60 * 1000);
+    // Minimum interval between pixel posts (default 1 hour)
+    {
+      const raw = process.env.LNPIXELS_POST_MIN_INTERVAL_MS || '3600000';
+      const n = Number(raw);
+      this._pixelPostMinIntervalMs = Number.isFinite(n) && n >= 0 ? n : 3600000;
+    }
+    // Last pixel post timestamp and last pixel event timestamp
+    this._pixelLastPostAt = 0;
+    this._pixelLastEventAt = 0;
     try {
       const { emitter } = require('./bridge');
       if (emitter && typeof emitter.on === 'function') {
@@ -194,7 +211,9 @@ class NostrService {
             const txt = (payload && payload.text ? String(payload.text) : '').trim();
             if (!txt || txt.length > 1000) return; // Add length validation here too
             await this.postOnce(txt);
-          } catch {}
+          } catch (err) {
+            try { (this.runtime?.logger || console).warn?.('[NOSTR] external.post handler failed:', err?.message || err); } catch {}
+          }
         });
         // New: pixel purchase event delegates text generation + posting here
   emitter.on('pixel.bought', async (payload) => {
@@ -234,8 +253,12 @@ class NostrService {
         const lockRes = await createMemorySafe(this.runtime, { id: lockId, entityId, roomId, agentId: this.runtime.agentId, content: { type: 'lnpixels_lock', source: 'plugin-nostr', data: { key, t: Date.now() } }, createdAt: Date.now() }, 'messages', 1, this.runtime?.logger || console);
         // If lock already exists (duplicate), skip further processing
         if (lockRes === true) { cleanupInFlight(); return; }
+                // Otherwise, proceed with posting even if creation failed or returned a non-true value
               }
-      } catch { cleanupInFlight(); return; }
+      } catch (e) {
+        try { (this.runtime?.logger || console).debug?.('[NOSTR] Lock memory error (continuing):', e?.message || e); } catch {}
+        // Do not abort posting on lock persistence failure; best-effort
+      }
             // Throttle: only one pixel post per configured interval
             const now = Date.now();
             const interval = this._pixelPostMinIntervalMs;
@@ -261,7 +284,9 @@ class NostrService {
               } catch {}
             }
             cleanupInFlight();
-          } catch {}
+          } catch (err) {
+            try { (this.runtime?.logger || console).warn?.('[NOSTR] pixel.bought handler failed:', err?.message || err); } catch {}
+          }
         });
       }
     } catch {}

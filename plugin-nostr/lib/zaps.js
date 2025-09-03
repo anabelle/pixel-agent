@@ -64,7 +64,7 @@ function generateThanksText(amountMsats) {
   ];
   const pick = () => base[Math.floor(Math.random() * base.length)];
   if (!amountMsats) {
-    return `zap received — ${pick()} ⚡️💛`; 
+    return `zap received ,  ${pick()} ⚡️💛`; 
   }
   const sats = Math.floor(amountMsats / 1000);
   if (sats >= 10000) return `⚡️ ${sats} sats, i’m screaming, thank you!! ${pick()} 🙏💛`;

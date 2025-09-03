@@ -867,7 +867,7 @@ class NostrService {
         const x = typeof activity?.x === 'number' ? activity.x : '?';
         const y = typeof activity?.y === 'number' ? activity.y : '?';
         const color = typeof activity?.color === 'string' ? ` #${activity.color.replace('#','')}` : '';
-        return `fresh pixel on the canvas at (${x},${y})${color} — ${sats} sats. place yours: https://ln.pixel.xx.kg`;
+        return `fresh pixel on the canvas at (${x},${y})${color} ,  ${sats} sats. place yours: https://ln.pixel.xx.kg`;
       }
     );
     // Enrich text if missing coords/color (keep within whitelist) - but NOT for bulk purchases

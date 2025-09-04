@@ -159,6 +159,15 @@ class NostrService {
     this.pendingReplyTimers = new Map();
     this.zapCooldownByUser = new Map();
 
+    // Connection monitoring and reconnection
+    this.connectionMonitorTimer = null;
+    this.lastEventReceived = Date.now();
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelayMs = 30000; // 30 seconds
+    this.connectionCheckIntervalMs = 60000; // Check every minute
+    this.maxTimeSinceLastEventMs = 300000; // 5 minutes without events triggers reconnect
+
     // DM (Direct Message) configuration
     this.dmEnabled = true;
     this.dmReplyEnabled = true;
@@ -361,6 +370,13 @@ class NostrService {
     const dmReplyVal = runtime.getSetting('NOSTR_DM_REPLY_ENABLE');
     const dmThrottleVal = runtime.getSetting('NOSTR_DM_THROTTLE_SEC');
 
+    // Connection monitoring configuration
+    const connectionMonitorEnabled = String(runtime.getSetting('NOSTR_CONNECTION_MONITOR_ENABLE') ?? 'true').toLowerCase() === 'true';
+    const connectionCheckIntervalSec = normalizeSeconds(runtime.getSetting('NOSTR_CONNECTION_CHECK_INTERVAL_SEC') ?? '60', 'NOSTR_CONNECTION_CHECK_INTERVAL_SEC');
+    const maxTimeSinceLastEventSec = normalizeSeconds(runtime.getSetting('NOSTR_MAX_TIME_SINCE_LAST_EVENT_SEC') ?? '300', 'NOSTR_MAX_TIME_SINCE_LAST_EVENT_SEC');
+    const reconnectDelaySec = normalizeSeconds(runtime.getSetting('NOSTR_RECONNECT_DELAY_SEC') ?? '30', 'NOSTR_RECONNECT_DELAY_SEC');
+    const maxReconnectAttempts = Math.max(1, Math.min(20, Number(runtime.getSetting('NOSTR_MAX_RECONNECT_ATTEMPTS') ?? '5')));
+
     svc.relays = relays;
     svc.sk = sk;
     svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
@@ -400,14 +416,21 @@ class NostrService {
     svc.dmReplyEnabled = String(dmReplyVal ?? 'true').toLowerCase() === 'true';
     svc.dmThrottleSec = normalizeSeconds(dmThrottleVal ?? '60', 'NOSTR_DM_THROTTLE_SEC');
 
-    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}`);
+    // Connection monitoring configuration
+    svc.connectionMonitorEnabled = connectionMonitorEnabled;
+    svc.connectionCheckIntervalMs = connectionCheckIntervalSec * 1000;
+    svc.maxTimeSinceLastEventMs = maxTimeSinceLastEventSec * 1000;
+    svc.reconnectDelayMs = reconnectDelaySec * 1000;
+    svc.maxReconnectAttempts = maxReconnectAttempts;
+
+    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
       return svc;
     }
 
-    svc.pool = new SimplePool({ enablePing });
+    svc.relays = relays;
 
     if (sk) {
       const pk = getPublicKey(sk);
@@ -421,32 +444,14 @@ class NostrService {
       logger.warn('[NOSTR] No key configured; listening and posting disabled');
     }
 
-    if (listenEnabled && svc.pool && svc.pkHex) {
+    if (listenEnabled && svc.pkHex) {
       try {
-        svc.listenUnsub = svc.pool.subscribeMany(
-          relays,
-          [
-            { kinds: [1], '#p': [svc.pkHex] },
-            { kinds: [4], '#p': [svc.pkHex] },
-            // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
-            { kinds: [14], '#p': [svc.pkHex] },
-            { kinds: [9735], authors: undefined, limit: 0, '#p': [svc.pkHex] },
-          ],
-          {
-            onevent(evt) {
-              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-              if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
-              if (evt.kind === 4) { svc.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
-              if (evt.kind === 14) { svc.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
-              if (evt.kind === 9735) { svc.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-              if (evt.kind === 1) { svc.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
-              logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
-            },
-            oneose() { logger.debug('[NOSTR] Mention subscription OSE'); },
-          }
-        );
+        await svc._setupConnection();
+        if (svc.connectionMonitorEnabled) {
+          svc._startConnectionMonitoring(); // Start connection health monitoring
+        }
       } catch (err) {
-        logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
+        logger.warn(`[NOSTR] Initial connection setup failed: ${err?.message || err}`);
       }
     }
 
@@ -1976,11 +1981,142 @@ class NostrService {
     if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
     if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
     if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch {} } this.pendingReplyTimers.clear(); }
     logger.info('[NOSTR] Service stopped');
+  }
+
+  _startConnectionMonitoring() {
+    if (!this.connectionMonitorEnabled) {
+      return;
+    }
+    
+    if (this.connectionMonitorTimer) {
+      clearTimeout(this.connectionMonitorTimer);
+    }
+    
+    this.connectionMonitorTimer = setTimeout(() => {
+      this._checkConnectionHealth();
+    }, this.connectionCheckIntervalMs);
+  }
+
+  _checkConnectionHealth() {
+    const now = Date.now();
+    const timeSinceLastEvent = now - this.lastEventReceived;
+    
+    if (timeSinceLastEvent > this.maxTimeSinceLastEventMs) {
+      logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
+      this._attemptReconnection();
+    } else {
+      logger.debug(`[NOSTR] Connection healthy, last event received ${Math.round(timeSinceLastEvent / 1000)}s ago`);
+      this._startConnectionMonitoring(); // Schedule next check
+    }
+  }
+
+  async _attemptReconnection() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error(`[NOSTR] Max reconnection attempts (${this.maxReconnectAttempts}) reached, giving up`);
+      return;
+    }
+
+    this.reconnectAttempts++;
+    logger.info(`[NOSTR] Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+
+    try {
+      // Close existing subscriptions and pool
+      if (this.listenUnsub) {
+        try { this.listenUnsub(); } catch {}
+        this.listenUnsub = null;
+      }
+      if (this.homeFeedUnsub) {
+        try { this.homeFeedUnsub(); } catch {}
+        this.homeFeedUnsub = null;
+      }
+      if (this.pool) {
+        try { this.pool.close([]); } catch {}
+      }
+
+      // Wait a bit before reconnecting
+      await new Promise(resolve => setTimeout(resolve, this.reconnectDelayMs));
+
+      // Recreate pool and subscriptions
+      await this._setupConnection();
+      
+      logger.info(`[NOSTR] Reconnection ${this.reconnectAttempts} successful`);
+      this.reconnectAttempts = 0; // Reset on successful reconnection
+      this.lastEventReceived = Date.now(); // Reset timer
+      if (this.connectionMonitorEnabled) {
+        this._startConnectionMonitoring(); // Resume monitoring
+      }
+      
+    } catch (error) {
+      logger.error(`[NOSTR] Reconnection ${this.reconnectAttempts} failed:`, error?.message || error);
+      
+      // Schedule another reconnection attempt
+      setTimeout(() => {
+        this._attemptReconnection();
+      }, this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1)); // Exponential backoff
+    }
+  }
+
+  async _setupConnection() {
+    const enablePing = String(this.runtime.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
+    this.pool = new SimplePool({ enablePing });
+
+    if (!this.relays.length || !this.pool || !this.pkHex) {
+      return;
+    }
+
+    // Setup main event subscriptions
+    try {
+      this.listenUnsub = this.pool.subscribeMany(
+        this.relays,
+        [
+          { kinds: [1], '#p': [this.pkHex] },
+          { kinds: [4], '#p': [this.pkHex] },
+          // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
+          { kinds: [14], '#p': [this.pkHex] },
+          { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
+        ],
+        {
+          onevent: (evt) => {
+            this.lastEventReceived = Date.now(); // Update last event timestamp
+            logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
+            if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+            if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
+            if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
+            if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
+            if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
+            logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
+          },
+          oneose: () => { 
+            logger.debug('[NOSTR] Mention subscription OSE'); 
+            this.lastEventReceived = Date.now(); // Update on EOSE as well
+          },
+          onclose: (reason) => {
+            logger.warn(`[NOSTR] Subscription closed: ${reason}`);
+            // Don't immediately reconnect here as it might cause a loop
+            // Let the connection monitor handle it
+          }
+        }
+      );
+      logger.info(`[NOSTR] Subscriptions established on ${this.relays.length} relays`);
+    } catch (err) {
+      logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
+      throw err;
+    }
+
+    // Restart home feed if it was active
+    if (this.homeFeedEnabled && this.sk) {
+      try {
+        await this.startHomeFeed();
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
+      }
+    }
   }
 
   async startHomeFeed() {
@@ -2003,11 +2139,18 @@ class NostrService {
         [{ kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 3600 }], // Last hour
         {
           onevent: (evt) => {
+            this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
             // Real-time event handling for quality tracking only
             this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
           },
-          oneose: () => { logger.debug('[NOSTR] Home feed subscription OSE'); },
+          oneose: () => { 
+            logger.debug('[NOSTR] Home feed subscription OSE'); 
+            this.lastEventReceived = Date.now(); // Update on EOSE as well
+          },
+          onclose: (reason) => {
+            logger.warn(`[NOSTR] Home feed subscription closed: ${reason}`);
+          }
         }
       );
 
@@ -2343,6 +2486,7 @@ Write a brief, engaging quote repost that adds value or provides context. Keep i
     if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
     if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }

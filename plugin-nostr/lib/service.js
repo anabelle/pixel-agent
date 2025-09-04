@@ -977,9 +977,19 @@ class NostrService {
       }
 
       try {
+        // NEW: Fetch thread context for better responses
+        const threadContext = await this._getThreadContext(evt);
         const convId = this._getConversationIdFromEvent(evt);
         const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
-        const text = await this.generateReplyTextLLM(evt, roomId);
+        
+        // Decide whether to engage based on full thread context
+        const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
+        if (!shouldEngage) {
+          logger.debug(`[NOSTR] Discovery skipping ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
+          continue;
+        }
+
+        const text = await this.generateReplyTextLLM(evt, roomId, threadContext);
         const ok = await this.postReply(evt, text);
         if (ok) {
           this.handledEventIds.add(evt.id);
@@ -988,7 +998,7 @@ class NostrService {
           eventTopics.forEach(topic => usedTopics.add(topic));
           replies++;
           qualityInteractions++; // Count all successful replies as quality interactions for now
-          logger.info(`[NOSTR] Discovery reply ${currentTotalReplies + replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1})`);
+          logger.info(`[NOSTR] Discovery reply ${currentTotalReplies + replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1}, thread-aware)`);
         }
       } catch (err) { logger.debug('[NOSTR] Discovery reply error:', err?.message || err); }
     }
@@ -1008,11 +1018,11 @@ class NostrService {
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt() { return buildPostPrompt(this.runtime.character); }
-  _buildReplyPrompt(evt, recent) {
+  _buildReplyPrompt(evt, recent, threadContext = null) {
     if (evt?.kind === 4) {
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    return buildReplyPrompt(this.runtime.character, evt, recent);
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1104,7 +1114,7 @@ class NostrService {
     return text || '';
   }
 
-  async generateReplyTextLLM(evt, roomId) {
+  async generateReplyTextLLM(evt, roomId, threadContext = null) {
     let recent = [];
     try {
       if (this.runtime?.getMemories && roomId) {
@@ -1113,7 +1123,9 @@ class NostrService {
         recent = ordered.map((m) => ({ role: m.agentId && this.runtime && m.agentId === this.runtime.agentId ? 'agent' : 'user', text: String(m.content?.text || '').slice(0, 220) })).filter((x) => x.text);
       }
     } catch {}
-    const prompt = this._buildReplyPrompt(evt, recent);
+    
+    // Use thread context if available for better contextual responses
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     const text = await generateWithModelOrFallback(
@@ -1186,6 +1198,252 @@ class NostrService {
     return getConversationIdFromEvent(evt);
   }
 
+  _isActualMention(evt) {
+    if (!evt || !this.pkHex) return false;
+    
+    // If the content explicitly mentions our npub or name, it's definitely a mention
+    const content = (evt.content || '').toLowerCase();
+    const agentName = (this.runtime?.character?.name || '').toLowerCase();
+    
+    // Check for direct npub mention
+    if (content.includes('npub') && content.includes(this.pkHex.slice(0, 8))) {
+      return true;
+    }
+    
+    // Check for agent name mention
+    if (agentName && content.includes(agentName)) {
+      return true;
+    }
+    
+    // Check for @username mention style
+    if (content.includes('@' + agentName)) {
+      return true;
+    }
+    
+    // Check thread structure to see if this is likely a direct mention vs thread reply
+    const tags = evt.tags || [];
+    const eTags = tags.filter(t => t[0] === 'e');
+    const pTags = tags.filter(t => t[0] === 'p');
+    
+    // If there are no e-tags, this is a root note mentioning us
+    if (eTags.length === 0) {
+      return true;
+    }
+    
+    // If we're the only p-tag or the first p-tag, likely a direct mention/reply to us
+    if (pTags.length === 1 && pTags[0][1] === this.pkHex) {
+      return true;
+    }
+    
+    if (pTags.length > 1 && pTags[0][1] === this.pkHex) {
+      return true;
+    }
+    
+    // If this is a thread reply and we're mentioned in the middle/end of p-tags,
+    // it's probably just thread protocol inclusion, not a direct mention
+    const ourPTagIndex = pTags.findIndex(t => t[1] === this.pkHex);
+    if (ourPTagIndex > 1) {
+      // We're not one of the primary recipients, probably just thread inclusion
+      try {
+        logger?.debug?.(`[NOSTR] ${evt.id.slice(0, 8)} has us as p-tag #${ourPTagIndex + 1} of ${pTags.length}, likely thread reply`);
+      } catch {}
+      return false;
+    }
+    
+    // For thread replies, check if the immediate parent is from us
+    try {
+      if (nip10Parse) {
+        const refs = nip10Parse(evt);
+        if (refs?.reply?.id && refs.reply.id !== evt.id) {
+          // This is a reply - if it's replying to us directly, it's a mention
+          // We'd need to fetch the parent to check, but for now be conservative
+          return true;
+        }
+      }
+    } catch {}
+    
+    // Default to true for borderline cases to avoid missing real mentions
+    return true;
+  }
+
+  async _getThreadContext(evt) {
+    if (!this.pool || !evt) return { thread: [], isRoot: true };
+
+    try {
+      const tags = evt.tags || [];
+      const eTags = tags.filter(t => t[0] === 'e');
+      
+      // If no e-tags, this is a root event
+      if (eTags.length === 0) {
+        return { thread: [evt], isRoot: true };
+      }
+
+      // Get root and parent references using NIP-10 parsing
+      let rootId = null;
+      let parentId = null;
+
+      try {
+        if (nip10Parse) {
+          const refs = nip10Parse(evt);
+          rootId = refs?.root?.id;
+          parentId = refs?.reply?.id;
+        }
+      } catch {}
+
+      // Fallback to simple e-tag parsing if NIP-10 parsing fails
+      if (!rootId && !parentId) {
+        for (const tag of eTags) {
+          if (tag[3] === 'root') {
+            rootId = tag[1];
+          } else if (tag[3] === 'reply') {
+            parentId = tag[1];
+          } else if (!rootId) {
+            // First e-tag is often the root in older implementations
+            rootId = tag[1];
+          }
+        }
+      }
+
+      // Fetch the thread events
+      const threadEvents = [];
+      const eventIds = new Set();
+
+      // Add the current event
+      threadEvents.push(evt);
+      eventIds.add(evt.id);
+
+      // Fetch root and parent if we have them
+      const eventsToFetch = [];
+      if (rootId && !eventIds.has(rootId)) {
+        eventsToFetch.push(rootId);
+        eventIds.add(rootId);
+      }
+      if (parentId && !eventIds.has(parentId) && parentId !== rootId) {
+        eventsToFetch.push(parentId);
+        eventIds.add(parentId);
+      }
+
+      if (eventsToFetch.length > 0) {
+        try {
+          const fetchedEvents = await this._list(this.relays, [
+            { ids: eventsToFetch }
+          ]);
+
+          threadEvents.push(...fetchedEvents);
+        } catch (err) {
+          logger?.debug?.('[NOSTR] Failed to fetch thread context events:', err?.message || err);
+        }
+      }
+
+      // Sort events by created_at for chronological order
+      threadEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+      return {
+        thread: threadEvents,
+        isRoot: eTags.length === 0,
+        rootId,
+        parentId,
+        contextQuality: this._assessThreadContextQuality(threadEvents)
+      };
+
+    } catch (err) {
+      logger?.debug?.('[NOSTR] Error getting thread context:', err?.message || err);
+      return { thread: [evt], isRoot: true };
+    }
+  }
+
+  _assessThreadContextQuality(threadEvents) {
+    if (!threadEvents || threadEvents.length === 0) return 0;
+
+    let score = 0;
+    const contents = threadEvents.map(e => e.content || '').filter(Boolean);
+    
+    // More events = better context (up to a point)
+    score += Math.min(threadEvents.length * 0.2, 1.0);
+    
+    // Content variety and depth
+    const totalLength = contents.join(' ').length;
+    if (totalLength > 100) score += 0.3;
+    if (totalLength > 300) score += 0.2;
+    
+    // Recent activity
+    const now = Math.floor(Date.now() / 1000);
+    const recentEvents = threadEvents.filter(e => (now - (e.created_at || 0)) < 3600); // Last hour
+    if (recentEvents.length > 0) score += 0.2;
+    
+    // Topic coherence
+    const allWords = contents.join(' ').toLowerCase().split(/\s+/);
+    const uniqueWords = new Set(allWords);
+    const coherence = uniqueWords.size / Math.max(allWords.length, 1);
+    if (coherence > 0.3) score += 0.3;
+    
+    return Math.min(score, 1.0);
+  }
+
+  _shouldEngageWithThread(evt, threadContext) {
+    if (!threadContext || !evt) return false;
+
+    const { thread, isRoot, contextQuality } = threadContext;
+    
+    // Always engage with high-quality root posts
+    if (isRoot && contextQuality > 0.6) {
+      return true;
+    }
+    
+    // For thread replies, be more selective
+    if (!isRoot) {
+      // Don't engage if we can't understand the context
+      if (contextQuality < 0.3) {
+        logger?.debug?.(`[NOSTR] Low context quality (${contextQuality.toFixed(2)}) for thread reply ${evt.id.slice(0, 8)}`);
+        return false;
+      }
+      
+      // Check if the thread is about relevant topics
+      const threadContent = thread.map(e => e.content || '').join(' ').toLowerCase();
+      const relevantKeywords = [
+        'art', 'pixel', 'creative', 'canvas', 'design', 'nostr', 'bitcoin', 
+        'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community'
+      ];
+      
+      const hasRelevantContent = relevantKeywords.some(keyword => 
+        threadContent.includes(keyword)
+      );
+      
+      if (!hasRelevantContent) {
+        logger?.debug?.(`[NOSTR] Thread ${evt.id.slice(0, 8)} lacks relevant content for engagement`);
+        return false;
+      }
+      
+      // Check if this is a good entry point (not too deep in thread)
+      if (thread.length > 5) {
+        logger?.debug?.(`[NOSTR] Thread too long (${thread.length} events) for natural entry ${evt.id.slice(0, 8)}`);
+        return false;
+      }
+    }
+    
+    // Additional quality checks
+    const content = evt.content || '';
+    
+    // Skip very short or very long content
+    if (content.length < 10 || content.length > 800) {
+      return false;
+    }
+    
+    // Skip obvious bot patterns
+    const botPatterns = [
+      /^(gm|good morning|good night|gn)\s*$/i,
+      /^(repost|rt)\s*$/i,
+      /^\d+$/, // Just numbers
+      /^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/ // Just symbols
+    ];
+    
+    if (botPatterns.some(pattern => pattern.test(content.trim()))) {
+      return false;
+    }
+    
+    return true;
+  }
+
   async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
   const { ensureNostrContext } = require('./context');
   return ensureNostrContext(this.runtime, userPubkey, usernameLike, conversationId, { createUniqueUuid, ChannelType, logger });
@@ -1201,6 +1459,14 @@ class NostrService {
       if (!evt || !evt.id) return;
       if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.info('[NOSTR] Ignoring self-mention'); return; }
       if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
+      
+      // Check if this is actually a mention directed at us vs just a thread reply
+      if (!this._isActualMention(evt)) {
+        logger.debug(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
+        this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
+        return;
+      }
+      
       this.handledEventIds.add(evt.id);
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);

@@ -15,7 +15,7 @@ const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandi
 const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
-const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts } = require('./eventFactory');
+const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -199,7 +199,14 @@ class NostrService {
 
     // User social metrics cache (follower/following ratios)
     this.userSocialMetrics = new Map(); // pubkey -> { followers: number, following: number, ratio: number, lastUpdated: timestamp }
-    this.socialMetricsCacheTTL = 24 * 60 * 60 * 1000; // 24 hours    // Bridge: allow external modules to request a post
+    this.socialMetricsCacheTTL = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Mute list cache
+    this.mutedUsers = new Set(); // Set of muted pubkeys
+    this.muteListLastFetched = 0; // Timestamp of last mute list fetch
+    this.muteListCacheTTL = 60 * 60 * 1000; // 1 hour TTL for mute list
+
+    // Bridge: allow external modules to request a post
 
     // Pixel activity tracking (dedupe + throttling)
     // In-flight dedupe within this process
@@ -446,6 +453,34 @@ class NostrService {
     if (svc.discoveryEnabled && sk) svc.scheduleNextDiscovery();
     if (svc.homeFeedEnabled && sk) svc.startHomeFeed();
 
+    // Load existing mute list during startup
+    if (svc.pool && svc.pkHex) {
+      try {
+        await svc._loadMuteList();
+        logger.info(`[NOSTR] Loaded mute list with ${svc.mutedUsers.size} muted users`);
+        
+        // Optionally unfollow any currently followed muted users
+        const unfollowMuted = String(runtime.getSetting('NOSTR_UNFOLLOW_MUTED_USERS') ?? 'true').toLowerCase() === 'true';
+        if (unfollowMuted && svc.mutedUsers.size > 0) {
+          try {
+            const contacts = await svc._loadCurrentContacts();
+            const mutedFollows = [...contacts].filter(pubkey => svc.mutedUsers.has(pubkey));
+            if (mutedFollows.length > 0) {
+              const newContacts = new Set([...contacts].filter(pubkey => !svc.mutedUsers.has(pubkey)));
+              const unfollowSuccess = await svc._publishContacts(newContacts);
+              if (unfollowSuccess) {
+                logger.info(`[NOSTR] Unfollowed ${mutedFollows.length} muted users on startup`);
+              }
+            }
+          } catch (err) {
+            logger.debug('[NOSTR] Failed to unfollow muted users on startup:', err?.message || err);
+          }
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to load mute list during startup:', err?.message || err);
+      }
+    }
+
     // Start LNPixels listener for external-triggered posts
     try {
       const { startLNPixelsListener } = require('./lnpixels-listener');
@@ -639,6 +674,32 @@ class NostrService {
     }
   }
 
+  async _loadMuteList() {
+    const now = Date.now();
+    // Return cached mute list if it's still fresh
+    if (this.mutedUsers.size > 0 && (now - this.muteListLastFetched) < this.muteListCacheTTL) {
+      return this.mutedUsers;
+    }
+
+    const { loadMuteList } = require('./contacts');
+    try {
+      const muteList = await loadMuteList(this.pool, this.relays, this.pkHex);
+      this.mutedUsers = muteList;
+      this.muteListLastFetched = now;
+      logger.info(`[NOSTR] Loaded mute list with ${muteList.size} muted users`);
+      return muteList;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to load mute list:', err?.message || err);
+      return new Set();
+    }
+  }
+
+  async _isUserMuted(pubkey) {
+    if (!pubkey) return false;
+    const muteList = await this._loadMuteList();
+    return muteList.has(pubkey);
+  }
+
   async _list(relays, filters) {
     const { poolList } = require('./poolList');
     return poolList(this.pool, relays, filters);
@@ -653,6 +714,91 @@ class NostrService {
       return ok;
     } catch (err) {
       logger.warn('[NOSTR] Failed to publish contacts:', err?.message || err);
+      return false;
+    }
+  }
+
+  async _publishMuteList(newSet) {
+    const { publishMuteList } = require('./contacts');
+    const { buildMuteList } = require('./eventFactory');
+    try {
+      const ok = await publishMuteList(this.pool, this.relays, this.sk, newSet, buildMuteList, finalizeEvent);
+      if (ok) logger.info(`[NOSTR] Published mute list with ${newSet.size} muted users`);
+      else logger.warn('[NOSTR] Failed to publish mute list (unknown error)');
+      return ok;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to publish mute list:', err?.message || err);
+      return false;
+    }
+  }
+
+  async muteUser(pubkey) {
+    if (!pubkey || !this.pool || !this.sk || !this.relays.length || !this.pkHex) return false;
+
+    try {
+      const muteList = await this._loadMuteList();
+      if (muteList.has(pubkey)) {
+        logger.debug(`[NOSTR] User ${pubkey.slice(0, 8)} already muted`);
+        return true; // Already muted
+      }
+
+      const newMuteList = new Set([...muteList, pubkey]);
+      const success = await this._publishMuteList(newMuteList);
+
+      if (success) {
+        // Update cache
+        this.mutedUsers = newMuteList;
+        this.muteListLastFetched = Date.now();
+
+        // Optionally unfollow muted user
+        const unfollowMuted = this.runtime?.getSetting('NOSTR_UNFOLLOW_MUTED_USERS') !== 'false';
+        if (unfollowMuted) {
+          try {
+            const contacts = await this._loadCurrentContacts();
+            if (contacts.has(pubkey)) {
+              const newContacts = new Set(contacts);
+              newContacts.delete(pubkey);
+              const unfollowSuccess = await this._publishContacts(newContacts);
+              if (unfollowSuccess) {
+                logger.info(`[NOSTR] Unfollowed muted user ${pubkey.slice(0, 8)}`);
+              }
+            }
+          } catch (err) {
+            logger.debug(`[NOSTR] Failed to unfollow muted user ${pubkey.slice(0, 8)}:`, err?.message || err);
+          }
+        }
+      }
+
+      return success;
+    } catch (err) {
+      logger.debug(`[NOSTR] Mute failed for ${pubkey.slice(0, 8)}:`, err?.message || err);
+      return false;
+    }
+  }
+
+  async unmuteUser(pubkey) {
+    if (!pubkey || !this.pool || !this.sk || !this.relays.length || !this.pkHex) return false;
+
+    try {
+      const muteList = await this._loadMuteList();
+      if (!muteList.has(pubkey)) {
+        logger.debug(`[NOSTR] User ${pubkey.slice(0, 8)} not muted`);
+        return true; // Already not muted
+      }
+
+      const newMuteList = new Set(muteList);
+      newMuteList.delete(pubkey);
+      const success = await this._publishMuteList(newMuteList);
+
+      if (success) {
+        // Update cache
+        this.mutedUsers = newMuteList;
+        this.muteListLastFetched = Date.now();
+      }
+
+      return success;
+    } catch (err) {
+      logger.debug(`[NOSTR] Unmute failed for ${pubkey.slice(0, 8)}:`, err?.message || err);
       return false;
     }
   }
@@ -787,6 +933,12 @@ class NostrService {
       if (usedAuthors.has(evt.pubkey)) continue;
       if (evt.pubkey === this.pkHex) continue;
       if (!canReply) continue;
+
+      // Check if user is muted
+      if (await this._isUserMuted(evt.pubkey)) {
+        logger.debug(`[NOSTR] Discovery skipping muted user ${evt.pubkey.slice(0, 8)}`);
+        continue;
+      }
 
       const last = this.lastReplyByUser.get(evt.pubkey) || 0;
       const now = Date.now();
@@ -1053,6 +1205,13 @@ class NostrService {
       if (!this.replyEnabled) { logger.info('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); return; }
       if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying'); return; }
       if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send reply'); return; }
+
+      // Check if user is muted
+      if (await this._isUserMuted(evt.pubkey)) {
+        logger.debug(`[NOSTR] Skipping reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        return;
+      }
+
       const last = this.lastReplyByUser.get(evt.pubkey) || 0; const now = Date.now();
       if (now - last < this.replyThrottleSec * 1000) {
         const waitMs = this.replyThrottleSec * 1000 - (now - last) + 250;
@@ -1072,6 +1231,8 @@ class NostrService {
               // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
+              // Check if user is muted before scheduled reply
+              if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
               this.lastReplyByUser.set(pubkey, now2);
               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
               logger.info(`[NOSTR] Sending scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
@@ -1215,6 +1376,13 @@ class NostrService {
       const targetEventId = getZapTargetEventId(evt);
       const sender = getZapSenderPubkey(evt) || evt.pubkey;
       const now = Date.now(); const last = this.zapCooldownByUser.get(sender) || 0; const cooldownMs = 5 * 60 * 1000; if (now - last < cooldownMs) return; this.zapCooldownByUser.set(sender, now);
+
+      // Check if sender is muted
+      if (await this._isUserMuted(sender)) {
+        logger.debug(`[NOSTR] Skipping zap thanks to muted user ${sender.slice(0, 8)}`);
+        return;
+      }
+
       const existingTimer = this.pendingReplyTimers.get(sender); if (existingTimer) { try { clearTimeout(existingTimer); } catch {} this.pendingReplyTimers.delete(sender); logger.info(`[NOSTR] Cancelled scheduled reply for ${sender.slice(0,8)} due to zap`); }
       this.lastReplyByUser.set(sender, now);
       const convId = targetEventId || this._getConversationIdFromEvent(evt);
@@ -1326,6 +1494,11 @@ class NostrService {
                 logger.info(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
                 return;
               }
+              // Check if user is muted before scheduled DM reply
+              if (await this._isUserMuted(pubkey)) {
+                logger.debug(`[NOSTR] Skipping scheduled DM reply to muted user ${pubkey.slice(0, 8)}`);
+                return;
+              }
               this.lastReplyByUser.set(pubkey, now2);
               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
               logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
@@ -1374,6 +1547,12 @@ class NostrService {
           return;
         }
       } catch {}
+
+      // Check if user is muted before sending DM reply
+      if (await this._isUserMuted(evt.pubkey)) {
+        logger.debug(`[NOSTR] Skipping DM reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        return;
+      }
 
   // Use decrypted content for the DM prompt
   const dmEvt = { ...evt, content: decryptedContent };
@@ -1467,6 +1646,11 @@ class NostrService {
             try {
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.dmThrottleSec * 1000) return;
+              // Check if user is muted before scheduled sealed DM reply
+              if (await this._isUserMuted(pubkey)) {
+                logger.debug(`[NOSTR] Skipping scheduled sealed DM reply to muted user ${pubkey.slice(0, 8)}`);
+                return;
+              }
               this.lastReplyByUser.set(pubkey, now2);
               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
               const ok = await this.postDM(parentEvt, replyText);
@@ -1488,6 +1672,12 @@ class NostrService {
       const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
       const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
       if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+
+      // Check if user is muted before sending sealed DM reply
+      if (await this._isUserMuted(evt.pubkey)) {
+        logger.debug(`[NOSTR] Skipping sealed DM reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        return;
+      }
 
       const dmEvt = { ...evt, content: decryptedContent };
       const replyText = await this.generateReplyTextLLM(dmEvt, roomId);
@@ -1591,6 +1781,12 @@ class NostrService {
       let interactions = 0;
       for (const evt of qualityEvents) {
         if (interactions >= this.homeFeedMaxInteractions) break;
+
+        // Check if user is muted
+        if (await this._isUserMuted(evt.pubkey)) {
+          logger.debug(`[NOSTR] Skipping home feed interaction with muted user ${evt.pubkey.slice(0, 8)}`);
+          continue;
+        }
 
         const interactionType = this._chooseInteractionType();
         if (!interactionType) continue;

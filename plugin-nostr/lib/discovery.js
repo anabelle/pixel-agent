@@ -131,14 +131,28 @@ async function selectFollowCandidates(scoredEvents, currentContacts, selfPk, las
     .map(([pubkey, score]) => ({ pubkey, score }))
     .sort((a, b) => b.score - a.score);
 
-  const qualityCandidates = candidates.filter(({ pubkey, score }) => {
-    if (score < 0.4) return false;
+  const qualityCandidates = [];
+  for (const candidate of candidates) {
+    const { pubkey, score } = candidate;
+    if (score < 0.4) continue;
     const lastReply = lastReplyByUser.get(pubkey) || 0;
     const timeSinceReply = now - lastReply;
     // Apply cooldown unless explicitly ignored for this pubkey
-    if (!ignoreCooldownSet.has(pubkey) && timeSinceReply < (2 * 60 * 60 * 1000)) return false; // 2 hours
-    return true;
-  });
+    if (!ignoreCooldownSet.has(pubkey) && timeSinceReply < (2 * 60 * 60 * 1000)) continue; // 2 hours
+
+    // Check if user is muted (if service instance is available)
+    let isMuted = false;
+    if (serviceInstance && serviceInstance._isUserMuted) {
+      try {
+        isMuted = await serviceInstance._isUserMuted(pubkey);
+      } catch (err) {
+        // Silently ignore mute check errors
+      }
+    }
+    if (isMuted) continue;
+
+    qualityCandidates.push(candidate);
+  }
 
   return qualityCandidates.map(c => c.pubkey);
 }

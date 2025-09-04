@@ -1,6 +1,6 @@
 // Full NostrService extracted from index.js for testability
 let logger, createUniqueUuid, ChannelType, ModelType;
-let SimplePool, nip19, nip04, finalizeEvent, getPublicKey;
+let SimplePool, nip19, nip04, nip44, finalizeEvent, getPublicKey;
 let wsInjector;
 let nip10Parse;
 
@@ -23,6 +23,8 @@ async function ensureDeps() {
     SimplePool = tools.SimplePool;
     nip19 = tools.nip19;
     nip04 = tools.nip04;
+  // nip44 may or may not be present depending on version; guard its usage
+  nip44 = tools.nip44;
     finalizeEvent = tools.finalizeEvent;
     getPublicKey = tools.getPublicKey;
     wsInjector = tools.setWebSocketConstructor || tools.useWebSocketImplementation;
@@ -67,6 +69,18 @@ async function ensureDeps() {
     if (wsInjector) {
       try { wsInjector(WebSocketWrapper); } catch {}
     }
+  }
+  // Best-effort dynamic acquire of nip44 if not already available
+  if (!nip44) {
+    try {
+      const mod = await import('@nostr/tools');
+      if (mod && mod.nip44) nip44 = mod.nip44;
+    } catch {}
+    try {
+      // Some distros expose nip44 as a subpath
+      const mod44 = await import('@nostr/tools/nip44');
+      if (mod44) nip44 = mod44;
+    } catch {}
   }
   if (!globalThis.WebSocket) globalThis.WebSocket = WebSocketWrapper;
   if (!nip10Parse) {
@@ -406,15 +420,19 @@ class NostrService {
           [
             { kinds: [1], '#p': [svc.pkHex] },
             { kinds: [4], '#p': [svc.pkHex] },
+            // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
+            { kinds: [14], '#p': [svc.pkHex] },
             { kinds: [9735], authors: undefined, limit: 0, '#p': [svc.pkHex] },
           ],
           {
             onevent(evt) {
-              logger.info(`[NOSTR] Mention from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
+              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
               if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
               if (evt.kind === 4) { svc.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
+              if (evt.kind === 14) { svc.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
               if (evt.kind === 9735) { svc.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-              svc.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err));
+              if (evt.kind === 1) { svc.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
+              logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
             },
             oneose() { logger.debug('[NOSTR] Mention subscription OSE'); },
           }
@@ -1376,6 +1394,110 @@ class NostrService {
       }
     } catch (err) {
       logger.warn('[NOSTR] handleDM failed:', err?.message || err);
+    }
+  }
+
+  async handleSealedDM(evt) {
+    try {
+      if (!evt || evt.kind !== 14) return;
+      if (!this.pkHex) return;
+      if (isSelfAuthor(evt, this.pkHex)) return;
+      if (!this.dmEnabled) { logger.info('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); return; }
+      if (!this.dmReplyEnabled) { logger.info('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); return; }
+      if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to sealed DM'); return; }
+      if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send sealed DM reply'); return; }
+
+      // Attempt to decrypt sealed content via nip44 if available
+      let decryptedContent = null;
+      try {
+        if (nip44 && (nip44.decrypt || nip44.sealOpen)) {
+          const recipientTag = evt.tags.find(t => t && t[0] === 'p');
+          const peerPubkey = recipientTag && recipientTag[1] && String(recipientTag[1]).toLowerCase() === String(this.pkHex).toLowerCase()
+            ? String(evt.pubkey).toLowerCase()
+            : String(recipientTag?.[1] || evt.pubkey).toLowerCase();
+          const privHex = typeof this.sk === 'string' ? this.sk : Buffer.from(this.sk).toString('hex');
+          if (typeof nip44.decrypt === 'function') {
+            decryptedContent = await nip44.decrypt(privHex, peerPubkey, evt.content);
+          } else if (typeof nip44.sealOpen === 'function') {
+            // Some APIs expose sealOpen(sk, content) or similar; try conservative signature
+            try { decryptedContent = await nip44.sealOpen(privHex, evt.content); } catch {}
+          }
+        }
+      } catch (e) {
+        logger.debug('[NOSTR] Sealed DM decrypt attempt failed:', e?.message || e);
+      }
+
+      if (!decryptedContent) {
+        logger.info('[NOSTR] Sealed DM received but cannot decrypt (nip44 not available). Consider enabling legacy DM or adding nip44 support in runtime build.');
+        return;
+      }
+
+      logger.info(`[NOSTR] Sealed DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+
+      // Dedup check
+      if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping sealed DM ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
+      this.handledEventIds.add(evt.id);
+
+      // Save memory and prepare reply context
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
+      const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (!existing) {
+          await this._createMemorySafe({ id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } }, createdAt: createdAtMs, }, 'messages');
+          logger.info(`[NOSTR] Saved sealed DM as memory id=${eventMemoryId}`);
+        }
+      } catch {}
+
+      // Respect throttling
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.dmThrottleSec * 1000) {
+        const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          const pubkey = evt.pubkey;
+          const parentEvt = { ...evt, content: decryptedContent };
+          const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
+              if (now2 - lastNow < this.dmThrottleSec * 1000) return;
+              this.lastReplyByUser.set(pubkey, now2);
+              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+              const ok = await this.postDM(parentEvt, replyText);
+              if (ok) {
+                const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
+                await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId }, createdAt: now2, }, 'messages').catch(() => {});
+              }
+            } catch (e2) { logger.warn('[NOSTR] Scheduled sealed DM reply failed:', e2?.message || e2); }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        }
+        return;
+      }
+
+      this.lastReplyByUser.set(evt.pubkey, now);
+
+      // Think delay
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+
+      const dmEvt = { ...evt, content: decryptedContent };
+      const replyText = await this.generateReplyTextLLM(dmEvt, roomId);
+      const replyOk = await this.postDM(evt, replyText);
+      if (replyOk) {
+        const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };
+        await this._createMemorySafe(replyMemory, 'messages');
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] handleSealedDM failed:', err?.message || err);
     }
   }
 

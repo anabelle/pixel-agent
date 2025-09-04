@@ -205,6 +205,7 @@ class NostrService {
     this.mutedUsers = new Set(); // Set of muted pubkeys
     this.muteListLastFetched = 0; // Timestamp of last mute list fetch
     this.muteListCacheTTL = 60 * 60 * 1000; // 1 hour TTL for mute list
+  this._muteListLoadInFlight = null; // Promise to dedupe concurrent loads
 
     // Bridge: allow external modules to request a post
 
@@ -680,18 +681,32 @@ class NostrService {
     if (this.mutedUsers.size > 0 && (now - this.muteListLastFetched) < this.muteListCacheTTL) {
       return this.mutedUsers;
     }
+    // If a load is already in progress, reuse it
+    if (this._muteListLoadInFlight) {
+      try {
+        return await this._muteListLoadInFlight;
+      } catch {
+        // Fall through to a fresh attempt
+      }
+    }
 
     const { loadMuteList } = require('./contacts');
-    try {
-      const muteList = await loadMuteList(this.pool, this.relays, this.pkHex);
-      this.mutedUsers = muteList;
-      this.muteListLastFetched = now;
-      logger.info(`[NOSTR] Loaded mute list with ${muteList.size} muted users`);
-      return muteList;
-    } catch (err) {
-      logger.warn('[NOSTR] Failed to load mute list:', err?.message || err);
-      return new Set();
-    }
+    this._muteListLoadInFlight = (async () => {
+      try {
+        const list = await loadMuteList(this.pool, this.relays, this.pkHex);
+        this.mutedUsers = list;
+        this.muteListLastFetched = Date.now();
+        logger.info(`[NOSTR] Loaded mute list with ${list.size} muted users`);
+        return list;
+      } catch (err) {
+        logger.warn('[NOSTR] Failed to load mute list:', err?.message || err);
+        return new Set();
+      } finally {
+        // Clear in-flight after completion to allow future refreshes
+        this._muteListLoadInFlight = null;
+      }
+    })();
+    return await this._muteListLoadInFlight;
   }
 
   async _isUserMuted(pubkey) {
@@ -751,7 +766,7 @@ class NostrService {
         this.muteListLastFetched = Date.now();
 
         // Optionally unfollow muted user
-        const unfollowMuted = this.runtime?.getSetting('NOSTR_UNFOLLOW_MUTED_USERS') !== 'false';
+  const unfollowMuted = String(this.runtime?.getSetting('NOSTR_UNFOLLOW_MUTED_USERS') ?? 'true').toLowerCase() === 'true';
         if (unfollowMuted) {
           try {
             const contacts = await this._loadCurrentContacts();

@@ -129,4 +129,17 @@ function buildDirectMessage(recipientPubkey, text, createdAtSec) {
   };
 }
 
-module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildDirectMessage };
+function buildMuteList(pubkeys) {
+  const tags = [];
+  for (const pk of pubkeys || []) {
+    if (pk) tags.push(['p', pk]);
+  }
+  return {
+    kind: 10000,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: '',
+  };
+}
+
+module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildDirectMessage, buildMuteList };

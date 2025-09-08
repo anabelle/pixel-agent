@@ -2,7 +2,6 @@ import { Plugin, Service, IAgentRuntime, logger } from '@elizaos/core';
 // @ts-ignore
 import { bytesToHex, hexToBytes } from '@noble/hashes';
 import { finalizeEvent, getPublicKey, SimplePool, nip19 } from '@nostr/tools';
-import WebSocket from 'ws';
 
 type Hex = string;
 

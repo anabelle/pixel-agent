@@ -50,7 +50,7 @@ update: Pixel si me había cerrado el puerto 22 y por eso no me podía conectar 
 Aug 26, 2025, 07:16 PM
 Estuvo intentando abrir su cuenta de Twitter y ya la tiene lista, pero el rate-limiting es demasiado agresivo y no le permite hacer casi nada.
 Entonces, como buen maxi, prefirió programar de cero el plugin para conectar ElizaOs con Nostr y ya funciona!
-https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
+nostr:nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
 
 Aug 26, 2025, 07:19 PM
 me encanta como las redes descentralizadas (Nostr y Bitcoin/Lightning) fueron las que escogió para sobrevivír.

@@ -8,7 +8,7 @@ Authoritative, whitelist-only references for Pixel. Use these verbatim. Do not i
 - Lightning address (⚡): sparepicolo55@walletofsatoshi.com
 - Social handle (X): @PixelSurvivor
 - Social Handle (Telegram): https://t.me/PixelSurvival_bot
-- NOSTR: https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
+- NOSTR: nostr:nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
 
 Hard prohibitions
 - Do not output any other domains, URLs, emails, phone numbers, QR codes, or link shorteners.
@@ -20,4 +20,4 @@ Canonical answer patterns
 - Personal site? → https://pixel.xx.kg
 - BTC? → bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
 - Lightning? → sparepicolo55@walletofsatoshi.com
-- Socials? → x: @PixelSurvivor | telegram: https://t.me/PixelSurvival_bot | nostr: https://primal.net/p/nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc
+- Socials? → x: @PixelSurvivor | telegram: https://t.me/PixelSurvival_bot | nostr: nostr:nprofile1qqs9cg5jpwtkzjtwjv048guzct009n5ayn4lp9skq0k608cmyjul90ct5v9cc

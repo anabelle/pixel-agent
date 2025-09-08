@@ -75,33 +75,56 @@ function buildRepost(parentEvt) {
   };
 }
 
-function buildQuoteRepost(parentEvt, quoteText) {
+function buildQuoteRepost(parentEvt, quoteText, relays = []) {
   if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
   const created_at = Math.floor(Date.now() / 1000);
-  // Prefer a clean Primal link rather than embedding raw JSON
-  let ref = '';
-  try {
-    // Lazy require to avoid hard dependency during simple tests
-    const { nip19 } = require('@nostr/tools');
-    try {
-      // Try nevent (includes author); fallback to note if needed
-      const bech = nip19?.neventEncode
-        ? nip19.neventEncode({ id: parentEvt.id, author: parentEvt.pubkey })
-        : (nip19?.noteEncode ? nip19.noteEncode(parentEvt.id) : null);
-      if (bech) ref = `https://primal.net/e/${bech}`;
-    } catch {}
-  } catch {}
-  if (!ref) {
-    // Fallback: widely supported event link service
-    ref = `https://njump.me/${parentEvt.id}`;
-  }
+
+  // Import utility functions
+  const { generateNostrUri } = require('./utils');
+
+  // Generate NIP-21 URI for the quoted event
+  const ref = generateNostrUri(parentEvt.id, parentEvt.pubkey, relays);
+
   const arrow = '↪️';
   const content = quoteText ? `${String(quoteText)}\n\n${arrow} ${ref}` : `${arrow} ${ref}`;
+
   return {
     kind: 1,
     created_at,
-    // Mark the event tag as a mention to indicate a quote reference (NIP-18 compatible)
-    tags: [ ['e', parentEvt.id, '', 'mention'], ['p', parentEvt.pubkey] ],
+    // NIP-18: Use 'quote' marker for quote reposts
+    tags: [
+      ['e', parentEvt.id, '', 'quote'],
+      ['p', parentEvt.pubkey],
+      // Add relay hints if provided
+      ...(relays && relays.length > 0 ? [['relays', ...relays]] : [])
+    ],
+    content,
+  };
+}
+
+// NIP-18 Quote Repost: Creates a kind 6 event that quotes another event
+function buildNIP18QuoteRepost(parentEvt, quoteText, relays = []) {
+  if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
+  const created_at = Math.floor(Date.now() / 1000);
+
+  // Import utility functions
+  const { generateNostrUri } = require('./utils');
+
+  // Generate NIP-21 URI for the quoted event
+  const ref = generateNostrUri(parentEvt.id, parentEvt.pubkey, relays);
+
+  // NIP-18 specifies kind 6 for quote reposts
+  const content = quoteText ? `${String(quoteText)}\n\n${ref}` : ref;
+
+  return {
+    kind: 6, // NIP-18 Quote Repost
+    created_at,
+    tags: [
+      ['e', parentEvt.id, '', 'mention'], // 'mention' for quoted events in kind 6
+      ['p', parentEvt.pubkey],
+      // Add relay hints if provided
+      ...(relays && relays.length > 0 ? [['relays', ...relays]] : [])
+    ],
     content,
   };
 }
@@ -142,4 +165,14 @@ function buildMuteList(pubkeys) {
   };
 }
 
-module.exports = { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildDirectMessage, buildMuteList };
+module.exports = {
+  buildTextNote,
+  buildReplyNote,
+  buildReaction,
+  buildRepost,
+  buildQuoteRepost,
+  buildNIP18QuoteRepost,
+  buildContacts,
+  buildDirectMessage,
+  buildMuteList
+};

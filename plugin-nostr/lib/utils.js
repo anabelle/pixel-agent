@@ -41,10 +41,89 @@ function pickRangeWithJitter(minSec, maxSec) {
   return minSec + Math.floor(Math.random() * Math.max(1, maxSec - minSec));
 }
 
+// NIP-21 URI utilities for nostr:nevent and nostr:nprofile
+function generateNostrUri(eventId, authorPubkey, relays = []) {
+  try {
+    // Lazy require to avoid hard dependency during simple tests
+    const { nip19 } = require('@nostr/tools');
+
+    if (authorPubkey && nip19?.neventEncode) {
+      // Generate nevent (includes author and optional relays)
+      const neventData = { id: eventId, author: authorPubkey };
+      if (relays && relays.length > 0) {
+        neventData.relays = relays;
+      }
+      const bech = nip19.neventEncode(neventData);
+      return `nostr:${bech}`;
+    } else if (nip19?.noteEncode) {
+      // Fallback to note (just event ID)
+      const bech = nip19.noteEncode(eventId);
+      return `nostr:${bech}`;
+    }
+  } catch (error) {
+    console.warn('[NOSTR] Failed to generate Nostr URI:', error.message);
+  }
+
+  // Final fallback: use njump.me as a widely supported event link service
+  return `https://njump.me/${eventId}`;
+}
+
+function generateNostrProfileUri(pubkey, relays = []) {
+  try {
+    // Lazy require to avoid hard dependency during simple tests
+    const { nip19 } = require('@nostr/tools');
+
+    if (nip19?.nprofileEncode) {
+      const nprofileData = { pubkey };
+      if (relays && relays.length > 0) {
+        nprofileData.relays = relays;
+      }
+      const bech = nip19.nprofileEncode(nprofileData);
+      return `nostr:${bech}`;
+    } else if (nip19?.npubEncode) {
+      // Fallback to npub
+      const bech = nip19.npubEncode(pubkey);
+      return `nostr:${bech}`;
+    }
+  } catch (error) {
+    console.warn('[NOSTR] Failed to generate Nostr profile URI:', error.message);
+  }
+
+  // Final fallback: use njump.me as a widely supported profile link service
+  return `https://njump.me/${pubkey}`;
+}
+
+function parseNostrUri(uri) {
+  if (!uri || typeof uri !== 'string') return null;
+
+  try {
+    // Lazy require to avoid hard dependency during simple tests
+    const { nip19 } = require('@nostr/tools');
+
+    if (uri.startsWith('nostr:')) {
+      const bech32 = uri.slice(6); // Remove 'nostr:' prefix
+      const decoded = nip19.decode(bech32);
+
+      return {
+        type: decoded.type,
+        data: decoded.data,
+        relays: decoded.data.relays || []
+      };
+    }
+  } catch (error) {
+    console.warn('[NOSTR] Failed to parse Nostr URI:', error.message);
+  }
+
+  return null;
+}
+
 module.exports = {
   hexToBytesLocal,
   bytesToHexLocal,
   parseRelays,
   normalizeSeconds,
   pickRangeWithJitter,
+  generateNostrUri,
+  generateNostrProfileUri,
+  parseNostrUri,
 };

@@ -685,10 +685,10 @@ export const character: Character = {
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
     IMAGE_DESCRIPTION:
       process.env.OPENROUTER_MODEL || "mistralai/mistral-medium-3.1",
-    OPENROUTER_MODEL:
-      process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
-    OPENROUTER_LARGE_MODEL:
-      process.env.OPENROUTER_LARGE_MODEL || "deepseek/deepseek-r1:free",
+     OPENROUTER_MODEL:
+       process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat-v3.1:free",
+     OPENROUTER_LARGE_MODEL:
+       process.env.OPENROUTER_LARGE_MODEL || "mistralai/mistral-medium-3.1",
     OPENROUTER_SMALL_MODEL:
       process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-nano",
     OPENROUTER_IMAGE_MODEL:

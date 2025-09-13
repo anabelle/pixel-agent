@@ -630,7 +630,7 @@ export const character: Character = {
     "@elizaos/plugin-openai",
     "@elizaos/plugin-knowledge",
     // "@elizaos/plugin-shell",
-    // '@elizaos/plugin-twitter',
+    '@elizaos/plugin-twitter',
     "@pixel/plugin-nostr",
   ],
   settings: {

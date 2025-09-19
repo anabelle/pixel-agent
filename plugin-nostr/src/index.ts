@@ -92,12 +92,8 @@ class NostrService extends Service {
           relays,
           [{ kinds: [1], '#p': [svc.pkHex] }],
           {
-            onevent(evt: any) {
-              logger.info(`[NOSTR] Mention from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-
-              // Skip processing mentions to avoid database errors with nostr-prefixed IDs
-              // The system tries to query memories using nostr event IDs which don't exist
-              return;
+            onevent: (evt: any) => {
+              svc.processNostrMention(evt).catch(err => logger.error('[NOSTR] Error processing mention:', err));
             },
             oneose() {
               logger.debug('[NOSTR] Mention subscription OSE');
@@ -171,7 +167,24 @@ class NostrService extends Service {
     logger.info('[NOSTR] Service stopped');
   }
 
+  private isContentAppropriate(content: string): boolean {
+    // Basic content moderation - block inappropriate content
+    const blockedKeywords = [
+      'pedo', 'pedophile', 'child', 'minor', 'underage', 'cp', 'csam',
+      'rape', 'abuse', 'exploitation', 'grooming', 'loli', 'shota'
+    ];
+
+    const lowerContent = content.toLowerCase();
+    return !blockedKeywords.some(keyword => lowerContent.includes(keyword));
+  }
+
   private async processNostrMention(evt: any): Promise<void> {
+    // Check content appropriateness before processing
+    if (!this.isContentAppropriate(evt.content)) {
+      logger.warn(`[NOSTR] Blocked inappropriate mention from ${evt.pubkey}: ${evt.content.slice(0, 50)}...`);
+      return;
+    }
+
     // This method can be used to process mentions without triggering memory queries
     // For now, just log the event to avoid database errors
     logger.debug(`[NOSTR] Processing mention from ${evt.pubkey}: ${evt.content.slice(0, 100)}`);

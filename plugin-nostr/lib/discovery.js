@@ -58,6 +58,32 @@ function isSemanticMatch(content, topic) {
   return relatedTerms.some(term => content.toLowerCase().includes(term.toLowerCase()));
 }
 
+async function analyzeAccountWithLLM(authorEvents, serviceInstance) {
+  if (!serviceInstance || !authorEvents.length) return true; // Default to allow if no service
+
+  // Combine recent posts (last 10) into a text for analysis
+  const recentPosts = authorEvents.slice(0, 10).map(e => e.content || '').join('\n').slice(0, 2000);
+
+  if (!recentPosts.trim()) return true;
+
+  const prompt = `Analyze this Nostr user's recent posts for appropriateness. Determine if the account seems to post harmful, illegal, or inappropriate content (e.g., child exploitation, abuse, scams). Respond with only "SAFE" or "UNSAFE" followed by a brief reason.
+
+Posts:
+${recentPosts}`;
+
+  try {
+    const response = await serviceInstance.generateText(prompt, { temperature: 0.1 });
+    const result = response?.trim().toUpperCase();
+    if (result.startsWith('UNSAFE')) {
+      return false;
+    }
+  } catch (err) {
+    // If LLM fails, fall back to basic checks
+  }
+
+  return true;
+}
+
 function isQualityAuthor(authorEvents) {
   if (!authorEvents.length) return false;
   if (authorEvents.length === 1) { const event = authorEvents[0]; return _isQualityContent(event, 'general'); }
@@ -83,6 +109,12 @@ function isQualityAuthor(authorEvents) {
 }
 
 async function selectFollowCandidates(scoredEvents, currentContacts, selfPk, lastReplyByUser, replyThrottleSec, serviceInstance = null, options = {}) {
+  // Group events by author for account analysis
+  const eventsByAuthor = new Map();
+  for (const { evt } of scoredEvents) {
+    if (!eventsByAuthor.has(evt.pubkey)) eventsByAuthor.set(evt.pubkey, []);
+    eventsByAuthor.get(evt.pubkey).push(evt);
+  }
   const authorScores = new Map();
   const now = Date.now();
 
@@ -151,6 +183,11 @@ async function selectFollowCandidates(scoredEvents, currentContacts, selfPk, las
     }
     if (isMuted) continue;
 
+    // Analyze account with LLM if service available
+    const authorEvents = eventsByAuthor.get(pubkey) || [];
+    const accountSafe = await analyzeAccountWithLLM(authorEvents, serviceInstance);
+    if (!accountSafe) continue;
+
     qualityCandidates.push(candidate);
   }
 
@@ -162,4 +199,5 @@ module.exports = {
   isSemanticMatch,
   isQualityAuthor,
   selectFollowCandidates,
+  analyzeAccountWithLLM,
 };

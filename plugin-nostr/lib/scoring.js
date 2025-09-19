@@ -58,6 +58,17 @@ function _scoreEventForEngagement(evt, nowSec = Math.floor(Date.now() / 1000)) {
 function _isQualityContent(event, topic = '') {
   if (!event || !event.content) return false;
   const content = event.content;
+
+  // Check for inappropriate content
+  const blockedKeywords = [
+    'pedo', 'pedophile', 'child', 'minor', 'underage', 'cp', 'csam',
+    'rape', 'abuse', 'exploitation', 'grooming', 'loli', 'shota'
+  ];
+  const lowerContent = content.toLowerCase();
+  if (blockedKeywords.some(keyword => lowerContent.includes(keyword))) {
+    return false;
+  }
+
   const contentLength = content.length;
   if (contentLength < 10) return false;
   if (contentLength > 2000) return false;

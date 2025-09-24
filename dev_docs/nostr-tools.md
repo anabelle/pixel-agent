@@ -4,7 +4,7 @@ CODE SNIPPETS
 TITLE: Install nostr-tools
 DESCRIPTION: Instructions for installing the nostr-tools package using npm or jsr.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_0
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_0
 
 LANGUAGE: bash
 CODE:
@@ -21,7 +21,7 @@ npx jsr add @nostr/tools
 TITLE: Browser Usage without Bundler
 DESCRIPTION: Provides an example of how to use nostr-tools directly from a browser by including the bundled JavaScript file via a CDN. It shows how to access the global NostrTools object and its functions.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_15
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_15
 
 LANGUAGE: html
 CODE:
@@ -37,7 +37,7 @@ CODE:
 TITLE: Interact with Relays using SimplePool
 DESCRIPTION: Demonstrates querying for single and multiple events, subscribing to events, publishing events, and managing relay connections using SimplePool.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_4
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_4
 
 LANGUAGE: js
 CODE:
@@ -108,7 +108,7 @@ relay.close()
 TITLE: Connecting to a Bunker using NIP-46
 DESCRIPTION: Demonstrates how to connect to a Nostr bunker service using NIP-46. It covers generating a local secret key, parsing a bunker URI, creating a BunkerSigner instance, connecting, and then signing an event.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_8
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_8
 
 LANGUAGE: js
 CODE:
@@ -150,7 +150,7 @@ pool.close([])
 TITLE: Initialize nostr-wasm with nostr-tools
 DESCRIPTION: Demonstrates how to import and initialize nostr-wasm to be used with nostr-tools functions like finalizeEvent and verifyEvent. It highlights the need to resolve the initialization promise before using these functions.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_13
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_13
 
 LANGUAGE: javascript
 CODE:
@@ -170,7 +170,7 @@ initNostrWasm().then(setNostrWasm)
 TITLE: Querying Profile Data from NIP-05 Address
 DESCRIPTION: Shows how to query profile information using a NIP-05 address. It includes the basic usage and instructions for older Node.js versions requiring `node-fetch`.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_10
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_10
 
 LANGUAGE: js
 CODE:
@@ -196,7 +196,7 @@ useFetchImplementation(require('node-fetch'))
 TITLE: Nostr Tools Development Commands
 DESCRIPTION: Lists available commands for developing nostr-tools using the 'just' task runner. Users can run 'just -l' to see the full list of commands.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_16
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_16
 
 LANGUAGE: plaintext
 CODE:
@@ -209,7 +209,7 @@ just -l
 TITLE: Using AbstractRelay and AbstractSimplePool with nostr-wasm
 DESCRIPTION: Shows how to integrate nostr-wasm with AbstractRelay and AbstractSimplePool by importing the necessary modules and passing the verifyEvent function during instantiation. This is required when using these abstract classes instead of the defaults.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_14
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_14
 
 LANGUAGE: javascript
 CODE:
@@ -230,7 +230,7 @@ const pool = new AbstractSimplePool({ verifyEvent })
 TITLE: Create, Sign, and Verify Nostr Events
 DESCRIPTION: Finalizes a Nostr event with necessary fields and signs it with a private key, then verifies the event's signature.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_3
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_3
 
 LANGUAGE: js
 CODE:
@@ -252,7 +252,7 @@ let isGood = verifyEvent(event)
 TITLE: Configure WebSocket Implementation for Node.js
 DESCRIPTION: Sets the WebSocket implementation for nostr-tools when running in a Node.js environment, typically using the 'ws' package.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_5
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_5
 
 LANGUAGE: js
 CODE:
@@ -269,7 +269,7 @@ useWebSocketImplementation(WebSocket)
 TITLE: Generate Private and Public Keys
 DESCRIPTION: Generates a private key (Uint8Array) and derives the corresponding public key (hex string) using nostr-tools.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_1
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_1
 
 LANGUAGE: js
 CODE:
@@ -285,7 +285,7 @@ let pk = getPublicKey(sk) // `pk` is a hex string
 TITLE: Enable Relay Pings with SimplePool
 DESCRIPTION: Configures SimplePool to enable regular pings to connected relays, improving reliability by detecting unresponsive connections.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_6
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_6
 
 LANGUAGE: js
 CODE:
@@ -300,7 +300,7 @@ const pool = new SimplePool({ enablePing: true })
 TITLE: Encoding and Decoding NIP-19 Codes
 DESCRIPTION: Illustrates the usage of NIP-19 for encoding and decoding various Nostr identifiers like `nsec`, `npub`, and `nprofile`. It demonstrates converting secret keys to `nsec`, public keys to `npub`, and creating/parsing `nprofile` with public keys and relays.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_12
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_12
 
 LANGUAGE: js
 CODE:
@@ -334,7 +334,7 @@ assert(data.relays.length === 2)
 TITLE: Parsing Threads from Notes using NIP-10
 DESCRIPTION: Explains how to parse Nostr events to identify thread structures based on NIP-10. It shows how to extract the root event, immediate parent, mentions, quotes, and referenced profiles from an event's tags.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_9
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_9
 
 LANGUAGE: js
 CODE:
@@ -383,7 +383,7 @@ for (let profile of refs.profiles) {
 TITLE: Parse Nostr References (NIP-27)
 DESCRIPTION: Parses a Nostr event's content to extract text, URLs, media, and Nostr-specific references (nevent, naddr, npub, nprofile) using the nip27 module.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_7
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_7
 
 LANGUAGE: js
 CODE:
@@ -426,7 +426,7 @@ for (let block of nip27.parse(evt.content)) {
 TITLE: Including NIP-07 Types
 DESCRIPTION: Provides TypeScript type definitions for the Nostr browser extension API (NIP-07) to aid in development.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_11
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_11
 
 LANGUAGE: typescript
 CODE:
@@ -445,7 +445,7 @@ declare global {
 TITLE: Convert Secret Key to Hex
 DESCRIPTION: Converts a secret key from Uint8Array to a hex string and back using @noble/hashes utilities.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_2
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_2
 
 LANGUAGE: js
 CODE:
@@ -461,7 +461,7 @@ let backToBytes = hexToBytes(skHex)
 TITLE: Nostr Tools Contribution Patch Address
 DESCRIPTION: Provides the Nostr address (naddr) for submitting patches to the nostr-tools repository, as per NIP-34.
 
-SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/master/README.md#_snippet_17
+SOURCE: https://github.com/nbd-wtf/nostr-tools/blob/main/README.md#_snippet_17
 
 LANGUAGE: plaintext
 CODE:

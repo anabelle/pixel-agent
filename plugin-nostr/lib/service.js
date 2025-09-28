@@ -1510,7 +1510,7 @@ class NostrService {
             try {
               logger.info(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`);
               try {
-                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 10 });
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) { logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); return; }
               } catch {}
@@ -1930,8 +1930,20 @@ class NostrService {
           const timer = setTimeout(async () => {
             this.pendingReplyTimers.delete(pubkey);
             try {
+              logger.info(`[NOSTR] Scheduled sealed DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
+              try {
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
+                if (hasReply) {
+                  logger.info(`[NOSTR] Skipping scheduled sealed DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
+                  return;
+                }
+              } catch {}
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
-              if (now2 - lastNow < this.dmThrottleSec * 1000) return;
+              if (now2 - lastNow < this.dmThrottleSec * 1000) {
+                logger.info(`[NOSTR] Still throttled for sealed DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
+                return;
+              }
               // Check if user is muted before scheduled sealed DM reply
               if (await this._isUserMuted(pubkey)) {
                 logger.debug(`[NOSTR] Skipping scheduled sealed DM reply to muted user ${pubkey.slice(0, 8)}`);

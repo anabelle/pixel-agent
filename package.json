@@ -13,6 +13,7 @@
     "clean-db": "./clean-db.sh"
   },
   "dependencies": {
+    "@elizaos/client-instagram": "^0.25.6-alpha.1",
     "@elizaos/core": "^1.0.0",
     "@elizaos/plugin-bootstrap": "^1.4.5",
     "@elizaos/plugin-discord": "^1.2.5",

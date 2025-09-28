@@ -671,8 +671,9 @@ export const character: Character = {
     "@elizaos/plugin-openai",
     "@elizaos/plugin-knowledge",
     // "@elizaos/plugin-shell",
-    '@elizaos/plugin-twitter',
+    // '@elizaos/plugin-twitter',
     "@pixel/plugin-nostr",
+    "@elizaos/client-instagram",
   ],
   settings: {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "",
@@ -686,6 +687,11 @@ export const character: Character = {
     TWITTER_POST_INTERVAL_MAX: process.env.TWITTER_POST_INTERVAL_MAX || "240",
     DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || "",
     DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || "",
+     INSTAGRAM_USERNAME: process.env.INSTAGRAM_USERNAME || "",
+     INSTAGRAM_PASSWORD: process.env.INSTAGRAM_PASSWORD || "",
+     INSTAGRAM_APP_ID: process.env.INSTAGRAM_APP_ID || "",
+     INSTAGRAM_APP_SECRET: process.env.INSTAGRAM_APP_SECRET || "",
+     INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
     OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
     IMAGE_DESCRIPTION:
       process.env.OPENROUTER_MODEL || "mistralai/mistral-medium-3.1",

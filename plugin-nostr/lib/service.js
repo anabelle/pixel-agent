@@ -2298,19 +2298,23 @@ class NostrService {
         const interactionType = this._chooseInteractionType();
         if (!interactionType) continue;
 
-        try {
-          let success = false;
-          switch (interactionType) {
-            case 'reaction':
-              success = await this.postReaction(evt, '+');
-              break;
-            case 'repost':
-              success = await this.postRepost(evt);
-              break;
-            case 'quote':
-              success = await this.postQuoteRepost(evt);
-              break;
-          }
+         try {
+           let success = false;
+           switch (interactionType) {
+             case 'reaction':
+               // For reactions, we could potentially make them image-aware by reacting differently
+               // based on image content, but for now keep it simple
+               success = await this.postReaction(evt, '+');
+               break;
+             case 'repost':
+               // Pure reposts don't need text generation, so no image awareness needed
+               success = await this.postRepost(evt);
+               break;
+             case 'quote':
+               // Quote reposts now include image awareness
+               success = await this.postQuoteRepost(evt);
+               break;
+           }
 
           if (success) {
             this.homeFeedProcessedEvents.add(evt.id);
@@ -2381,26 +2385,51 @@ class NostrService {
     }
   }
 
-  async generateQuoteTextLLM(evt) {
-    const prompt = `Quote and comment on this Nostr post in your unique voice as ${this.runtime.character?.name || 'an AI agent'}:
+   async generateQuoteTextLLM(evt) {
+     // Process images if enabled
+     let imageContext = { imageDescriptions: [], imageUrls: [] };
+     if (this.imageProcessingEnabled) {
+       try {
+         const { processImageContent } = require('./image-vision');
+         const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+         imageContext = {
+           imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+           imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+         };
+       } catch (error) {
+         logger.debug(`[NOSTR] Error processing images for quote: ${error.message}`);
+       }
+     }
 
-Original post: "${evt.content}"
+     let imagePrompt = '';
+     if (imageContext.imageDescriptions.length > 0) {
+       imagePrompt = `
+
+Images in the original post:
+${imageContext.imageDescriptions.join('\n\n')}
+
+Reference these visual elements naturally in your quote repost to make it more engaging.`;
+     }
+
+     const prompt = `Quote and comment on this Nostr post in your unique voice as ${this.runtime.character?.name || 'an AI agent'}:
+
+Original post: "${evt.content}"${imagePrompt}
 
 Write a brief, engaging quote repost that adds value or provides context. Keep it under 200 characters.`;
 
-    const type = this._getLargeModelType();
-    const { generateWithModelOrFallback } = require('./generation');
-    const text = await generateWithModelOrFallback(
-      this.runtime,
-      type,
-      prompt,
-      { maxTokens: 100, temperature: 0.8 },
-      (res) => this._extractTextFromModelResult(res),
-      (s) => this._sanitizeWhitelist(s),
-      () => `Interesting perspective on "${evt.content.slice(0, 1000)}..."`
-    );
-    return text || null;
-  }
+     const type = this._getLargeModelType();
+     const { generateWithModelOrFallback } = require('./generation');
+     const text = await generateWithModelOrFallback(
+       this.runtime,
+       type,
+       prompt,
+       { maxTokens: 100, temperature: 0.8 },
+       (res) => this._extractTextFromModelResult(res),
+       (s) => this._sanitizeWhitelist(s),
+       () => `Interesting perspective on "${evt.content.slice(0, 1000)}..."`
+     );
+     return text || null;
+   }
 
   async handleHomeFeedEvent(evt) {
     // NOTE: Do NOT mark as processed here - only mark when actual interactions occur

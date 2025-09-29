@@ -27,7 +27,7 @@ function buildPostPrompt(character) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -55,7 +55,7 @@ function buildReplyPrompt(character, evt, recentMessages, threadContext = null) 
         return `${i + 1}. ${author}${isTarget ? ' [TARGET]' : ''}: "${content}"`;
       })
       .join('\n');
-    
+
     threadContextSection = `
 Thread Context (quality: ${(contextQuality * 100).toFixed(0)}%):
 ${threadSummary}
@@ -63,18 +63,30 @@ ${threadSummary}
 This is ${isRoot ? 'a root post' : `a reply in a ${thread.length}-message thread`}. Use the full thread context to craft a natural, contextually aware response that adds value to the conversation.`;
   }
 
-  return [
-    `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.`,
-    ch.system ? `Persona/system: ${ch.system}` : '',
-    style.length ? `Style guidelines: ${style.join(' | ')}` : '',
-    examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
-    whitelist,
-    threadContextSection,
-    history,
-    `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
-    'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
-    `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
-  ].filter(Boolean).join('\n\n');
+  // Build image context section if available
+  let imageContextSection = '';
+  if (imageContext && imageContext.imageDescriptions && imageContext.imageDescriptions.length > 0) {
+    const imageDescriptions = imageContext.imageDescriptions.join('\n\n');
+    imageContextSection = `
+Image Context (what you can see in the images):
+${imageDescriptions}
+
+IMPORTANT: You have actually viewed these images and can reference their visual content naturally in your response. When relevant, mention specific visual elements, colors, subjects, composition, or artistic style as if you saw them firsthand. Make your response more engaging by reacting to what you observe in the images.`;
+  }
+
+    return [
+      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}`,
+      ch.system ? `Persona/system: ${ch.system}` : '',
+      style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+      examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
+      whitelist,
+      threadContextSection,
+      imageContextSection,
+      history,
+      `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
+      'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
+      `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}${imageContext ? ' and visually-aware (reference what you see in the images)' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
+    ].filter(Boolean).join('\n\n');
 }
 
 // DM-specific reply prompt (more private, concise, and cautious with links)

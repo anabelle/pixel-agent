@@ -214,7 +214,11 @@ class NostrService {
     this.mutedUsers = new Set(); // Set of muted pubkeys
     this.muteListLastFetched = 0; // Timestamp of last mute list fetch
     this.muteListCacheTTL = 60 * 60 * 1000; // 1 hour TTL for mute list
-  this._muteListLoadInFlight = null; // Promise to dedupe concurrent loads
+    this._muteListLoadInFlight = null; // Promise to dedupe concurrent loads
+
+    // Image processing configuration
+    this.imageProcessingEnabled = String(runtime.getSetting('NOSTR_IMAGE_PROCESSING_ENABLED') ?? 'true').toLowerCase() === 'true';
+    this.maxImagesPerMessage = Math.max(1, Math.min(10, Number(runtime.getSetting('NOSTR_MAX_IMAGES_PER_MESSAGE') ?? '5')));
 
     // Bridge: allow external modules to request a post
 
@@ -994,7 +998,7 @@ class NostrService {
           continue;
         }
 
-        const text = await this.generateReplyTextLLM(evt, roomId, threadContext);
+        const text = await this.generateReplyTextLLM(evt, roomId, threadContext, null);
         const ok = await this.postReply(evt, text);
         if (ok) {
           this.handledEventIds.add(evt.id);
@@ -1023,11 +1027,11 @@ class NostrService {
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt() { return buildPostPrompt(this.runtime.character); }
-  _buildReplyPrompt(evt, recent, threadContext = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null) {
     if (evt?.kind === 4) {
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext);
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1119,7 +1123,7 @@ class NostrService {
     return text || '';
   }
 
-  async generateReplyTextLLM(evt, roomId, threadContext = null) {
+  async generateReplyTextLLM(evt, roomId, threadContext = null, imageContext = null) {
     let recent = [];
     try {
       if (this.runtime?.getMemories && roomId) {
@@ -1129,8 +1133,8 @@ class NostrService {
       }
     } catch {}
     
-    // Use thread context if available for better contextual responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext);
+    // Use thread context and image context if available for better contextual responses
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     const text = await generateWithModelOrFallback(
@@ -1519,9 +1523,9 @@ class NostrService {
               if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
               // Check if user is muted before scheduled reply
               if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
-              this.lastReplyByUser.set(pubkey, now2);
-              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
-              logger.info(`[NOSTR] Sending scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
+               this.lastReplyByUser.set(pubkey, now2);
+               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, null);
+               logger.info(`[NOSTR] Sending scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
               const ok = await this.postReply(parentEvt, replyText);
               if (ok) {
                 const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${now2}:scheduled`);
@@ -1539,7 +1543,31 @@ class NostrService {
       const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
       if (delayMs > 0) { logger.info(`[NOSTR] Preparing reply; thinking for ~${delayMs}ms`); await new Promise((r) => setTimeout(r, delayMs)); }
       else { logger.info(`[NOSTR] Preparing immediate reply (no delay)`); }
-      const replyText = await this.generateReplyTextLLM(evt, roomId);
+
+      // Process images in the mention content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in mention content: "${(evt.content || '').slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(evt.content || '', runtime);
+          // Limit the number of images to process
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from mention (max: ${this.maxImagesPerMessage}), URLs: ${imageContext.imageUrls.join(', ')}`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in image processing: ${error.message || error}`);
+          // Continue with empty image context
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      } else {
+        logger.debug('[NOSTR] Image processing disabled by configuration');
+      }
+
+      logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
+      const replyText = await this.generateReplyTextLLM(evt, roomId, null, imageContext);
       logger.info(`[NOSTR] Sending reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
       const replyOk = await this.postReply(evt, replyText);
       if (replyOk) {
@@ -1840,9 +1868,9 @@ class NostrService {
         return;
       }
 
-  // Use decrypted content for the DM prompt
-  const dmEvt = { ...evt, content: decryptedContent };
-  const replyText = await this.generateReplyTextLLM(dmEvt, roomId);
+   // Use decrypted content for the DM prompt
+   const dmEvt = { ...evt, content: decryptedContent };
+   const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
       logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
       const replyOk = await this.postDM(evt, replyText);
       if (replyOk) {
@@ -1977,9 +2005,9 @@ class NostrService {
         return;
       }
 
-      const dmEvt = { ...evt, content: decryptedContent };
-      const replyText = await this.generateReplyTextLLM(dmEvt, roomId);
-      const replyOk = await this.postDM(evt, replyText);
+       const dmEvt = { ...evt, content: decryptedContent };
+       const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
+       const replyOk = await this.postDM(evt, replyText);
       if (replyOk) {
         const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };
         await this._createMemorySafe(replyMemory, 'messages');

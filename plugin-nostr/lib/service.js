@@ -155,6 +155,9 @@ class NostrService {
     this.replyInitialDelayMinMs = 800;
     this.replyInitialDelayMaxMs = 2500;
     this.handledEventIds = new Set();
+
+    // Restore handled event IDs from memory on startup
+    this._restoreHandledEventIds();
     this.lastReplyByUser = new Map();
     this.pendingReplyTimers = new Map();
     this.zapCooldownByUser = new Map();
@@ -1572,10 +1575,50 @@ class NostrService {
       const replyOk = await this.postReply(evt, replyText);
       if (replyOk) {
         logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
-        const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId, }, createdAt: now, };
+        const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId, imageContext: imageContext && imageContext.imageDescriptions.length > 0 ? { descriptions: imageContext.imageDescriptions, urls: imageContext.imageUrls } : null, }, createdAt: now, };
   await this._createMemorySafe(replyMemory, 'messages');
       }
     } catch (err) { logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
+  }
+
+  async _restoreHandledEventIds() {
+    try {
+      if (!this.runtime?.getMemories) return;
+
+      // Get recent reply memories to restore handled event IDs
+      const replyMemories = await this.runtime.getMemories({
+        tableName: 'messages',
+        agentId: this.runtime.agentId,
+        count: 1000, // Load last 1000 replies
+        unique: false
+      });
+
+      let restored = 0;
+      for (const memory of replyMemories) {
+        if (memory.content?.source === 'nostr' && memory.content?.inReplyTo) {
+          // Extract the original event ID from the inReplyTo field
+          const originalEventId = memory.content.inReplyTo;
+          if (originalEventId && !this.handledEventIds.has(originalEventId)) {
+            this.handledEventIds.add(originalEventId);
+            restored++;
+          }
+        }
+        // Also check if the memory ID contains the event ID (fallback)
+        if (memory.id && memory.id.includes(':')) {
+          const parts = memory.id.split(':');
+          if (parts.length >= 2 && !this.handledEventIds.has(parts[0])) {
+            this.handledEventIds.add(parts[0]);
+            restored++;
+          }
+        }
+      }
+
+      if (restored > 0) {
+        logger.info(`[NOSTR] Restored ${restored} handled event IDs from memory`);
+      }
+    } catch (error) {
+      logger.warn(`[NOSTR] Failed to restore handled event IDs: ${error.message}`);
+    }
   }
 
   pickReplyTextFor(evt) {

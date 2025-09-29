@@ -2,21 +2,49 @@ const fetch = require('node-fetch');
 
 function extractImageUrls(content) {
   logger.info('[NOSTR] 🔍 Extracting images from mention content (length ' + content.length + ')');
-  logger.info('[NOSTR] Raw content preview: "' + content.replace(/\n/g, '\\n').slice(0, 300) + '..."');
-  
+  logger.info('[NOSTR] Raw content preview: "' + content.replace(/\n/g, '\\n').slice(0, 500) + '...');
+
   // Aggressive normalization: replace all whitespace sequences with single space
   const normalized = content.replace(/\s+/g, ' ').trim();
-  logger.info('[NOSTR] Normalized content: "' + normalized.slice(0, 300) + '..."');
-  
-  // Simple regex for blossom.primal.net URLs with hash + .jpg
-  const urlRegex = /https:\/\/blossom\.primal\.net\/[a-fA-F0-9]{64}\.jpg/gi;
-  
-  const matches = normalized.match(urlRegex) || [];
-  logger.info('[NOSTR] Regex found ' + matches.length + ' potential URLs: ' + matches.join(' | '));
-  
-  // For now, all matches are considered valid for blossom.primal.net
-  const filtered = matches.filter(url => /blossom\.primal\.net/i.test(url));
-  
+  logger.info('[NOSTR] Normalized content: "' + normalized.slice(0, 500) + '...');
+
+  // Enhanced regex for common image URL patterns
+  // Supports: https://domain.com/path/image.jpg, https://domain.com/path/image.png, etc.
+  // Also includes query parameters and fragments
+  // Special handling for blossom.primal.net URLs which may or may not have extensions
+  const imageUrlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?)(?:\?[^\s<>"{}|\\^`[\]]*)?/gi;
+
+   // Also match blossom.primal.net URLs that might not have extensions (for other media types)
+   const blossomRegex = /https:\/\/blossom\.primal\.net\/[a-fA-F0-9]+(?:\.(?:jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?))?/gi;
+
+   const imageMatches = normalized.match(imageUrlRegex) || [];
+   const blossomMatches = normalized.match(blossomRegex) || [];
+   const matches = [...new Set([...imageMatches, ...blossomMatches])]; // Deduplicate URLs
+   logger.info('[NOSTR] Regex found ' + matches.length + ' potential image URLs: ' + matches.join(' | '));
+
+  // Filter for valid image URLs (basic validation)
+  const filtered = matches.filter(url => {
+    try {
+      const urlObj = new URL(url);
+      // Basic validation: has valid protocol and hostname
+      if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') {
+        return false;
+      }
+
+      // For blossom.primal.net URLs, assume they are media (could be images)
+      if (urlObj.hostname === 'blossom.primal.net') {
+        return true;
+      }
+
+      // For other URLs, check for image extensions
+      const pathname = urlObj.pathname.toLowerCase();
+      return /\.(jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?)$/.test(pathname);
+    } catch (error) {
+      logger.debug('[NOSTR] Invalid URL skipped: ' + url + ' - ' + error.message);
+      return false;
+    }
+  });
+
   if (filtered.length > 0) {
     logger.info('[NOSTR] ✅ SUCCESS: Extracted ' + filtered.length + ' image URL(s): ' + filtered.join(', '));
   } else {
@@ -27,12 +55,64 @@ function extractImageUrls(content) {
   return filtered;
 }
 
+/**
+ * Process image content from a Nostr message by extracting URLs and analyzing them
+ * @param {string} content - The message content to process
+ * @param {IAgentRuntime} runtime - The runtime instance
+ * @returns {Promise<{imageDescriptions: string[], imageUrls: string[]}>}
+ */
+async function processImageContent(content, runtime) {
+  logger.info(`[NOSTR] === STARTING IMAGE PROCESSING ===`);
+  logger.info(`[NOSTR] processImageContent called with content length: ${content.length}`);
+  logger.info(`[NOSTR] Content preview: "${content.slice(0, 300)}..."`);
+
+  const imageUrls = extractImageUrls(content);
+
+  if (imageUrls.length === 0) {
+    logger.info('[NOSTR] No image URLs found in content');
+    return { imageDescriptions: [], imageUrls: [] };
+  }
+
+  logger.info(`[NOSTR] Processing ${imageUrls.length} images from content: ${imageUrls.join(', ')}`);
+
+  const imageDescriptions = [];
+  const processedUrls = [];
+
+  for (const imageUrl of imageUrls) {
+    try {
+      logger.info(`[NOSTR] Analyzing image: ${imageUrl}`);
+      const description = await analyzeImageWithVision(imageUrl, runtime);
+      logger.info(`[NOSTR] Image analysis result: ${description ? 'SUCCESS' : 'FAILED'} - Length: ${description?.length || 0}`);
+      if (description) {
+        logger.info(`[NOSTR] Image description preview: "${description.slice(0, 100)}..."`);
+        imageDescriptions.push(description);
+        processedUrls.push(imageUrl);
+        logger.info(`[NOSTR] Successfully processed image: ${imageUrl.slice(0, 50)}... Description length: ${description.length}`);
+      } else {
+        logger.warn(`[NOSTR] Failed to analyze image (no description returned): ${imageUrl}`);
+      }
+    } catch (error) {
+      logger.error(`[NOSTR] Error processing image ${imageUrl}: ${error.message || error}`);
+    }
+  }
+
+  logger.info(`[NOSTR] Image processing complete: ${imageDescriptions.length} descriptions generated`);
+  return { imageDescriptions, imageUrls: processedUrls };
+}
+
 async function analyzeImageWithVision(imageUrl, runtime) {
+  console.log(`[NOSTR] === ANALYZING IMAGE ===`);
+  console.log(`[NOSTR] analyzeImageWithVision called for: ${imageUrl}`);
+  logger.info(`[NOSTR] === ANALYZING IMAGE ===`);
+  logger.info(`[NOSTR] analyzeImageWithVision called for: ${imageUrl}`);
+
   // Try OpenAI first (primary vision model)
   try {
     const apiKey = runtime.getSetting('OPENAI_API_KEY');
+    logger.info(`[NOSTR] OpenAI API key configured: ${!!apiKey}`);
     if (apiKey) {
-      logger.info('[NOSTR] 👁️  Calling OpenAI vision for: ' + imageUrl);
+      logger.info('[NOSTR] 👁️  Calling OpenAI vision API for: ' + imageUrl);
+      logger.info(`[NOSTR] OpenAI model: ${runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MODEL') || 'gpt-4o-mini'}`);
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -62,12 +142,17 @@ async function analyzeImageWithVision(imageUrl, runtime) {
       if (response.ok) {
         const data = await response.json();
         const description = data.choices[0]?.message?.content?.trim();
+        logger.info(`[NOSTR] OpenAI response data: ${JSON.stringify(data).slice(0, 200)}...`);
         if (description) {
           logger.info('[NOSTR] ✅ OpenAI analyzed image: ' + description.slice(0, 100) + '...');
           return description;
+        } else {
+          logger.warn('[NOSTR] OpenAI returned no description in response');
         }
       } else {
         logger.warn('[NOSTR] OpenAI vision response not OK: ' + response.status + ' ' + response.statusText);
+        const errorText = await response.text();
+        logger.warn('[NOSTR] OpenAI error response: ' + errorText);
       }
     } else {
       logger.warn('[NOSTR] No OPENAI_API_KEY configured - skipping OpenAI vision');
@@ -186,6 +271,7 @@ async function generateNaturalReply(originalContent, imageDescription, runtime) 
 
 module.exports = {
   extractImageUrls,
+  processImageContent,
   analyzeImageWithVision,
   generateNaturalReply
 };

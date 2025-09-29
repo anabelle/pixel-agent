@@ -398,6 +398,9 @@ class NostrService {
     svc.discoveryMinSec = discoveryMin;
     svc.discoveryMaxSec = discoveryMax;
     svc.discoveryMaxReplies = discoveryMaxReplies;
+
+    // Configurable max event age for filtering old mentions/discovery events (in days)
+    svc.maxEventAgeDays = Math.max(0.1, Math.min(30, Number(runtime.getSetting('NOSTR_MAX_EVENT_AGE_DAYS') ?? '2')));
     svc.discoveryMaxFollows = discoveryMaxFollows;
     svc.discoveryMinQualityInteractions = discoveryMinQualityInteractions;
     svc.discoveryMaxSearchRounds = discoveryMaxSearchRounds;
@@ -953,13 +956,22 @@ class NostrService {
     let replies = 0;
     let qualityInteractions = 0;
 
-    for (const { evt, score } of scoredEvents) {
-      if (currentTotalReplies + replies >= this.discoveryMaxReplies) break;
-      if (!evt || !evt.id || !evt.pubkey) continue;
-      if (this.handledEventIds.has(evt.id)) continue;
-      if (usedAuthors.has(evt.pubkey)) continue;
-      if (evt.pubkey === this.pkHex) continue;
-      if (!canReply) continue;
+     for (const { evt, score } of scoredEvents) {
+       if (currentTotalReplies + replies >= this.discoveryMaxReplies) break;
+       if (!evt || !evt.id || !evt.pubkey) continue;
+       if (this.handledEventIds.has(evt.id)) continue;
+       if (usedAuthors.has(evt.pubkey)) continue;
+       if (evt.pubkey === this.pkHex) continue;
+       if (!canReply) continue;
+
+       // Check if event is too old (ignore events older than configured days for discovery replies)
+       const eventAgeMs = Date.now() - (evt.created_at * 1000);
+       const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
+       if (eventAgeMs > maxAgeMs) {
+         logger.debug(`[NOSTR] Discovery skipping old event ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`);
+         this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+         continue;
+       }
 
       // Check if user is muted
       if (await this._isUserMuted(evt.pubkey)) {
@@ -1469,10 +1481,19 @@ class NostrService {
   async handleMention(evt) {
     try {
       if (!evt || !evt.id) return;
-      if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.info('[NOSTR] Ignoring self-mention'); return; }
-      if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
-      
-      // Check if this is actually a mention directed at us vs just a thread reply
+       if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.info('[NOSTR] Ignoring self-mention'); return; }
+       if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
+
+       // Check if mention is too old (ignore mentions older than configured days)
+       const eventAgeMs = Date.now() - (evt.created_at * 1000);
+       const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
+       if (eventAgeMs > maxAgeMs) {
+         logger.info(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`);
+         this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+         return;
+       }
+
+       // Check if this is actually a mention directed at us vs just a thread reply
       if (!this._isActualMention(evt)) {
         logger.debug(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
         this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing

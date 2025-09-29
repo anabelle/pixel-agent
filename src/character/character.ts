@@ -1,11 +1,11 @@
 import { type Character } from "@elizaos/core";
-import { bio } from "./character/bio";
-import { topics } from "./character/topics";
-import { messageExamples } from "./character/messageExamples";
-import { postExamples } from "./character/postExamples";
-import { style } from "./character/style";
-import { plugins } from "./character/plugins";
-import { settings } from "./character/settings";
+import { bio } from "./bio";
+import { topics } from "./topics";
+import { messageExamples } from "./messageExamples";
+import { postExamples } from "./postExamples";
+import { style } from "./style";
+import { plugins } from "./plugins";
+import { settings } from "./settings";
 
 export const character: Character = {
   name: "Pixel",

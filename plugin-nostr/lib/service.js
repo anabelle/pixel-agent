@@ -2165,16 +2165,38 @@ class NostrService {
           { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
         ],
         {
-          onevent: (evt) => {
-            this.lastEventReceived = Date.now(); // Update last event timestamp
-            logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-            if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
-            if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
-            if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
-            if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-            if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
-            logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
-          },
+           onevent: (evt) => {
+             this.lastEventReceived = Date.now(); // Update last event timestamp
+             logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
+             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+
+             // Ignore known bot pubkeys to prevent loops
+             const botPubkeys = new Set([
+               '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
+             ]);
+             if (botPubkeys.has(evt.pubkey)) {
+               logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
+               return;
+             }
+
+             // Ignore bot-like content patterns
+             const botPatterns = [
+               /^Unknown command\. Try: /i,
+               /^\/help/i,
+               /^Command not found/i,
+               /^Please use \/help/i
+             ];
+             if (botPatterns.some(pattern => pattern.test(evt.content))) {
+               logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
+               return;
+             }
+
+             if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
+             if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
+             if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
+             if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
+             logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
+           },
           oneose: () => { 
             logger.debug('[NOSTR] Mention subscription OSE'); 
             this.lastEventReceived = Date.now(); // Update on EOSE as well

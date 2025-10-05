@@ -244,7 +244,7 @@ async function generateNaturalReply(originalContent, imageDescription, runtime) 
       },
       body: JSON.stringify({
         model: isOpenRouter 
-          ? (runtime.getSetting('OPENROUTER_MODEL') || 'x-ai/grok-4-fast:free')
+          ? (runtime.getSetting('OPENROUTER_MODEL') || 'tngtech/deepseek-r1t2-chimera:free')
           : (runtime.getSetting('OPENAI_MODEL') || 'gpt-4o-mini'),
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 200,

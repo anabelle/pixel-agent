@@ -18,8 +18,8 @@ export const settings = {
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
   IMAGE_DESCRIPTION:
     process.env.OPENROUTER_MODEL || "mistralai/mistral-medium-3.1",
-    OPENROUTER_MODEL:
-      process.env.OPENROUTER_MODEL || "x-ai/grok-4-fast:free",
+     OPENROUTER_MODEL:
+       process.env.OPENROUTER_MODEL || "tngtech/deepseek-r1t2-chimera:free",
    OPENROUTER_LARGE_MODEL:
      process.env.OPENROUTER_LARGE_MODEL || "mistralai/mistral-medium-3.1",
   OPENROUTER_SMALL_MODEL:

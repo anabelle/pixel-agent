@@ -152,9 +152,12 @@ class NostrService {
     this.listenUnsub = null;
     this.replyEnabled = true;
     this.replyThrottleSec = 60;
-    this.replyInitialDelayMinMs = 800;
-    this.replyInitialDelayMaxMs = 2500;
-    this.handledEventIds = new Set();
+     this.replyInitialDelayMinMs = 800;
+     this.replyInitialDelayMaxMs = 2500;
+     this.postMinSec = 7200; // Post every 2-4 hours (less frequent)
+     this.postMaxSec = 14400;
+     this.postEnabled = true;
+     this.handledEventIds = new Set();
 
     // Restore handled event IDs from memory on startup
     this._restoreHandledEventIds();
@@ -188,17 +191,17 @@ class NostrService {
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
 
-    // Home feed configuration
-    this.homeFeedEnabled = true;
-    this.homeFeedTimer = null;
-    this.homeFeedMinSec = 300; // Check home feed every 5 minutes
-    this.homeFeedMaxSec = 900; // Up to 15 minutes
-    this.homeFeedReactionChance = 0.15; // 15% chance to react to a post
-    this.homeFeedRepostChance = 0.05; // 5% chance to repost
-    this.homeFeedQuoteChance = 0.02; // 2% chance to quote repost
-    this.homeFeedMaxInteractions = 3; // Max interactions per home feed check
-    this.homeFeedProcessedEvents = new Set(); // Track processed events
-    this.homeFeedUnsub = null;
+     // Home feed configuration (reduced for less spam)
+     this.homeFeedEnabled = true;
+     this.homeFeedTimer = null;
+     this.homeFeedMinSec = 600; // Check home feed every 10 minutes (less frequent)
+     this.homeFeedMaxSec = 1800; // Up to 30 minutes
+     this.homeFeedReactionChance = 0.05; // 5% chance to react (reduced)
+     this.homeFeedRepostChance = 0.02; // 2% chance to repost (reduced)
+     this.homeFeedQuoteChance = 0.01; // 1% chance to quote repost (reduced)
+     this.homeFeedMaxInteractions = 1; // Max 1 interaction per check (reduced)
+     this.homeFeedProcessedEvents = new Set(); // Track processed events
+     this.homeFeedUnsub = null;
 
     // Unfollow configuration
     this.unfollowEnabled = true; // Disabled by default to prevent mass unfollows
@@ -225,22 +228,29 @@ class NostrService {
 
     // Bridge: allow external modules to request a post
 
-    // Pixel activity tracking (dedupe + throttling)
-    // In-flight dedupe within this process
-    this._pixelInFlight = new Set();
-    // Seen keys with TTL for cross-callback dedupe in this process
-    this._pixelSeen = new Map();
-    // TTL for seen cache (default 5 minutes)
-    this._pixelSeenTTL = Number(process.env.LNPIXELS_SEEN_TTL_MS || 5 * 60 * 1000);
-    // Minimum interval between pixel posts (default 1 hour)
-    {
-      const raw = process.env.LNPIXELS_POST_MIN_INTERVAL_MS || '3600000';
-      const n = Number(raw);
-      this._pixelPostMinIntervalMs = Number.isFinite(n) && n >= 0 ? n : 3600000;
-    }
-    // Last pixel post timestamp and last pixel event timestamp
-    this._pixelLastPostAt = 0;
-    this._pixelLastEventAt = 0;
+     // Pixel activity tracking (dedupe + throttling)
+     // In-flight dedupe within this process
+     this._pixelInFlight = new Set();
+     // Seen keys with TTL for cross-callback dedupe in this process
+     this._pixelSeen = new Map();
+     // TTL for seen cache (default 5 minutes)
+     this._pixelSeenTTL = Number(process.env.LNPIXELS_SEEN_TTL_MS || 5 * 60 * 1000);
+     // Minimum interval between pixel posts (default 1 hour)
+     {
+       const raw = process.env.LNPIXELS_POST_MIN_INTERVAL_MS || '3600000';
+       const n = Number(raw);
+       this._pixelPostMinIntervalMs = Number.isFinite(n) && n >= 0 ? n : 3600000;
+     }
+     // Last pixel post timestamp and last pixel event timestamp
+     this._pixelLastPostAt = 0;
+     this._pixelLastEventAt = 0;
+
+     // User interaction limits: max 2 interactions per user unless mentioned (persistent, resets weekly)
+     this.userInteractionCount = new Map();
+     this.interactionCountsMemoryId = null;
+
+     // Home feed followed users
+     this.followedUsers = new Set();
     try {
       const { emitter } = require('./bridge');
       if (emitter && typeof emitter.on === 'function') {
@@ -328,11 +338,124 @@ class NostrService {
         });
       }
     } catch {}
+   }
+
+  async _loadInteractionCounts() {
+    try {
+      const memories = await this.runtime.getMemories({ tableName: 'messages', count: 10 });
+      const latest = memories
+        .filter(m => m.content?.source === 'nostr' && m.content?.type === 'interaction_counts')
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+      if (latest && latest.content?.counts) {
+        this.userInteractionCount = new Map(Object.entries(latest.content.counts));
+        logger.info(`[NOSTR] Loaded ${this.userInteractionCount.size} interaction counts from memory`);
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Failed to load interaction counts:', err?.message || err);
+    }
   }
 
-  static async start(runtime) {
-    await ensureDeps();
-    const svc = new NostrService(runtime);
+  _setupResetTimer() {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    setInterval(async () => {
+      this.userInteractionCount.clear();
+      await this._saveInteractionCounts();
+      logger.info('[NOSTR] Weekly interaction counts reset');
+    }, weekMs);
+  }
+
+  async _saveInteractionCounts() {
+    try {
+      const content = { source: 'nostr', type: 'interaction_counts', counts: Object.fromEntries(this.userInteractionCount) };
+      const id = createUniqueUuid(this.runtime, `nostr:interaction_counts:${Date.now()}`);
+      await this._createMemorySafe({
+        id,
+        entityId: createUniqueUuid(this.runtime, 'nostr:system'),
+        agentId: this.runtime.agentId,
+        roomId: createUniqueUuid(this.runtime, 'nostr:counts'),
+        content,
+        createdAt: Date.now(),
+      }, 'messages');
+    } catch (err) {
+      logger.debug('[NOSTR] Failed to save interaction counts:', err?.message || err);
+    }
+  }
+
+  async _analyzePostForInteraction(evt) {
+    if (!evt || !evt.content) return false;
+
+    const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness? Respond with 'YES' or 'NO' and a brief reason.`;
+
+    const type = this._getSmallModelType();
+
+    try {
+      const { generateWithModelOrFallback } = require('./generation');
+      const response = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 100, temperature: 0.1 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => s,
+        () => 'NO' // Fallback to no
+      );
+      const result = response?.trim().toUpperCase();
+      return result.startsWith('YES');
+    } catch (err) {
+      logger.debug('[NOSTR] Failed to analyze post for interaction:', err?.message || err);
+      return false;
+    }
+  }
+
+  async _handleHomeFeedEvent(evt) {
+    if (this.homeFeedProcessedEvents.has(evt.id)) return;
+    this.homeFeedProcessedEvents.add(evt.id);
+
+    // Analyze post for relevance before interacting
+    if (!(await this._analyzePostForInteraction(evt))) {
+      logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0,8)} - not relevant`);
+      return;
+    }
+
+    const rand = Math.random();
+    if (rand < this.homeFeedReactionChance) {
+      this.postReaction(evt, '+').catch(() => {});
+    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
+      this.postRepost(evt).catch(() => {});
+    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
+      this.postQuoteRepost(evt, 'interesting').catch(() => {});
+    }
+  }
+
+  async postRepost(evt) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      const evtTemplate = buildRepost(evt);
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Reposted ${evt.id.slice(0, 8)}`);
+      return true;
+    } catch (err) { logger.debug('[NOSTR] Repost failed:', err?.message || err); return false; }
+  }
+
+  async postQuoteRepost(evt, text) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      const evtTemplate = buildQuoteRepost(evt, text);
+      const signed = finalizeEvent(evtTemplate, this.sk);
+      await Promise.any(this.pool.publish(this.relays, signed));
+      logger.info(`[NOSTR] Quote reposted ${evt.id.slice(0, 8)}`);
+      return true;
+    } catch (err) { logger.debug('[NOSTR] Quote repost failed:', err?.message || err); return false; }
+  }
+
+   static async start(runtime) {
+     await ensureDeps();
+     const svc = new NostrService(runtime);
+     await svc._loadInteractionCounts();
+     svc._setupResetTimer();
+     const current = await svc._loadCurrentContacts();
+     svc.followedUsers = current;
     const relays = parseRelays(runtime.getSetting('NOSTR_RELAYS'));
     const sk = parseSk(runtime.getSetting('NOSTR_PRIVATE_KEY'));
     const pkEnv = parsePk(runtime.getSetting('NOSTR_PUBLIC_KEY'));
@@ -1647,17 +1770,24 @@ class NostrService {
     return pickReplyTextFor(evt);
   }
 
-  async postReply(parentEvtOrId, text, opts = {}) {
-    if (!this.pool || !this.sk || !this.relays.length) return false;
-    try {
-      let rootId = null; let parentId = null; let parentAuthorPk = null;
-      try {
-        if (typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id) {
-          parentId = parentEvtOrId.id; parentAuthorPk = parentEvtOrId.pubkey || null;
-          if (nip10Parse) { const refs = nip10Parse(parentEvtOrId); if (refs?.root?.id) rootId = refs.root.id; if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvtOrId.id) rootId = refs.reply.id; }
-        } else if (typeof parentEvtOrId === 'string') { parentId = parentEvtOrId; }
-      } catch {}
-      if (!parentId) return false;
+   async postReply(parentEvtOrId, text, opts = {}) {
+     if (!this.pool || !this.sk || !this.relays.length) return false;
+     try {
+       let rootId = null; let parentId = null; let parentAuthorPk = null; let isMention = false;
+       try {
+         if (typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id) {
+           parentId = parentEvtOrId.id; parentAuthorPk = parentEvtOrId.pubkey || null;
+           isMention = this._isActualMention(parentEvtOrId);
+           if (nip10Parse) { const refs = nip10Parse(parentEvtOrId); if (refs?.root?.id) rootId = refs.root.id; if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvtOrId.id) rootId = refs.reply.id; }
+         } else if (typeof parentEvtOrId === 'string') { parentId = parentEvtOrId; }
+       } catch {}
+       if (!parentId) return false;
+
+       // Check interaction limit: max 2 per user unless it's a mention
+       if (parentAuthorPk && !isMention && (this.userInteractionCount.get(parentAuthorPk) || 0) >= 2) {
+         logger.info(`[NOSTR] Skipping reply to ${parentAuthorPk.slice(0,8)} - interaction limit reached (2/2)`);
+         return false;
+       }
       const parentForFactory = { id: parentId, pubkey: parentAuthorPk, refs: { rootId } };
       const extraPTags = (Array.isArray(opts.extraPTags) ? opts.extraPTags : []).filter(pk => pk && pk !== this.pkHex);
       const evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
@@ -1669,13 +1799,20 @@ class NostrService {
         const hasExpected = expectPk ? evtTemplate.tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
         logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0,8)} root=${rootId?String(rootId).slice(0,8):'-'}${expectPk?` mentionExpected=${hasExpected?'yes':'no'}`:''}`);
       } catch {}
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-      logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`);
-      await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => {});
-      if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => {}); }
-      return true;
+       const signed = finalizeEvent(evtTemplate, this.sk);
+       await Promise.any(this.pool.publish(this.relays, signed));
+       const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
+       logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`);
+
+       // Increment interaction count if not a mention
+       if (parentAuthorPk && !isMention) {
+         this.userInteractionCount.set(parentAuthorPk, (this.userInteractionCount.get(parentAuthorPk) || 0) + 1);
+         await this._saveInteractionCounts();
+       }
+
+       await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => {});
+       if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => {}); }
+       return true;
     } catch (err) { logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
   }
 

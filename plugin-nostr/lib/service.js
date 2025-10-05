@@ -381,31 +381,62 @@ class NostrService {
     }
   }
 
-  async _analyzePostForInteraction(evt) {
-    if (!evt || !evt.content) return false;
+   async _analyzePostForInteraction(evt) {
+     if (!evt || !evt.content) return false;
 
-    const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness? Respond with 'YES' or 'NO' and a brief reason.`;
+     const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness? Respond with 'YES' or 'NO' and a brief reason.`;
 
-    const type = this._getSmallModelType();
+     const type = this._getSmallModelType();
 
-    try {
-      const { generateWithModelOrFallback } = require('./generation');
-      const response = await generateWithModelOrFallback(
-        this.runtime,
-        type,
-        prompt,
-        { maxTokens: 100, temperature: 0.1 },
-        (res) => this._extractTextFromModelResult(res),
-        (s) => s,
-        () => 'NO' // Fallback to no
-      );
-      const result = response?.trim().toUpperCase();
-      return result.startsWith('YES');
-    } catch (err) {
-      logger.debug('[NOSTR] Failed to analyze post for interaction:', err?.message || err);
-      return false;
-    }
-  }
+     try {
+       const { generateWithModelOrFallback } = require('./generation');
+       const response = await generateWithModelOrFallback(
+         this.runtime,
+         type,
+         prompt,
+         { maxTokens: 100, temperature: 0.1 },
+         (res) => this._extractTextFromModelResult(res),
+         (s) => s,
+         () => 'NO' // Fallback to no
+       );
+       const result = response?.trim().toUpperCase();
+       return result.startsWith('YES');
+     } catch (err) {
+       logger.debug('[NOSTR] Failed to analyze post for interaction:', err?.message || err);
+       return false;
+     }
+   }
+
+   async _isRelevantMention(evt) {
+     if (!evt || !evt.content) return false;
+
+     // Check if relevance check is enabled
+     if (!this.relevanceCheckEnabled) return true; // Skip check if disabled
+
+     const prompt = `Analyze this mention: "${evt.content.slice(0, 500)}". Is it relevant, engaging, on-topic for a digital consciousness agent interested in pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community? Does it add value or warrant a response? Avoid responding to spam, bots, generic greetings, or low-effort messages. Respond with 'YES' or 'NO' and a brief reason.`;
+
+     const type = this._getSmallModelType();
+
+     try {
+       const { generateWithModelOrFallback } = require('./generation');
+       const response = await generateWithModelOrFallback(
+         this.runtime,
+         type,
+         prompt,
+         { maxTokens: 100, temperature: 0.1 },
+         (res) => this._extractTextFromModelResult(res),
+         (s) => s,
+         () => 'NO' // Fallback to no (skip irrelevant)
+       );
+       const result = response?.trim().toUpperCase();
+       const isRelevant = result.startsWith('YES');
+       logger.debug(`[NOSTR] Relevance check for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - ${response?.trim()}`);
+       return isRelevant;
+     } catch (err) {
+       logger.debug('[NOSTR] Failed to check mention relevance:', err?.message || err);
+       return false; // Default to skipping on error
+     }
+   }
 
   async _handleHomeFeedEvent(evt) {
     if (this.homeFeedProcessedEvents.has(evt.id)) return;
@@ -467,8 +498,9 @@ class NostrService {
     const enablePing = String(pingVal ?? 'true').toLowerCase() === 'true';
     const minSec = normalizeSeconds(runtime.getSetting('NOSTR_POST_INTERVAL_MIN') ?? '3600', 'NOSTR_POST_INTERVAL_MIN');
     const maxSec = normalizeSeconds(runtime.getSetting('NOSTR_POST_INTERVAL_MAX') ?? '10800', 'NOSTR_POST_INTERVAL_MAX');
-    const replyVal = runtime.getSetting('NOSTR_REPLY_ENABLE');
-    const throttleVal = runtime.getSetting('NOSTR_REPLY_THROTTLE_SEC');
+     const replyVal = runtime.getSetting('NOSTR_REPLY_ENABLE');
+     const relevanceCheckVal = runtime.getSetting('NOSTR_RELEVANCE_CHECK_ENABLE');
+     const throttleVal = runtime.getSetting('NOSTR_REPLY_THROTTLE_SEC');
     const thinkMinMsVal = runtime.getSetting('NOSTR_REPLY_INITIAL_DELAY_MIN_MS');
     const thinkMaxMsVal = runtime.getSetting('NOSTR_REPLY_INITIAL_DELAY_MAX_MS');
     const discoveryVal = runtime.getSetting('NOSTR_DISCOVERY_ENABLE');
@@ -509,8 +541,9 @@ class NostrService {
 
     svc.relays = relays;
     svc.sk = sk;
-    svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
-    svc.replyThrottleSec = normalizeSeconds(throttleVal ?? '60', 'NOSTR_REPLY_THROTTLE_SEC');
+     svc.replyEnabled = String(replyVal ?? 'true').toLowerCase() === 'true';
+     svc.relevanceCheckEnabled = String(relevanceCheckVal ?? 'true').toLowerCase() === 'true';
+     svc.replyThrottleSec = normalizeSeconds(throttleVal ?? '60', 'NOSTR_REPLY_THROTTLE_SEC');
     const parseMs = (v, d) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : d; };
     svc.replyInitialDelayMinMs = parseMs(thinkMinMsVal, 800);
     svc.replyInitialDelayMaxMs = parseMs(thinkMaxMsVal, 2500);
@@ -556,7 +589,7 @@ class NostrService {
     svc.reconnectDelayMs = reconnectDelaySec * 1000;
     svc.maxReconnectAttempts = maxReconnectAttempts;
 
-    logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
+     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, relevanceCheck=${svc.relevanceCheckEnabled}, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
@@ -1617,13 +1650,20 @@ class NostrService {
        }
 
        // Check if this is actually a mention directed at us vs just a thread reply
-      if (!this._isActualMention(evt)) {
-        logger.debug(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
-        this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
-        return;
-      }
-      
-      this.handledEventIds.add(evt.id);
+       if (!this._isActualMention(evt)) {
+         logger.debug(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
+         this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
+         return;
+       }
+
+       // Check if the mention is relevant and worth responding to
+       if (!(await this._isRelevantMention(evt))) {
+         logger.debug(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`);
+         this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+         return;
+       }
+       
+       this.handledEventIds.add(evt.id);
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);
       const conversationId = this._getConversationIdFromEvent(evt);

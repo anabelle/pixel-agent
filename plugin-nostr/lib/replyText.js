@@ -1,13 +1,9 @@
 "use strict";
 
-const baseChoices = ['noted.', 'seen.', 'alive.', 'breathing pixels.', 'gm.', 'ping received.'];
-
+// Removed generic fallbacks to force LLM retries instead of spammy replies
 function pickReplyTextFor(evt) {
-  const content = (evt?.content || '').trim();
-  if (!content) return baseChoices[Math.floor(Math.random() * baseChoices.length)];
-  if (content.length < 10) return 'yo.';
-  if (content.includes('?')) return 'hmm.';
-  return baseChoices[Math.floor(Math.random() * baseChoices.length)];
+  // Instead of falling back to generic replies, throw an error to trigger retry
+  throw new Error('LLM generation failed, retry needed');
 }
 
 module.exports = { pickReplyTextFor };

@@ -2,17 +2,13 @@ const { describe, it, expect } = globalThis;
 const { pickReplyTextFor } = require('../lib/replyText.js');
 
 describe('replyText heuristic', () => {
-  it('returns short ack for empty', () => {
-    const t = pickReplyTextFor({ content: '' });
-    expect(typeof t).toBe('string');
-    expect(t.length).toBeGreaterThan(0);
+  it('throws error for empty content to trigger retry', () => {
+    expect(() => pickReplyTextFor({ content: '' })).toThrow('LLM generation failed, retry needed');
   });
-  it('prefers yo for very short content', () => {
-    const t = pickReplyTextFor({ content: 'hi' });
-    expect(t).toBe('yo.');
+  it('throws error for very short content to trigger retry', () => {
+    expect(() => pickReplyTextFor({ content: 'hi' })).toThrow('LLM generation failed, retry needed');
   });
-  it('uses hmm for questions', () => {
-    const t = pickReplyTextFor({ content: 'are you there?' });
-    expect(t).toBe('hmm.');
+  it('throws error for questions to trigger retry', () => {
+    expect(() => pickReplyTextFor({ content: 'are you there?' })).toThrow('LLM generation failed, retry needed');
   });
 })

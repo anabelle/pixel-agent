@@ -438,25 +438,30 @@ class NostrService {
      }
    }
 
-  async _handleHomeFeedEvent(evt) {
-    if (this.homeFeedProcessedEvents.has(evt.id)) return;
-    this.homeFeedProcessedEvents.add(evt.id);
+   async _handleHomeFeedEvent(evt) {
+     if (this.homeFeedProcessedEvents.has(evt.id)) return;
+     this.homeFeedProcessedEvents.add(evt.id);
 
-    // Analyze post for relevance before interacting
-    if (!(await this._analyzePostForInteraction(evt))) {
-      logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0,8)} - not relevant`);
-      return;
-    }
+     // Analyze post for relevance before interacting
+     if (!(await this._analyzePostForInteraction(evt))) {
+       logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0,8)} - not relevant`);
+       // Add delay even for skips to scatter processing naturally (10s to 2min for natural spacing)
+       await new Promise(resolve => setTimeout(resolve, 10000 + Math.random() * 110000));
+       return;
+     }
 
-    const rand = Math.random();
-    if (rand < this.homeFeedReactionChance) {
-      this.postReaction(evt, '+').catch(() => {});
-    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
-      this.postRepost(evt).catch(() => {});
-    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
-      this.postQuoteRepost(evt, 'interesting').catch(() => {});
-    }
-  }
+     const rand = Math.random();
+     if (rand < this.homeFeedReactionChance) {
+       await this.postReaction(evt, '+').catch(() => {});
+     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
+       await this.postRepost(evt).catch(() => {});
+     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
+       await this.postQuoteRepost(evt, 'interesting').catch(() => {});
+     }
+
+      // Scatter interactions over time for natural feel (30s to 5min between events)
+      await new Promise(resolve => setTimeout(resolve, 30000 + Math.random() * 270000));
+   }
 
    async postRepost(evt) {
      if (!this.pool || !this.sk || !this.relays.length) return false;
@@ -1332,16 +1337,35 @@ class NostrService {
     const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
-    const text = await generateWithModelOrFallback(
-      this.runtime,
-      type,
-      prompt,
-      { maxTokens: 192, temperature: 0.8 },
-      (res) => this._extractTextFromModelResult(res),
-      (s) => this._sanitizeWhitelist(s),
-      () => this.pickReplyTextFor(evt)
-    );
-    return text || 'noted.';
+    
+    // Retry mechanism: attempt up to 3 times with exponential backoff
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const text = await generateWithModelOrFallback(
+          this.runtime,
+          type,
+          prompt,
+          { maxTokens: 192, temperature: 0.8 },
+          (res) => this._extractTextFromModelResult(res),
+          (s) => this._sanitizeWhitelist(s),
+          () => { throw new Error('LLM generation failed'); } // Force retry on fallback
+        );
+        if (text && String(text).trim()) {
+          return String(text).trim();
+        }
+      } catch (error) {
+        logger.warn(`[NOSTR] LLM generation attempt ${attempt} failed: ${error.message}`);
+        if (attempt < maxRetries) {
+          // Exponential backoff: wait 1s, 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
+        }
+      }
+    }
+    
+    // If all retries fail, return a minimal response or null to avoid spammy fallbacks
+    logger.error('[NOSTR] All LLM generation retries failed, skipping reply');
+    return null;
   }
 
   async postOnce(content) {

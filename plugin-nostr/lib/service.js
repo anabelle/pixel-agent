@@ -347,11 +347,11 @@ class NostrService {
         .filter(m => m.content?.source === 'nostr' && m.content?.type === 'interaction_counts')
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
       if (latest && latest.content?.counts) {
-        this.userInteractionCount = new Map(Object.entries(latest.content.counts));
-        logger.info(`[NOSTR] Loaded ${this.userInteractionCount.size} interaction counts from memory`);
-      }
-    } catch (err) {
-      logger.debug('[NOSTR] Failed to load interaction counts:', err?.message || err);
+         this.userInteractionCount = new Map(Object.entries(latest.content.counts));
+         this.logger.info(`[NOSTR] Loaded ${this.userInteractionCount.size} interaction counts from memory`);
+       }
+     } catch (err) {
+       this.logger.debug('[NOSTR] Failed to load interaction counts:', err?.message || err);
     }
   }
 
@@ -375,9 +375,9 @@ class NostrService {
         roomId: createUniqueUuid(this.runtime, 'nostr:counts'),
         content,
         createdAt: Date.now(),
-      }, 'messages');
-    } catch (err) {
-      logger.debug('[NOSTR] Failed to save interaction counts:', err?.message || err);
+       }, 'messages');
+     } catch (err) {
+       this.logger.debug('[NOSTR] Failed to save interaction counts:', err?.message || err);
     }
   }
 
@@ -458,27 +458,51 @@ class NostrService {
     }
   }
 
-  async postRepost(evt) {
-    if (!this.pool || !this.sk || !this.relays.length) return false;
-    try {
-      const evtTemplate = buildRepost(evt);
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Reposted ${evt.id.slice(0, 8)}`);
-      return true;
-    } catch (err) { logger.debug('[NOSTR] Repost failed:', err?.message || err); return false; }
-  }
+   async postRepost(evt) {
+     if (!this.pool || !this.sk || !this.relays.length) return false;
+     try {
+       // Check interaction limit: max 2 per user for non-mentions
+       if (evt?.pubkey && (this.userInteractionCount.get(evt.pubkey) || 0) >= 2) {
+         logger.info(`[NOSTR] Skipping repost of ${evt.pubkey.slice(0,8)} - interaction limit reached (2/2)`);
+         return false;
+       }
+       const evtTemplate = buildRepost(evt);
+       const signed = finalizeEvent(evtTemplate, this.sk);
+       await this.pool.publish(this.relays, signed);
+       this.logger.info(`[NOSTR] Reposted ${evt.id.slice(0, 8)}`);
 
-  async postQuoteRepost(evt, text) {
-    if (!this.pool || !this.sk || !this.relays.length) return false;
-    try {
-      const evtTemplate = buildQuoteRepost(evt, text);
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Quote reposted ${evt.id.slice(0, 8)}`);
-      return true;
-    } catch (err) { logger.debug('[NOSTR] Quote repost failed:', err?.message || err); return false; }
-  }
+       // Increment interaction count
+       if (evt?.pubkey) {
+         this.userInteractionCount.set(evt.pubkey, (this.userInteractionCount.get(evt.pubkey) || 0) + 1);
+         await this._saveInteractionCounts();
+       }
+
+       return true;
+     } catch (err) { logger.debug('[NOSTR] Repost failed:', err?.message || err); return false; }
+   }
+
+   async postQuoteRepost(evt, text) {
+     if (!this.pool || !this.sk || !this.relays.length) return false;
+     try {
+       // Check interaction limit: max 2 per user for non-mentions
+       if (evt?.pubkey && (this.userInteractionCount.get(evt.pubkey) || 0) >= 2) {
+         logger.info(`[NOSTR] Skipping quote repost of ${evt.pubkey.slice(0,8)} - interaction limit reached (2/2)`);
+         return false;
+       }
+       const evtTemplate = buildQuoteRepost(evt, text);
+       const signed = finalizeEvent(evtTemplate, this.sk);
+       await this.pool.publish(this.relays, signed);
+       this.logger.info(`[NOSTR] Quote reposted ${evt.id.slice(0, 8)}`);
+
+       // Increment interaction count
+       if (evt?.pubkey) {
+         this.userInteractionCount.set(evt.pubkey, (this.userInteractionCount.get(evt.pubkey) || 0) + 1);
+         await this._saveInteractionCounts();
+       }
+
+       return true;
+     } catch (err) { logger.debug('[NOSTR] Quote repost failed:', err?.message || err); return false; }
+   }
 
    static async start(runtime) {
      await ensureDeps();
@@ -1354,8 +1378,8 @@ class NostrService {
     const evtTemplate = buildTextNote(text);
     try {
       const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Posted note (${text.length} chars)`);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[NOSTR] Posted note (${text.length} chars)`);
       try {
         const runtime = this.runtime;
         const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
@@ -1839,10 +1863,10 @@ class NostrService {
         const hasExpected = expectPk ? evtTemplate.tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
         logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0,8)} root=${rootId?String(rootId).slice(0,8):'-'}${expectPk?` mentionExpected=${hasExpected?'yes':'no'}`:''}`);
       } catch {}
-       const signed = finalizeEvent(evtTemplate, this.sk);
-       await Promise.any(this.pool.publish(this.relays, signed));
-       const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-       logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`);
+        const signed = finalizeEvent(evtTemplate, this.sk);
+        await this.pool.publish(this.relays, signed);
+        const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
+        this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`);
 
        // Increment interaction count if not a mention
        if (parentAuthorPk && !isMention) {
@@ -1852,8 +1876,8 @@ class NostrService {
 
        await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => {});
        if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => {}); }
-       return true;
-    } catch (err) { logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
+        return true;
+     } catch (err) { this.logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
   }
 
   async postReaction(parentEvt, symbol = '+') {
@@ -1861,10 +1885,10 @@ class NostrService {
     try {
       if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
       if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) { logger.debug('[NOSTR] Skipping reaction to self-authored event'); return false; }
-      const evtTemplate = buildReaction(parentEvt, symbol);
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}"`);
+       const evtTemplate = buildReaction(parentEvt, symbol);
+       const signed = finalizeEvent(evtTemplate, this.sk);
+       await this.pool.publish(this.relays, signed);
+       this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}"`);
       return true;
     } catch (err) { logger.debug('[NOSTR] Reaction failed:', err?.message || err); return false; }
   }
@@ -1906,10 +1930,10 @@ class NostrService {
 
       if (!evtTemplate) return false;
 
-      const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
+       const signed = finalizeEvent(evtTemplate, this.sk);
+       await this.pool.publish(this.relays, signed);
 
-      logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
+       this.logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
       return true;
     } catch (err) {
       logger.warn('[NOSTR] DM send failed:', err?.message || err);
@@ -2575,11 +2599,11 @@ class NostrService {
 
       const evtTemplate = buildRepost(parentEvt);
       const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
-      return true;
-    } catch (err) {
-      logger.debug('[NOSTR] Repost failed:', err?.message || err);
+       await Promise.any(this.pool.publish(this.relays, signed));
+       this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
+       return true;
+     } catch (err) {
+       this.logger.debug('[NOSTR] Repost failed:', err?.message || err);
       return false;
     }
   }
@@ -2596,11 +2620,11 @@ class NostrService {
 
       const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
       const signed = finalizeEvent(evtTemplate, this.sk);
-      await Promise.any(this.pool.publish(this.relays, signed));
-      logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
-      return true;
-    } catch (err) {
-      logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
+       await Promise.any(this.pool.publish(this.relays, signed));
+       this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
+       return true;
+     } catch (err) {
+       this.logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
       return false;
     }
   }

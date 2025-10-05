@@ -97,16 +97,14 @@ describe('NostrService Interaction Limits', () => {
       agentId: 'agent-id',
     };
 
-    service = new NostrService(runtime);
-    service.pool = { publish: vi.fn(() => Promise.resolve()) };
-    service.relays = ['wss://relay1.com'];
-    service.sk = 'sk123';
-    service.pkHex = 'pk123';
-    // Set logger for the service
-    service.logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn() };
-    // Mock generation for LLM analysis
-    const mockGenerate = require('../lib/generation').generateWithModelOrFallback;
-    mockGenerate.mockImplementation(() => Promise.resolve('YES, relevant.'));
+     service = new NostrService(runtime);
+     service.pool = { publish: vi.fn().mockResolvedValue(true) };
+     service.relays = ['wss://relay1.com'];
+     service.sk = 'sk123';
+     service.pkHex = 'pk123';
+     // Set logger for the service
+     service.logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+     service._createMemorySafe = vi.fn().mockResolvedValue(true);
   });
 
   describe('_loadInteractionCounts', () => {
@@ -192,13 +190,55 @@ describe('NostrService Interaction Limits', () => {
     });
   });
 
-  describe('_setupResetTimer', () => {
-    it('should set up weekly reset timer', () => {
-      const setIntervalSpy = vi.spyOn(global, 'setInterval');
+   describe('postRepost with interaction limits', () => {
+     it('should repost if count < 2', async () => {
+       const mockEvent = { id: 'event-id', pubkey: 'user1' };
+       service.userInteractionCount.set('user1', 1);
 
-      service._setupResetTimer();
+       const result = await service.postRepost(mockEvent);
 
-      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 7 * 24 * 60 * 60 * 1000);
-    });
-  });
-});
+       expect(result).toBe(true);
+       expect(service.userInteractionCount.get('user1')).toBe(2);
+     });
+
+     it('should skip repost if count >= 2', async () => {
+       const mockEvent = { id: 'event-id', pubkey: 'user1' };
+       service.userInteractionCount.set('user1', 2);
+
+       const result = await service.postRepost(mockEvent);
+
+       expect(result).toBe(false);
+     });
+   });
+
+   describe('postQuoteRepost with interaction limits', () => {
+     it('should quote repost if count < 2', async () => {
+       const mockEvent = { id: 'event-id', pubkey: 'user1' };
+       service.userInteractionCount.set('user1', 1);
+
+       const result = await service.postQuoteRepost(mockEvent, 'quote text');
+
+       expect(result).toBe(true);
+       expect(service.userInteractionCount.get('user1')).toBe(2);
+     });
+
+     it('should skip quote repost if count >= 2', async () => {
+       const mockEvent = { id: 'event-id', pubkey: 'user1' };
+       service.userInteractionCount.set('user1', 2);
+
+       const result = await service.postQuoteRepost(mockEvent, 'quote text');
+
+       expect(result).toBe(false);
+     });
+   });
+
+   describe('_setupResetTimer', () => {
+     it('should set up weekly reset timer', () => {
+       const setIntervalSpy = vi.spyOn(global, 'setInterval');
+
+       service._setupResetTimer();
+
+       expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 7 * 24 * 60 * 60 * 1000);
+     });
+   });
+ });

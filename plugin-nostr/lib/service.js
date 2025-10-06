@@ -1346,7 +1346,7 @@ class NostrService {
           this.runtime,
           type,
           prompt,
-          { maxTokens: 192, temperature: 0.8 },
+          { maxTokens: 256, temperature: 0.8 },
           (res) => this._extractTextFromModelResult(res),
           (s) => this._sanitizeWhitelist(s),
           () => { throw new Error('LLM generation failed'); } // Force retry on fallback

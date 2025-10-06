@@ -27,6 +27,13 @@ describe('eventFactory', () => {
     expect(eTags.find(t => t[3] === 'root')).toBeTruthy();
   });
 
+  it('buildReplyNote throws error for empty text', () => {
+    const parent = { id: 'abcd', pubkey: 'pk' };
+    expect(() => buildReplyNote(parent, null, {})).toThrow('No text provided for reply note');
+    expect(() => buildReplyNote(parent, '', {})).toThrow('No text provided for reply note');
+    expect(() => buildReplyNote(parent, '   ', {})).toThrow('No text provided for reply note');
+  });
+
   it('buildReaction kind 7 structure', () => {
     const parent = { id: 'x', pubkey: 'y' };
     const evt = buildReaction(parent, '+');

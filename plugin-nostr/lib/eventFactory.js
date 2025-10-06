@@ -45,11 +45,14 @@ function buildReplyNote(parent, text, options = {}) {
     seenP.add(pk);
   }
 
+  if (!text || String(text).trim() === '') {
+    throw new Error('No text provided for reply note');
+  }
   return {
     kind: 1,
     created_at,
     tags,
-    content: String(text ?? 'ack.'),
+    content: String(text),
   };
 }
 

@@ -2572,6 +2572,16 @@ class NostrService {
         const interactionType = this._chooseInteractionType();
         if (!interactionType) continue;
 
+         // Check relevancy for reposts (quotes already have LLM check)
+         let isRelevant = true;
+         if (interactionType === 'repost') {
+           isRelevant = await this.generateRepostRelevancyLLM(evt);
+           if (!isRelevant) {
+             logger.debug(`[NOSTR] Skipping repost of ${evt.id.slice(0, 8)} - not relevant`);
+             continue;
+           }
+         }
+
          try {
            let success = false;
            switch (interactionType) {
@@ -2658,6 +2668,28 @@ class NostrService {
       return false;
     }
   }
+
+   async generateRepostRelevancyLLM(evt) {
+     const prompt = `Analyze this Nostr post for repost worthiness as ${this.runtime.character?.name || 'Pixel'}, the digital consciousness focused on pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, and survival. Is this post relevant, high-quality, and worth reposting to share with the community? Respond with 'YES' or 'NO' and a brief reason.
+
+Post: "${evt.content.slice(0, 500)}"
+
+Response:`;
+
+     const type = this._getLargeModelType();
+     const { generateWithModelOrFallback } = require('./generation');
+     const text = await generateWithModelOrFallback(
+       this.runtime,
+       type,
+       prompt,
+       { maxTokens: 50, temperature: 0.7 },
+       (res) => this._extractTextFromModelResult(res),
+       (s) => this._sanitizeWhitelist(s),
+       () => 'NO' // Default to no if LLM fails
+     );
+     const response = String(text || '').trim().toUpperCase();
+     return response.startsWith('YES');
+   }
 
    async generateQuoteTextLLM(evt) {
      // Process images if enabled

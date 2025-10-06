@@ -1878,7 +1878,13 @@ class NostrService {
        }
       const parentForFactory = { id: parentId, pubkey: parentAuthorPk, refs: { rootId } };
       const extraPTags = (Array.isArray(opts.extraPTags) ? opts.extraPTags : []).filter(pk => pk && pk !== this.pkHex);
-      const evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
+      let evtTemplate;
+      try {
+        evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
+      } catch (error) {
+        logger.warn(`[NOSTR] Failed to build reply note: ${error.message}`);
+        return false;
+      }
       if (!evtTemplate) return false;
       try {
         const eCount = evtTemplate.tags.filter(t => t?.[0] === 'e').length;

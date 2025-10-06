@@ -40,8 +40,8 @@ export const settings = {
     "wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social",
   NOSTR_LISTEN_ENABLE: process.env.NOSTR_LISTEN_ENABLE || "true",
   NOSTR_POST_ENABLE: process.env.NOSTR_POST_ENABLE || "false",
-  NOSTR_POST_INTERVAL_MIN: process.env.NOSTR_POST_INTERVAL_MIN || "3600",
-  NOSTR_POST_INTERVAL_MAX: process.env.NOSTR_POST_INTERVAL_MAX || "10800",
+  NOSTR_POST_INTERVAL_MIN: process.env.NOSTR_POST_INTERVAL_MIN || "7200",
+  NOSTR_POST_INTERVAL_MAX: process.env.NOSTR_POST_INTERVAL_MAX || "21600",
   NOSTR_REPLY_ENABLE: process.env.NOSTR_REPLY_ENABLE || "true",
   NOSTR_REPLY_THROTTLE_SEC: process.env.NOSTR_REPLY_THROTTLE_SEC || "60",
   // Human-like reply delay (milliseconds)
@@ -52,11 +52,11 @@ export const settings = {
   // Discovery (for autonomous topic search/replies)
   NOSTR_DISCOVERY_ENABLE: process.env.NOSTR_DISCOVERY_ENABLE || "true",
   NOSTR_DISCOVERY_INTERVAL_MIN:
-    process.env.NOSTR_DISCOVERY_INTERVAL_MIN || "900",
+    process.env.NOSTR_DISCOVERY_INTERVAL_MIN || "1800",
   NOSTR_DISCOVERY_INTERVAL_MAX:
-    process.env.NOSTR_DISCOVERY_INTERVAL_MAX || "1800",
+    process.env.NOSTR_DISCOVERY_INTERVAL_MAX || "3600",
   NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN:
-    process.env.NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN || "5",
+    process.env.NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN || "3",
   NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN:
     process.env.NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN || "5",
   // Time-based filtering for old messages (ISO 8601 format)

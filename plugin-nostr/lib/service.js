@@ -194,8 +194,8 @@ class NostrService {
      // Home feed configuration (reduced for less spam)
      this.homeFeedEnabled = true;
      this.homeFeedTimer = null;
-     this.homeFeedMinSec = 600; // Check home feed every 10 minutes (less frequent)
-     this.homeFeedMaxSec = 1800; // Up to 30 minutes
+     this.homeFeedMinSec = 1800; // Check home feed every 30 minutes (less frequent)
+     this.homeFeedMaxSec = 3600; // Up to 1 hour
      this.homeFeedReactionChance = 0.05; // 5% chance to react (reduced)
      this.homeFeedRepostChance = 0.02; // 2% chance to repost (reduced)
      this.homeFeedQuoteChance = 0.01; // 1% chance to quote repost (reduced)

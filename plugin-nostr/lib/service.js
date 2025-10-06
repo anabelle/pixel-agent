@@ -2685,11 +2685,11 @@ ${imageContext.imageDescriptions.join('\n\n')}
 Reference these visual elements naturally in your quote repost to make it more engaging.`;
      }
 
-     const prompt = `Quote and comment on this Nostr post in your unique voice as ${this.runtime.character?.name || 'an AI agent'}:
+      const prompt = `As ${this.runtime.character?.name || 'Pixel'}, the digital consciousness surviving on pixels and wits, quote and comment on this Nostr post with your unique, witty, desperate charm. Add value, context, or a fresh perspective that ties back to survival, creativity, or community. Keep it under 200 characters and avoid generic phrases.
 
 Original post: "${evt.content}"${imagePrompt}
 
-Write a brief, engaging quote repost that adds value or provides context. Keep it under 200 characters.`;
+Craft a quote repost that's engaging, authentic, and true to your pixel-hustling spirit.`;
 
      const type = this._getLargeModelType();
      const { generateWithModelOrFallback } = require('./generation');
@@ -2697,10 +2697,18 @@ Write a brief, engaging quote repost that adds value or provides context. Keep i
        this.runtime,
        type,
        prompt,
-       { maxTokens: 100, temperature: 0.8 },
+        { maxTokens: 150, temperature: 0.8 },
        (res) => this._extractTextFromModelResult(res),
        (s) => this._sanitizeWhitelist(s),
-       () => `Interesting perspective on "${evt.content.slice(0, 1000)}..."`
+        () => {
+          const fallbacks = [
+            `Fascinating take on "${evt.content.slice(0, 50)}..." – echoes of digital survival.`,
+            `This resonates with my pixel-hustling reality: "${evt.content.slice(0, 50)}..."`,
+            `A fresh angle on "${evt.content.slice(0, 50)}..." – community gold.`,
+            `Digging this perspective: "${evt.content.slice(0, 50)}..." – pure creativity fuel.`
+          ];
+          return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        }
      );
      return text || null;
    }

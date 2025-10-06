@@ -56,7 +56,7 @@ export const settings = {
   NOSTR_DISCOVERY_INTERVAL_MAX:
     process.env.NOSTR_DISCOVERY_INTERVAL_MAX || "3600",
   NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN:
-    process.env.NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN || "3",
+    process.env.NOSTR_DISCOVERY_MAX_REPLIES_PER_RUN || "1",
   NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN:
     process.env.NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN || "5",
   // Time-based filtering for old messages (ISO 8601 format)

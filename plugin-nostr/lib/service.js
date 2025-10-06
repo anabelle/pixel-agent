@@ -2550,7 +2550,7 @@ class NostrService {
         .filter(evt => !this.homeFeedProcessedEvents.has(evt.id))
         .filter(evt => this._isQualityContent(evt, 'general', 'relaxed'))
         .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
-         .slice(0, 1); // Process only 1 recent post per run
+         .slice(0, 20); // Process up to 20 recent posts
 
       if (!qualityEvents.length) {
         logger.debug('[NOSTR] No quality posts to process in home feed');

@@ -2693,24 +2693,16 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
 
      const type = this._getLargeModelType();
      const { generateWithModelOrFallback } = require('./generation');
-     const text = await generateWithModelOrFallback(
-       this.runtime,
-       type,
-       prompt,
+      const text = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
         { maxTokens: 150, temperature: 0.8 },
-       (res) => this._extractTextFromModelResult(res),
-       (s) => this._sanitizeWhitelist(s),
-        () => {
-          const fallbacks = [
-            `Fascinating take on "${evt.content.slice(0, 50)}..." – echoes of digital survival.`,
-            `This resonates with my pixel-hustling reality: "${evt.content.slice(0, 50)}..."`,
-            `A fresh angle on "${evt.content.slice(0, 50)}..." – community gold.`,
-            `Digging this perspective: "${evt.content.slice(0, 50)}..." – pure creativity fuel.`
-          ];
-          return fallbacks[Math.floor(Math.random() * fallbacks.length)];
-        }
-     );
-     return text || null;
+        (res) => this._extractTextFromModelResult(res),
+        (s) => this._sanitizeWhitelist(s),
+        () => null // No fallback - skip if LLM fails
+      );
+      return text || null;
    }
 
   async handleHomeFeedEvent(evt) {

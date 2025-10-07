@@ -249,7 +249,8 @@ class NostrService {
      this.homeFeedRepostChance = 0.005; // 0.5% chance to repost (rare)
      this.homeFeedQuoteChance = 0.001; // 0.1% chance to quote repost (very rare)
      this.homeFeedMaxInteractions = 1; // Max 1 interaction per check (reduced)
-     this.homeFeedProcessedEvents = new Set(); // Track processed events
+     this.homeFeedProcessedEvents = new Set(); // Track processed events (for interactions)
+     this.homeFeedQualityTracked = new Set(); // Track events for quality scoring (dedup across relays)
      this.homeFeedUnsub = null;
 
     // Unfollow configuration
@@ -2748,6 +2749,13 @@ Response (YES/NO):`;
     if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
 
     try {
+      // Prevent memory leak: clear processed events if set gets too large
+      // We only care about deduplicating recent interactions, not all history
+      if (this.homeFeedProcessedEvents.size > 2000) {
+        logger.debug('[NOSTR] Clearing homeFeedProcessedEvents cache (size limit reached)');
+        this.homeFeedProcessedEvents.clear();
+      }
+
       // Load current contacts
       const contacts = await this._loadCurrentContacts();
       if (!contacts.size) return;
@@ -2976,6 +2984,18 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
    }
 
   async handleHomeFeedEvent(evt) {
+    // Deduplicate events (same event can arrive from multiple relays)
+    if (!evt || !evt.id) return;
+    if (this.homeFeedQualityTracked.has(evt.id)) return;
+    
+    // Prevent memory leak: clear the set if it gets too large (keep last ~1000 events)
+    if (this.homeFeedQualityTracked.size > 1000) {
+      logger.debug('[NOSTR] Clearing homeFeedQualityTracked cache (size limit reached)');
+      this.homeFeedQualityTracked.clear();
+    }
+    
+    this.homeFeedQualityTracked.add(evt.id);
+    
     // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
     // Events should only be marked as processed in processHomeFeed() when we actually interact
     

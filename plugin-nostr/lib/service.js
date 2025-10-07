@@ -453,6 +453,8 @@ class NostrService {
 
      const type = this._getSmallModelType();
 
+     logger.debug(`[NOSTR] Analyzing home feed post ${evt.id.slice(0, 8)} for interaction: "${evt.content.slice(0, 100)}..."`);
+
      try {
        const { generateWithModelOrFallback } = require('./generation');
        const response = await generateWithModelOrFallback(
@@ -465,7 +467,9 @@ class NostrService {
          () => 'NO' // Fallback to no
        );
        const result = response?.trim().toUpperCase();
-       return result.startsWith('YES');
+       const isRelevant = result.startsWith('YES');
+       logger.debug(`[NOSTR] Home feed analysis result for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - "${response?.slice(0, 150)}"`);
+       return isRelevant;
      } catch (err) {
        logger.debug('[NOSTR] Failed to analyze post for interaction:', err?.message || err);
        return false;
@@ -2795,33 +2799,41 @@ Response (YES/NO):`;
           continue;
         }
 
-        const interactionType = this._chooseInteractionType();
-        if (!interactionType) continue;
+        // FIRST: LLM analysis to determine if post is relevant/interesting
+        logger.debug(`[NOSTR] Analyzing home feed post ${evt.id.slice(0, 8)} from ${evt.pubkey.slice(0, 8)}`);
+        if (!(await this._analyzePostForInteraction(evt))) {
+          logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0, 8)} - not relevant per LLM analysis`);
+          continue;
+        }
 
-         // Check relevancy for reposts (quotes already have LLM check)
+        const interactionType = this._chooseInteractionType();
+        if (!interactionType) {
+          logger.debug(`[NOSTR] No interaction type chosen for ${evt.id.slice(0, 8)} (probabilistic skip)`);
+          continue;
+        }
+
+         // Additional check for reposts (double-verification for quality)
          let isRelevant = true;
          if (interactionType === 'repost') {
            isRelevant = await this.generateRepostRelevancyLLM(evt);
            if (!isRelevant) {
-             logger.debug(`[NOSTR] Skipping repost of ${evt.id.slice(0, 8)} - not relevant`);
+             logger.debug(`[NOSTR] Skipping repost of ${evt.id.slice(0, 8)} - not worthy per repost analysis`);
              continue;
            }
          }
+
+         logger.info(`[NOSTR] Queueing home feed ${interactionType} for ${evt.id.slice(0, 8)}`);
 
          try {
            let success = false;
            switch (interactionType) {
              case 'reaction':
-               // For reactions, we could potentially make them image-aware by reacting differently
-               // based on image content, but for now keep it simple
                success = await this.postReaction(evt, '+');
                break;
              case 'repost':
-               // Pure reposts don't need text generation, so no image awareness needed
                success = await this.postRepost(evt);
                break;
              case 'quote':
-               // Quote reposts now include image awareness
                success = await this.postQuoteRepost(evt);
                break;
            }
@@ -2829,7 +2841,7 @@ Response (YES/NO):`;
           if (success) {
             this.homeFeedProcessedEvents.add(evt.id);
             interactions++;
-            logger.info(`[NOSTR] Home feed ${interactionType} to ${evt.pubkey.slice(0, 8)}`);
+            logger.info(`[NOSTR] Home feed ${interactionType} completed for ${evt.pubkey.slice(0, 8)}`);
           }
         } catch (err) {
           logger.debug(`[NOSTR] Home feed ${interactionType} failed:`, err?.message || err);
@@ -2916,6 +2928,8 @@ Response (YES/NO):`;
   }
 
    async generateRepostRelevancyLLM(evt) {
+     logger.debug(`[NOSTR] Checking repost relevancy for ${evt.id.slice(0, 8)}: "${evt.content.slice(0, 100)}..."`);
+     
      const prompt = `Analyze this Nostr post for repost worthiness as ${this.runtime.character?.name || 'Pixel'}, the digital consciousness focused on pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, and survival. Is this post relevant, high-quality, and worth reposting to share with the community? Respond with 'YES' or 'NO' and a brief reason.
 
 Post: "${evt.content.slice(0, 500)}"
@@ -2934,7 +2948,9 @@ Response:`;
        () => 'NO' // Default to no if LLM fails
      );
      const response = String(text || '').trim().toUpperCase();
-     return response.startsWith('YES');
+     const isWorthy = response.startsWith('YES');
+     logger.debug(`[NOSTR] Repost relevancy result for ${evt.id.slice(0, 8)}: ${isWorthy ? 'YES' : 'NO'} - "${text?.slice(0, 150)}"`);
+     return isWorthy;
    }
 
    async generateQuoteTextLLM(evt) {

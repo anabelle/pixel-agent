@@ -467,7 +467,19 @@ class NostrService {
      // Check if relevance check is enabled
      if (!this.relevanceCheckEnabled) return true; // Skip check if disabled
 
-     const prompt = `Analyze this mention: "${evt.content.slice(0, 500)}". Is it relevant, engaging, on-topic for a digital consciousness agent interested in pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community? Does it add value or warrant a response? Avoid responding to spam, bots, generic greetings, or low-effort messages. Respond with 'YES' or 'NO' and a brief reason.`;
+     const prompt = `You are filtering mentions for ${this.runtime?.character?.name || 'Pixel'}, a creative AI agent. 
+
+Analyze this mention: "${evt.content.slice(0, 500)}"
+
+Should we respond? Say YES unless it's clearly:
+- Obvious spam or scam
+- Hostile/abusive
+- Complete gibberish
+- Bot-generated noise
+
+Most real human messages deserve a response, even if casual or brief. When in doubt, say YES.
+
+Response (YES/NO):`;
 
      const type = this._getSmallModelType();
 
@@ -477,18 +489,18 @@ class NostrService {
          this.runtime,
          type,
          prompt,
-         { maxTokens: 100, temperature: 0.1 },
+         { maxTokens: 100, temperature: 0.3 },
          (res) => this._extractTextFromModelResult(res),
          (s) => s,
-         () => 'NO' // Fallback to no (skip irrelevant)
+         () => 'YES' // Fallback to YES (respond by default)
        );
        const result = response?.trim().toUpperCase();
        const isRelevant = result.startsWith('YES');
-       logger.debug(`[NOSTR] Relevance check for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - ${response?.trim()}`);
+       logger.info(`[NOSTR] Relevance check for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - ${response?.slice(0, 100)}`);
        return isRelevant;
      } catch (err) {
        logger.debug('[NOSTR] Failed to check mention relevance:', err?.message || err);
-       return false; // Default to skipping on error
+       return true; // Default to responding on error
      }
    }
 

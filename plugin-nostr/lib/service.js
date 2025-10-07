@@ -1242,6 +1242,12 @@ Response (YES/NO):`;
 
         const text = await this.generateReplyTextLLM(evt, roomId, threadContext, null);
         
+        // Check if LLM generation failed (returned null)
+        if (!text || !text.trim()) {
+          logger.warn(`[NOSTR] Skipping discovery reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+          continue;
+        }
+        
         // Queue the discovery reply instead of posting directly
         logger.info(`[NOSTR] Queuing discovery reply to ${evt.id.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1})`);
         const queueSuccess = await this.postingQueue.enqueue({
@@ -1395,8 +1401,8 @@ Response (YES/NO):`;
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
-    // Retry mechanism: attempt up to 3 times with exponential backoff
-    const maxRetries = 3;
+    // Retry mechanism: attempt up to 5 times with exponential backoff
+    const maxRetries = 5;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const text = await generateWithModelOrFallback(
@@ -1414,7 +1420,7 @@ Response (YES/NO):`;
       } catch (error) {
         logger.warn(`[NOSTR] LLM generation attempt ${attempt} failed: ${error.message}`);
         if (attempt < maxRetries) {
-          // Exponential backoff: wait 1s, 2s, 4s
+          // Exponential backoff: wait 1s, 2s, 4s, 8s, 16s
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
         }
       }
@@ -1888,6 +1894,13 @@ Response (YES/NO):`;
               if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
                this.lastReplyByUser.set(pubkey, now2);
                const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, null);
+               
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                logger.warn(`[NOSTR] Skipping throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                return;
+              }
+               
                logger.info(`[NOSTR] Queuing throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
                
               // Queue the throttled reply with normal priority
@@ -1942,6 +1955,12 @@ Response (YES/NO):`;
 
       logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
       const replyText = await this.generateReplyTextLLM(evt, roomId, null, imageContext);
+      
+      // Check if LLM generation failed (returned null)
+      if (!replyText || !replyText.trim()) {
+        logger.warn(`[NOSTR] Skipping mention reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+        return;
+      }
       
       // Queue the reply instead of posting directly for natural rate limiting
       logger.info(`[NOSTR] Queuing mention reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
@@ -2276,6 +2295,13 @@ Response (YES/NO):`;
               }
               this.lastReplyByUser.set(pubkey, now2);
               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+              
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                logger.warn(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                return;
+              }
+              
               logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
               const ok = await this.postDM(parentEvt, replyText);
               if (ok) {
@@ -2332,6 +2358,13 @@ Response (YES/NO):`;
    // Use decrypted content for the DM prompt
    const dmEvt = { ...evt, content: decryptedContent };
    const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
+   
+      // Check if LLM generation failed (returned null)
+      if (!replyText || !replyText.trim()) {
+        logger.warn(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+        return;
+      }
+      
       logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
       const replyOk = await this.postDM(evt, replyText);
       if (replyOk) {
@@ -2440,6 +2473,13 @@ Response (YES/NO):`;
               }
               this.lastReplyByUser.set(pubkey, now2);
               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+              
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                logger.warn(`[NOSTR] Skipping scheduled sealed DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                return;
+              }
+              
               const ok = await this.postDM(parentEvt, replyText);
               if (ok) {
                 const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
@@ -2468,6 +2508,13 @@ Response (YES/NO):`;
 
        const dmEvt = { ...evt, content: decryptedContent };
        const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
+       
+       // Check if LLM generation failed (returned null)
+       if (!replyText || !replyText.trim()) {
+         logger.warn(`[NOSTR] Skipping sealed DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+         return;
+       }
+       
        const replyOk = await this.postDM(evt, replyText);
       if (replyOk) {
         const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };

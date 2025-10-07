@@ -2988,6 +2988,31 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
   }
 
+  _updateUserQualityScore(pubkey, evt) {
+    if (!pubkey || !evt || !evt.content) return;
+
+    // Increment post count for this user
+    const currentCount = this.userPostCounts.get(pubkey) || 0;
+    this.userPostCounts.set(pubkey, currentCount + 1);
+
+    // Evaluate content quality (use 'general' topic and current strictness)
+    const isQuality = this._isQualityContent(evt, 'general', this.discoveryQualityStrictness);
+    
+    // Calculate quality value (1.0 for quality content, 0.0 for low quality)
+    const qualityValue = isQuality ? 1.0 : 0.0;
+
+    // Get current quality score or initialize
+    const currentScore = this.userQualityScores.get(pubkey) || 0.5; // Start at neutral 0.5
+
+    // Use exponential moving average to update quality score
+    // Alpha of 0.3 means new posts have 30% weight, historical has 70%
+    const alpha = 0.3;
+    const newScore = alpha * qualityValue + (1 - alpha) * currentScore;
+
+    // Update the score
+    this.userQualityScores.set(pubkey, newScore);
+  }
+
   async _getUserSocialMetrics(pubkey) {
     if (!pubkey || !this.pool) return null;
 

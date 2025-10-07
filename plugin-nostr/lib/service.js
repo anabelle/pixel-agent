@@ -1746,15 +1746,19 @@ class NostrService {
        }
 
        // Check if this is actually a mention directed at us vs just a thread reply
-       if (!this._isActualMention(evt)) {
-         logger.debug(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
+       const isActualMention = this._isActualMention(evt);
+       logger.info(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`);
+       if (!isActualMention) {
+         logger.info(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
          this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
          return;
        }
 
        // Check if the mention is relevant and worth responding to
-       if (!(await this._isRelevantMention(evt))) {
-         logger.debug(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`);
+       const isRelevant = await this._isRelevantMention(evt);
+       logger.info(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`);
+       if (!isRelevant) {
+         logger.info(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`);
          this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
          return;
        }

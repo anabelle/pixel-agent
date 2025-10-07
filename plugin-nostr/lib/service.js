@@ -1461,8 +1461,11 @@ class NostrService {
     const eTags = tags.filter(t => t[0] === 'e');
     const pTags = tags.filter(t => t[0] === 'p');
     
-    // If there are no e-tags, treat as non-mention unless content already matched
+    // If there are no e-tags, treat as mention when we're explicitly tagged via p-tags
     if (eTags.length === 0) {
+      if (pTags.some(t => t[1] === this.pkHex)) {
+        return true;
+      }
       return false;
     }
     

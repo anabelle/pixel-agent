@@ -1446,6 +1446,21 @@ class NostrService {
       return true;
     }
     
+    // Check for nprofile mention
+    if (content.includes('nprofile')) {
+      try {
+        const nprofileMatch = content.match(/nprofile1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+/);
+        if (nprofileMatch && nip19?.decode) {
+          const decoded = nip19.decode(nprofileMatch[0]);
+          if (decoded.type === 'nprofile' && decoded.data.pubkey === this.pkHex) {
+            return true;
+          }
+        }
+      } catch (err) {
+        // Ignore decode errors
+      }
+    }
+    
     // Check for agent name mention
     if (agentName && content.includes(agentName)) {
       return true;

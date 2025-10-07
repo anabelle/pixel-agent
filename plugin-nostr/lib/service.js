@@ -300,6 +300,16 @@ class NostrService {
 
      // Home feed followed users
      this.followedUsers = new Set();
+
+    // Centralized posting queue for natural rate limiting
+    const { PostingQueue } = require('./postingQueue');
+    this.postingQueue = new PostingQueue({
+      minDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MIN_DELAY_BETWEEN_POSTS_MS') ?? '15000'), // 15s default
+      maxDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MAX_DELAY_BETWEEN_POSTS_MS') ?? '120000'), // 2min default
+      mentionPriorityBoost: Number(runtime.getSetting('NOSTR_MENTION_PRIORITY_BOOST_MS') ?? '5000'), // 5s faster for mentions
+    });
+    logger.info(`[NOSTR] Posting queue initialized: minDelay=${this.postingQueue.minDelayBetweenPosts}ms, maxDelay=${this.postingQueue.maxDelayBetweenPosts}ms`);
+
     try {
       const { emitter } = require('./bridge');
       if (emitter && typeof emitter.on === 'function') {
@@ -511,22 +521,34 @@ Response (YES/NO):`;
      // Analyze post for relevance before interacting
      if (!(await this._analyzePostForInteraction(evt))) {
        logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0,8)} - not relevant`);
-       // Add delay even for skips to scatter processing naturally (10s to 2min for natural spacing)
-       await new Promise(resolve => setTimeout(resolve, 10000 + Math.random() * 110000));
        return;
      }
 
      const rand = Math.random();
+     let interactionType = null;
+     let action = null;
+     
      if (rand < this.homeFeedReactionChance) {
-       await this.postReaction(evt, '+').catch(() => {});
+       interactionType = 'reaction';
+       action = async () => await this.postReaction(evt, '+');
      } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
-       await this.postRepost(evt).catch(() => {});
+       interactionType = 'repost';
+       action = async () => await this.postRepost(evt);
      } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
-       await this.postQuoteRepost(evt, 'interesting').catch(() => {});
+       interactionType = 'quote';
+       action = async () => await this.postQuoteRepost(evt, 'interesting');
      }
-
-      // Scatter interactions over time for natural feel (30s to 5min between events)
-      await new Promise(resolve => setTimeout(resolve, 30000 + Math.random() * 270000));
+     
+     if (interactionType && action) {
+       logger.info(`[NOSTR] Queuing home feed ${interactionType} for ${evt.id.slice(0,8)}`);
+       await this.postingQueue.enqueue({
+         type: `homefeed_${interactionType}`,
+         id: `homefeed:${interactionType}:${evt.id}:${Date.now()}`,
+         priority: this.postingQueue.priorities.MEDIUM,
+         metadata: { eventId: evt.id.slice(0, 8), interactionType },
+         action: action
+       });
+     }
    }
 
    static async start(runtime) {
@@ -1219,15 +1241,30 @@ Response (YES/NO):`;
         }
 
         const text = await this.generateReplyTextLLM(evt, roomId, threadContext, null);
-        const ok = await this.postReply(evt, text);
-        if (ok) {
-          this.handledEventIds.add(evt.id);
-          usedAuthors.add(evt.pubkey);
-          this.lastReplyByUser.set(evt.pubkey, Date.now());
-          eventTopics.forEach(topic => usedTopics.add(topic));
+        
+        // Queue the discovery reply instead of posting directly
+        logger.info(`[NOSTR] Queuing discovery reply to ${evt.id.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1})`);
+        const queueSuccess = await this.postingQueue.enqueue({
+          type: 'discovery',
+          id: `discovery:${evt.id}:${Date.now()}`,
+          priority: this.postingQueue.priorities.MEDIUM,
+          metadata: { eventId: evt.id.slice(0, 8), pubkey: evt.pubkey.slice(0, 8), score: score.toFixed(2) },
+          action: async () => {
+            const ok = await this.postReply(evt, text);
+            if (ok) {
+              this.handledEventIds.add(evt.id);
+              usedAuthors.add(evt.pubkey);
+              this.lastReplyByUser.set(evt.pubkey, Date.now());
+              eventTopics.forEach(topic => usedTopics.add(topic));
+              logger.info(`[NOSTR] Discovery reply completed to ${evt.pubkey.slice(0, 8)} (round: ${round + 1}, thread-aware)`);
+            }
+            return ok;
+          }
+        });
+        
+        if (queueSuccess) {
           replies++;
-          qualityInteractions++; // Count all successful replies as quality interactions for now
-          logger.info(`[NOSTR] Discovery reply ${currentTotalReplies + replies}/${this.discoveryMaxReplies} to ${evt.pubkey.slice(0, 8)} (score: ${score.toFixed(2)}, round: ${round + 1}, thread-aware)`);
+          qualityInteractions++; // Count queued replies as quality interactions
         }
       } catch (err) { logger.debug('[NOSTR] Discovery reply error:', err?.message || err); }
     }
@@ -1390,8 +1427,12 @@ Response (YES/NO):`;
 
   async postOnce(content) {
     if (!this.pool || !this.sk || !this.relays.length) return false;
+    
+    // Determine if this is a scheduled post or external/pixel post
+    const isScheduledPost = !content;
+    
     // Avoid posting a generic scheduled note immediately after a pixel post
-    if (!content) {
+    if (isScheduledPost) {
       const now = Date.now();
       // Hard suppression if a pixel post occurred recently
       if (now - (this._pixelLastPostAt || 0) < (this._pixelPostMinIntervalMs || 0)) {
@@ -1405,11 +1446,13 @@ Response (YES/NO):`;
         return false;
       }
     }
+    
     let text = content?.trim?.();
     if (!text) { text = await this.generatePostTextLLM(); if (!text) text = this.pickPostText(); }
     text = text || 'hello, nostr';
+    
     // Extra safety: if this is a scheduled post (no content provided), strip accidental pixel-like patterns
-    if (!content) {
+    if (isScheduledPost) {
       try {
         // Remove coordinates like (23,17) and hex colors like #ff5500 to avoid "fake pixel" notes
         const originalText = text;
@@ -1419,26 +1462,47 @@ Response (YES/NO):`;
         }
       } catch {}
     }
-    const evtTemplate = buildTextNote(text);
-    try {
-      const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
-      this.logger.info(`[NOSTR] Posted note (${text.length} chars)`);
-      try {
-        const runtime = this.runtime;
-        const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
-        const roomId = createUniqueUuid(runtime, 'nostr:posts');
-        // Ensure posts room exists (avoid default type issues in some adapters)
+    
+    // For external/pixel posts, use CRITICAL priority and post immediately
+    // For scheduled posts, queue with LOW priority
+    const priority = isScheduledPost ? this.postingQueue.priorities.LOW : this.postingQueue.priorities.CRITICAL;
+    const postType = isScheduledPost ? 'scheduled' : 'external';
+    
+    logger.info(`[NOSTR] Queuing ${postType} post (${text.length} chars, priority: ${priority})`);
+    
+    return await this.postingQueue.enqueue({
+      type: postType,
+      id: `post:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      priority: priority,
+      metadata: { textLength: text.length, isScheduled: isScheduledPost },
+      action: async () => {
+        const evtTemplate = buildTextNote(text);
         try {
-          const worldId = createUniqueUuid(runtime, 'nostr');
-          await runtime.ensureWorldExists({ id: worldId, name: 'Nostr', agentId: runtime.agentId, serverId: 'nostr', metadata: { system: true } }).catch(() => {});
-          await runtime.ensureRoomExists({ id: roomId, name: 'Nostr Posts', source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'nostr:posts', serverId: 'nostr', worldId }).catch(() => {});
-        } catch {}
-        const entityId = createUniqueUuid(runtime, this.pkHex || 'nostr');
-  await this._createMemorySafe({ id, entityId, agentId: runtime.agentId, roomId, content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined }, createdAt: Date.now(), }, 'messages');
-      } catch {}
-      return true;
-    } catch (err) { logger.error('[NOSTR] Post failed:', err?.message || err); return false; }
+          const signed = this._finalizeEvent(evtTemplate);
+          await this.pool.publish(this.relays, signed);
+          this.logger.info(`[NOSTR] Posted note (${text.length} chars)`);
+          
+          try {
+            const runtime = this.runtime;
+            const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
+            const roomId = createUniqueUuid(runtime, 'nostr:posts');
+            // Ensure posts room exists (avoid default type issues in some adapters)
+            try {
+              const worldId = createUniqueUuid(runtime, 'nostr');
+              await runtime.ensureWorldExists({ id: worldId, name: 'Nostr', agentId: runtime.agentId, serverId: 'nostr', metadata: { system: true } }).catch(() => {});
+              await runtime.ensureRoomExists({ id: roomId, name: 'Nostr Posts', source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'nostr:posts', serverId: 'nostr', worldId }).catch(() => {});
+            } catch {}
+            const entityId = createUniqueUuid(runtime, this.pkHex || 'nostr');
+            await this._createMemorySafe({ id, entityId, agentId: runtime.agentId, roomId, content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined }, createdAt: Date.now(), }, 'messages');
+          } catch {}
+          
+          return true;
+        } catch (err) { 
+          logger.error('[NOSTR] Post failed:', err?.message || err); 
+          return false; 
+        }
+      }
+    });
   }
 
   _getConversationIdFromEvent(evt) {
@@ -1824,12 +1888,23 @@ Response (YES/NO):`;
               if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
                this.lastReplyByUser.set(pubkey, now2);
                const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, null);
-               logger.info(`[NOSTR] Sending scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
-              const ok = await this.postReply(parentEvt, replyText);
-              if (ok) {
-                const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${now2}:scheduled`);
-                await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: now2, }, 'messages').catch(() => {});
-              }
+               logger.info(`[NOSTR] Queuing throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
+               
+              // Queue the throttled reply with normal priority
+              await this.postingQueue.enqueue({
+                type: 'mention_throttled',
+                id: `mention_throttled:${parentEvt.id}:${now2}`,
+                priority: this.postingQueue.priorities.HIGH,
+                metadata: { eventId: parentEvt.id.slice(0, 8), pubkey: pubkey.slice(0, 8) },
+                action: async () => {
+                  const ok = await this.postReply(parentEvt, replyText);
+                  if (ok) {
+                    const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${Date.now()}:scheduled`);
+                    await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: Date.now(), }, 'messages').catch(() => {});
+                  }
+                  return ok;
+                }
+              });
             } catch (e) { logger.warn('[NOSTR] Scheduled reply failed:', e?.message || e); }
           }, waitMs);
           this.pendingReplyTimers.set(evt.pubkey, timer);
@@ -1867,12 +1942,39 @@ Response (YES/NO):`;
 
       logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
       const replyText = await this.generateReplyTextLLM(evt, roomId, null, imageContext);
-      logger.info(`[NOSTR] Sending reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
-      const replyOk = await this.postReply(evt, replyText);
-      if (replyOk) {
-        logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
-        const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId, imageContext: imageContext && imageContext.imageDescriptions.length > 0 ? { descriptions: imageContext.imageDescriptions, urls: imageContext.imageUrls } : null, }, createdAt: now, };
-  await this._createMemorySafe(replyMemory, 'messages');
+      
+      // Queue the reply instead of posting directly for natural rate limiting
+      logger.info(`[NOSTR] Queuing mention reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
+      const queueSuccess = await this.postingQueue.enqueue({
+        type: 'mention',
+        id: `mention:${evt.id}:${now}`,
+        priority: this.postingQueue.priorities.HIGH,
+        metadata: { eventId: evt.id.slice(0, 8), pubkey: evt.pubkey.slice(0, 8) },
+        action: async () => {
+          const replyOk = await this.postReply(evt, replyText);
+          if (replyOk) {
+            logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
+            const replyMemory = { 
+              id: createUniqueUuid(runtime, `${evt.id}:reply:${Date.now()}`), 
+              entityId, 
+              agentId: runtime.agentId, 
+              roomId, 
+              content: { 
+                text: replyText, 
+                source: 'nostr', 
+                inReplyTo: eventMemoryId, 
+                imageContext: imageContext && imageContext.imageDescriptions.length > 0 ? { descriptions: imageContext.imageDescriptions, urls: imageContext.imageUrls } : null, 
+              }, 
+              createdAt: Date.now(), 
+            };
+            await this._createMemorySafe(replyMemory, 'messages');
+          }
+          return replyOk;
+        }
+      });
+      
+      if (!queueSuccess) {
+        logger.warn(`[NOSTR] Failed to queue mention reply for ${evt.id.slice(0, 8)}`);
       }
     } catch (err) { logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
   }

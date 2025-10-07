@@ -1292,8 +1292,10 @@ Response (YES/NO):`;
   _buildPostPrompt() { return buildPostPrompt(this.runtime.character); }
   _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null) {
     if (evt?.kind === 4) {
+      logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
+    logger.debug('[NOSTR] Building regular reply prompt');
     return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
@@ -1400,6 +1402,9 @@ Response (YES/NO):`;
     const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
+    
+    // Log prompt details for debugging
+    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}`);
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;

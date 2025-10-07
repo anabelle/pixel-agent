@@ -2,6 +2,23 @@
 
 Nostr plugin for ElizaOS with LLM-driven post and reply generation.
 
+## 🎯 Key Features
+
+### Centralized Posting Queue
+All posts, replies, and interactions are now managed through a **centralized posting queue** that ensures natural, organic-looking activity patterns:
+- **Priority-based posting**: Mentions are prioritized over discovery and scheduled posts
+- **Natural rate limiting**: Posts are spaced 15s-2min apart (configurable)
+- **No batching**: Prevents unnatural bursts of replies/reactions
+- **Collision prevention**: Scheduled posts don't conflict with pixel purchases or mentions
+- See [POSTING_QUEUE.md](./POSTING_QUEUE.md) for detailed documentation
+
+Configuration:
+```bash
+NOSTR_MIN_DELAY_BETWEEN_POSTS_MS=15000      # Min 15s between posts
+NOSTR_MAX_DELAY_BETWEEN_POSTS_MS=120000     # Max 2min natural variance
+NOSTR_MENTION_PRIORITY_BOOST_MS=5000        # Mentions wait 5s less
+```
+
 What changed:
 - Posts and replies are now generated with the configured LLM via `runtime.useModel(ModelType.TEXT_SMALL, { prompt, ... })`.
 - Falls back to `character.postExamples` only if the LLM is unavailable or errors.

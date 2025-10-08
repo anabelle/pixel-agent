@@ -30,6 +30,15 @@ class ContextAccumulator {
     this.hourlyDigestEnabled = true;
     this.dailyReportEnabled = true;
     this.emergingStoriesEnabled = true;
+    this.llmAnalysisEnabled = process.env.CONTEXT_LLM_ANALYSIS_ENABLED === 'true' || false;
+    this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+    this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+    
+    // Performance tuning
+    this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment
+    this.llmSentimentMaxLength = 500; // Maximum content length for LLM sentiment
+    this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
+    this.llmTopicMaxLength = 500; // Maximum content length for LLM topic extraction
   }
 
   async processEvent(evt) {
@@ -107,24 +116,48 @@ class ContextAccumulator {
   }
 
   async _extractStructuredData(evt) {
-    // Fast extraction without LLM for now
-    // TODO: Add optional LLM-based extraction for deeper analysis
-    
     const content = evt.content || '';
-    const topics = extractTopicsFromEvent(evt);
     
     // Extract links
     const linkRegex = /(https?:\/\/[^\s]+)/g;
     const links = content.match(linkRegex) || [];
     
-    // Basic sentiment analysis
-    const sentiment = this._basicSentiment(content);
-    
     // Detect if it's a question
     const isQuestion = content.includes('?');
     
+    // Topic extraction: Try LLM first (if enabled), fallback to keyword-based
+    let topics = [];
+    
+    if (this.llmTopicExtractionEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
+        content.length >= this.llmTopicMinLength && content.length <= this.llmTopicMaxLength) {
+      // Use LLM for intelligent topic extraction
+      topics = await this._extractTopicsWithLLM(content);
+    }
+    
+    // If LLM didn't work or returned nothing, use keyword-based extraction
+    if (topics.length === 0) {
+      topics = extractTopicsFromEvent(evt);
+    }
+    
+    // If still no topics, use 'general' as fallback
+    if (topics.length === 0) {
+      topics = ['general'];
+    }
+    
+    // Sentiment analysis: Try LLM first (if enabled and content is substantial), fallback to keyword-based
+    let sentiment = 'neutral';
+    
+    if (this.llmSentimentEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
+        content.length >= this.llmSentimentMinLength && content.length <= this.llmSentimentMaxLength) {
+      // Use LLM for sentiment analysis on substantial content
+      sentiment = await this._analyzeSentimentWithLLM(content);
+    } else {
+      // Fast keyword-based sentiment for short content or when LLM disabled
+      sentiment = this._basicSentiment(content);
+    }
+    
     return {
-      topics: topics.length > 0 ? topics : ['general'],
+      topics,
       links,
       sentiment,
       isQuestion,
@@ -132,26 +165,276 @@ class ContextAccumulator {
     };
   }
 
+  async _extractTopicsWithLLM(content) {
+    try {
+      const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
+
+Post: "${content.slice(0, 400)}"
+
+Examples of good topics:
+- Instead of "tech": "AI agents", "nostr protocol", "bitcoin mining"
+- Instead of "art": "pixel art", "collaborative canvas", "generative design"
+- Instead of "social": "community building", "decentralization", "privacy advocacy"
+
+Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropayments, value4value"):`;
+
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.3,
+        maxTokens: 50
+      });
+
+      // Parse comma-separated topics
+      const topicsRaw = response.trim()
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(t => t.length > 0 && t.length < 50) // Reasonable length
+        .filter(t => !t.includes('general') && !t.includes('various')); // Filter out vague terms
+      
+      // Limit to 3 topics
+      const topics = topicsRaw.slice(0, 3);
+      
+      // Validate we got something useful
+      if (topics.length === 0) {
+        this.logger.debug(`[CONTEXT] LLM topics returned empty, using fallback`);
+        return [];
+      }
+      
+      this.logger.debug(`[CONTEXT] LLM extracted topics: ${topics.join(', ')}`);
+      return topics;
+      
+    } catch (err) {
+      this.logger.debug('[CONTEXT] LLM topic extraction failed:', err.message);
+      return [];
+    }
+  }
+
+  async _refineTopicsForDigest(digest) {
+    // Refine vague "general" topics by analyzing the content in aggregate
+    if (!this.llmTopicExtractionEnabled || !this.runtime || typeof this.runtime.generateText !== 'function') {
+      return digest.topics; // Return as-is
+    }
+
+    try {
+      // Check if we have too many "general" topics
+      const generalCount = digest.topics.get('general') || 0;
+      const totalTopics = Array.from(digest.topics.values()).reduce((sum, count) => sum + count, 0);
+      
+      // If "general" is more than 30% of topics, try to refine
+      if (generalCount / totalTopics < 0.3) {
+        return digest.topics; // Not too many vague topics
+      }
+
+      // Sample some recent events to understand what "general" actually means
+      const recentEvents = this.dailyEvents
+        .slice(-30)
+        .filter(e => e.topics.includes('general'))
+        .map(e => e.content)
+        .slice(0, 10);
+
+      if (recentEvents.length < 3) {
+        return digest.topics; // Not enough data
+      }
+
+      const sampleContent = recentEvents.join('\n---\n').slice(0, 2000);
+
+      const prompt = `Analyze these posts that were tagged as "general". Identify 3-5 specific recurring themes or topics. Be precise and insightful.
+
+Posts:
+${sampleContent}
+
+Respond with ONLY the topics, comma-separated:`;
+
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.4,
+        maxTokens: 60
+      });
+
+      // Parse refined topics
+      const refinedTopics = response.trim()
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(t => t.length > 0 && t.length < 50)
+        .slice(0, 5);
+
+      if (refinedTopics.length > 0) {
+        // Create new topics map with refined topics replacing "general"
+        const newTopics = new Map(digest.topics);
+        
+        // Distribute "general" count across refined topics
+        const countPerTopic = Math.ceil(generalCount / refinedTopics.length);
+        refinedTopics.forEach(topic => {
+          newTopics.set(topic, (newTopics.get(topic) || 0) + countPerTopic);
+        });
+        
+        // Remove or reduce "general"
+        newTopics.delete('general');
+        
+        this.logger.info(`[CONTEXT] 🎯 Refined ${generalCount} "general" topics into: ${refinedTopics.join(', ')}`);
+        return newTopics;
+      }
+
+      return digest.topics;
+      
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Topic refinement failed:', err.message);
+      return digest.topics;
+    }
+  }
+
+  async _analyzeSentimentWithLLM(content) {
+    try {
+      const prompt = `Analyze the sentiment of this post. Respond with ONLY one word: "positive", "negative", or "neutral".
+
+Post: "${content.slice(0, 400)}"
+
+Sentiment:`;
+
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 10
+      });
+
+      const sentimentLower = response.trim().toLowerCase();
+      
+      // Validate response
+      if (sentimentLower.includes('positive')) return 'positive';
+      if (sentimentLower.includes('negative')) return 'negative';
+      if (sentimentLower.includes('neutral')) return 'neutral';
+      
+      // If LLM gives unexpected response, fallback to keyword analysis
+      this.logger.debug(`[CONTEXT] LLM sentiment returned unexpected value: ${response.trim()}, using fallback`);
+      return this._basicSentiment(content);
+      
+    } catch (err) {
+      this.logger.debug('[CONTEXT] LLM sentiment analysis failed:', err.message);
+      return this._basicSentiment(content);
+    }
+  }
+
+  async _analyzeBatchSentimentWithLLM(contents) {
+    // Batch sentiment analysis for efficiency when processing multiple posts
+    try {
+      if (!contents || contents.length === 0) return [];
+      if (contents.length === 1) return [await this._analyzeSentimentWithLLM(contents[0])];
+      
+      // Limit batch size to prevent token overflow
+      const batchSize = Math.min(contents.length, 10);
+      const batch = contents.slice(0, batchSize);
+      
+      const prompt = `Analyze the sentiment of each post below. For each post, respond with ONLY one word: "positive", "negative", or "neutral".
+
+${batch.map((c, i) => `Post ${i + 1}: "${c.slice(0, 200)}"`).join('\n\n')}
+
+Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
+
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 50
+      });
+
+      // Parse response line by line
+      const lines = response.trim().split('\n').filter(l => l.trim());
+      const sentiments = [];
+      
+      for (let i = 0; i < batch.length; i++) {
+        const line = lines[i]?.toLowerCase() || '';
+        let sentiment = 'neutral';
+        
+        if (line.includes('positive')) sentiment = 'positive';
+        else if (line.includes('negative')) sentiment = 'negative';
+        else if (line.includes('neutral')) sentiment = 'neutral';
+        else sentiment = this._basicSentiment(batch[i]); // Fallback
+        
+        sentiments.push(sentiment);
+      }
+      
+      // Process remaining items with fallback if batch was limited
+      for (let i = batchSize; i < contents.length; i++) {
+        sentiments.push(this._basicSentiment(contents[i]));
+      }
+      
+      return sentiments;
+      
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Batch sentiment analysis failed:', err.message);
+      // Fallback to basic sentiment for all
+      return contents.map(c => this._basicSentiment(c));
+    }
+  }
+
   _basicSentiment(content) {
     const lower = content.toLowerCase();
     
-    // Simple keyword-based sentiment
-    const positiveKeywords = ['great', 'awesome', 'love', 'amazing', 'excellent', 'good', 'nice', 'wonderful', 'fantastic', '🚀', '🎉', '❤️', '😊', '👍'];
-    const negativeKeywords = ['bad', 'terrible', 'awful', 'hate', 'worst', 'sucks', 'fail', 'disappointing', '😢', '😡', '👎'];
+    // Expanded keyword lists with weighted scoring
+    const positiveKeywords = {
+      // Strong positive (weight: 2)
+      'love': 2, 'amazing': 2, 'excellent': 2, 'fantastic': 2, 'awesome': 2, 
+      'brilliant': 2, 'outstanding': 2, 'wonderful': 2, 'incredible': 2,
+      'perfect': 2, 'beautiful': 2, 'stunning': 2, 'spectacular': 2,
+      
+      // Moderate positive (weight: 1)
+      'great': 1, 'good': 1, 'nice': 1, 'cool': 1, 'happy': 1, 'excited': 1,
+      'helpful': 1, 'interesting': 1, 'useful': 1, 'fun': 1, 'glad': 1,
+      'appreciate': 1, 'thanks': 1, 'thank': 1, 'enjoy': 1, 'impressed': 1,
+      'congrats': 1, 'celebrate': 1, 'win': 1, 'success': 1, 'inspiring': 1,
+      
+      // Emoji positive (weight: 1)
+      '🚀': 1, '🎉': 1, '❤️': 1, '😊': 1, '👍': 1, '🔥': 1, '✨': 1, 
+      '💪': 1, '🙌': 1, '👏': 1, '💯': 1, '⭐': 1, '🎊': 1, '😄': 1,
+      '😍': 1, '🤩': 1, '💖': 1, '🌟': 1
+    };
     
-    let positiveCount = 0;
-    let negativeCount = 0;
+    const negativeKeywords = {
+      // Strong negative (weight: 2)
+      'hate': 2, 'terrible': 2, 'awful': 2, 'worst': 2, 'horrible': 2,
+      'disgusting': 2, 'disaster': 2, 'pathetic': 2, 'useless': 2,
+      'garbage': 2, 'trash': 2, 'scam': 2, 'fraud': 2, 'sucks': 2,
+      
+      // Moderate negative (weight: 1)
+      'bad': 1, 'sad': 1, 'disappointing': 1, 'disappointed': 1, 'fail': 1,
+      'failed': 1, 'broken': 1, 'problem': 1, 'issue': 1, 'wrong': 1,
+      'error': 1, 'angry': 1, 'frustrated': 1, 'confusing': 1, 'confused': 1,
+      'worried': 1, 'concerned': 1, 'unfortunate': 1, 'struggling': 1,
+      
+      // Emoji negative (weight: 1)
+      '😢': 1, '😡': 1, '👎': 1, '😞': 1, '😔': 1, '😩': 1, '😤': 1,
+      '💔': 1, '😠': 1, '😰': 1, '😓': 1, '🤦': 1, '😖': 1
+    };
     
-    for (const keyword of positiveKeywords) {
-      if (lower.includes(keyword)) positiveCount++;
+    // Calculate weighted sentiment scores
+    let positiveScore = 0;
+    let negativeScore = 0;
+    
+    for (const [keyword, weight] of Object.entries(positiveKeywords)) {
+      if (lower.includes(keyword)) positiveScore += weight;
     }
     
-    for (const keyword of negativeKeywords) {
-      if (lower.includes(keyword)) negativeCount++;
+    for (const [keyword, weight] of Object.entries(negativeKeywords)) {
+      if (lower.includes(keyword)) negativeScore += weight;
     }
     
-    if (positiveCount > negativeCount) return 'positive';
-    if (negativeCount > positiveCount) return 'negative';
+    // Check for negation patterns that might flip sentiment
+    const negations = ['not', 'no', "don't", "doesn't", "didn't", "won't", "can't", "never"];
+    const hasNegation = negations.some(neg => lower.includes(neg));
+    
+    // If there's negation near positive words, reduce positive score
+    if (hasNegation && positiveScore > 0) {
+      // Look for patterns like "not good", "not great", etc.
+      for (const neg of negations) {
+        for (const posWord of Object.keys(positiveKeywords)) {
+          if (lower.includes(`${neg} ${posWord}`) || lower.includes(`${neg}${posWord}`)) {
+            positiveScore -= positiveKeywords[posWord];
+            negativeScore += 1; // Add to negative instead
+          }
+        }
+      }
+    }
+    
+    // Determine sentiment based on weighted scores
+    const threshold = 1; // Need at least weight of 1 to count
+    
+    if (positiveScore > negativeScore && positiveScore >= threshold) return 'positive';
+    if (negativeScore > positiveScore && negativeScore >= threshold) return 'negative';
     return 'neutral';
   }
 
@@ -248,11 +531,20 @@ class ContextAccumulator {
     }
 
     try {
-      const createUniqueUuid = this.runtime.createUniqueUuid || 
-        ((rt, seed) => `${seed}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`);
+      const timestamp = Date.now();
+      const topicSlug = topic.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
+      
+      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
+      // It will try @elizaos/core first, then fall back to deterministic UUID generation
+      const createUniqueUuid = this.runtime.createUniqueUuid;
+      
+      if (!createUniqueUuid) {
+        this.logger.warn('[CONTEXT] Cannot store emerging story - createUniqueUuid not available');
+        return;
+      }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `emerging-story:${topic}:${Date.now()}`),
+        id: createUniqueUuid(this.runtime, `nostr:context:emerging-story:${topicSlug}:${timestamp}`),
         entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
         roomId: createUniqueUuid(this.runtime, 'nostr:emerging-stories'),
         agentId: this.runtime.agentId,
@@ -266,10 +558,10 @@ class ContextAccumulator {
             sentiment: story.sentiment,
             firstSeen: story.firstSeen,
             recentEvents: story.events.slice(-5), // Last 5 events
-            timestamp: Date.now()
+            timestamp
           }
         },
-        createdAt: Date.now()
+        createdAt: timestamp
       };
       
       await this.runtime.createMemory(memory, 'messages');
@@ -288,6 +580,11 @@ class ContextAccumulator {
     if (!digest || digest.eventCount === 0) {
       this.logger.debug('[CONTEXT] No events in previous hour for digest');
       return null;
+    }
+    
+    // Refine topics if too many "general" entries
+    if (this.llmTopicExtractionEnabled) {
+      digest.topics = await this._refineTopicsForDigest(digest);
     }
     
     // Generate structured summary
@@ -363,7 +660,6 @@ class ContextAccumulator {
 
       // Build user interaction map
       const userInteractions = new Map();
-      const userTopics = new Map();
       
       for (const evt of recentEvents) {
         if (!userInteractions.has(evt.author)) {
@@ -431,8 +727,28 @@ Make it fascinating! Find the human story in the data.`;
         maxTokens: 500
       });
 
-      // Parse JSON response
-      const narrative = JSON.parse(response.trim());
+      // Parse JSON response with error handling
+      let narrative;
+      try {
+        // Try to extract JSON even if there's extra text
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          narrative = JSON.parse(jsonMatch[0]);
+        } else {
+          narrative = JSON.parse(response.trim());
+        }
+      } catch (parseErr) {
+        this.logger.debug('[CONTEXT] Failed to parse LLM narrative JSON:', parseErr.message);
+        // Return a simplified structure if JSON parsing fails
+        return {
+          headline: response.slice(0, 100),
+          summary: response.slice(0, 300),
+          insights: [],
+          vibe: 'active',
+          keyMoment: 'Various discussions across multiple topics',
+          connections: []
+        };
+      }
       
       this.logger.info(`[CONTEXT] 🎯 Generated LLM narrative for hour`);
       return narrative;
@@ -455,11 +771,18 @@ Make it fascinating! Find the human story in the data.`;
     }
 
     try {
-      const createUniqueUuid = this.runtime.createUniqueUuid || 
-        ((rt, seed) => `${seed}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`);
+      const timestamp = Date.now();
+      
+      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
+      const createUniqueUuid = this.runtime.createUniqueUuid;
+      
+      if (!createUniqueUuid) {
+        this.logger.warn('[CONTEXT] Cannot store digest - createUniqueUuid not available');
+        return;
+      }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `hourly-digest:${Date.now()}`),
+        id: createUniqueUuid(this.runtime, `nostr:context:hourly-digest:${timestamp}`),
         entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
         roomId: createUniqueUuid(this.runtime, 'nostr:digests'),
         agentId: this.runtime.agentId,
@@ -468,7 +791,7 @@ Make it fascinating! Find the human story in the data.`;
           source: 'nostr',
           data: summary
         },
-        createdAt: Date.now()
+        createdAt: timestamp
       };
       
       await this.runtime.createMemory(memory, 'messages');
@@ -618,7 +941,30 @@ Make it profound! Find the deeper story in the data.`;
         maxTokens: 700
       });
 
-      const narrative = JSON.parse(response.trim());
+      // Parse JSON response with error handling
+      let narrative;
+      try {
+        // Try to extract JSON even if there's extra text
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          narrative = JSON.parse(jsonMatch[0]);
+        } else {
+          narrative = JSON.parse(response.trim());
+        }
+      } catch (parseErr) {
+        this.logger.debug('[CONTEXT] Failed to parse daily narrative JSON:', parseErr.message);
+        // Return a simplified structure if JSON parsing fails
+        return {
+          headline: response.slice(0, 100),
+          summary: response.slice(0, 500),
+          arc: 'Community activity throughout the day',
+          keyMoments: [],
+          communities: [],
+          insights: [],
+          vibe: 'active',
+          tomorrow: 'Continue monitoring community trends'
+        };
+      }
       
       this.logger.info(`[CONTEXT] 🎯 Generated LLM daily narrative`);
       return narrative;
@@ -635,11 +981,19 @@ Make it profound! Find the deeper story in the data.`;
     }
 
     try {
-      const createUniqueUuid = this.runtime.createUniqueUuid || 
-        ((rt, seed) => `${seed}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`);
+      const timestamp = Date.now();
+      const dateSlug = report.date.replace(/[^0-9]/g, '');
+      
+      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
+      const createUniqueUuid = this.runtime.createUniqueUuid;
+      
+      if (!createUniqueUuid) {
+        this.logger.warn('[CONTEXT] Cannot store daily report - createUniqueUuid not available');
+        return;
+      }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `daily-report:${report.date}`),
+        id: createUniqueUuid(this.runtime, `nostr:context:daily-report:${dateSlug}:${timestamp}`),
         entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
         roomId: createUniqueUuid(this.runtime, 'nostr:reports'),
         agentId: this.runtime.agentId,
@@ -648,7 +1002,7 @@ Make it profound! Find the deeper story in the data.`;
           source: 'nostr',
           data: report
         },
-        createdAt: Date.now()
+        createdAt: timestamp
       };
       
       await this.runtime.createMemory(memory, 'messages');
@@ -750,11 +1104,25 @@ Make it profound! Find the deeper story in the data.`;
   getStats() {
     return {
       enabled: this.enabled,
+      llmAnalysisEnabled: this.llmAnalysisEnabled,
+      llmSentimentEnabled: this.llmSentimentEnabled,
+      llmTopicExtractionEnabled: this.llmTopicExtractionEnabled,
       hourlyDigests: this.hourlyDigests.size,
       emergingStories: this.emergingStories.size,
       topicTimelines: this.topicTimelines.size,
       dailyEvents: this.dailyEvents.length,
-      currentActivity: this.getCurrentActivity()
+      currentActivity: this.getCurrentActivity(),
+      config: {
+        maxHourlyDigests: this.maxHourlyDigests,
+        maxTopicTimelineEvents: this.maxTopicTimelineEvents,
+        maxDailyEvents: this.maxDailyEvents,
+        emergingStoryThreshold: this.emergingStoryThreshold,
+        emergingStoryMentionThreshold: this.emergingStoryMentionThreshold,
+        llmSentimentMinLength: this.llmSentimentMinLength,
+        llmSentimentMaxLength: this.llmSentimentMaxLength,
+        llmTopicMinLength: this.llmTopicMinLength,
+        llmTopicMaxLength: this.llmTopicMaxLength
+      }
     };
   }
 }

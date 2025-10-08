@@ -635,6 +635,23 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     // Store to memory
     await this._storeDigestToMemory(summary);
     
+    // Store to narrative memory for long-term historical context
+    if (this.narrativeMemory) {
+      try {
+        await this.narrativeMemory.storeHourlyNarrative({
+          timestamp: Date.now(),
+          events: digest.eventCount,
+          users: digest.users.size,
+          topTopics: topTopics.slice(0, 5),
+          sentiment: digest.sentiment,
+          narrative: summary.narrative || null
+        });
+        this.logger.debug('[CONTEXT] Stored hourly narrative to long-term memory');
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Failed to store hourly narrative:', err.message);
+      }
+    }
+    
     return summary;
   }
 
@@ -689,6 +706,27 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         .map(e => `[${e.author}] ${e.content}`)
         .join('\n\n');
 
+      // Get historical context for comparison
+      let historicalContext = '';
+      if (this.narrativeMemory) {
+        try {
+          const history = await this.narrativeMemory.getHistoricalContext(7); // Last 7 days, same hour
+          if (history.length > 0) {
+            const lastWeek = history[0];
+            const avgEvents = Math.round(lastWeek.events);
+            const comparison = digest.eventCount > avgEvents * 1.2 ? 'significantly higher' 
+                             : digest.eventCount < avgEvents * 0.8 ? 'notably lower'
+                             : 'similar';
+            historicalContext = `\n\nHISTORICAL CONTEXT (same hour last week):
+- Activity level: ${lastWeek.events} events (this hour: ${comparison})
+- Common topics: ${lastWeek.topTopics?.slice(0, 3).map(t => t.topic).join(', ') || 'N/A'}
+- Consider if this hour shows continuation, shift, or new patterns compared to last week`;
+          }
+        } catch (err) {
+          this.logger.debug('[CONTEXT] Failed to get historical context:', err.message);
+        }
+      }
+
       const prompt = `Analyze this hour's activity on Nostr and create a compelling narrative summary.
 
 ACTIVITY DATA:
@@ -701,7 +739,7 @@ KEY PLAYERS:
 ${keyPlayers.map(p => `- ${p.author}: ${p.posts} posts about ${p.topics.join(', ')} (${p.sentiment} tone)`).join('\n')}
 
 SAMPLE POSTS:
-${sampleContent.slice(0, 2000)}
+${sampleContent.slice(0, 2000)}${historicalContext}
 
 ANALYZE:
 1. What narrative is emerging? What's the story being told?
@@ -709,6 +747,7 @@ ANALYZE:
 3. What's the emotional vibe? Energy level?
 4. Any surprising insights or patterns?
 5. If you could describe this hour in one compelling sentence, what would it be?
+6. ${historicalContext ? 'How does this compare to last week at this time?' : ''}
 
 OUTPUT JSON:
 {
@@ -868,6 +907,24 @@ Make it fascinating! Find the human story in the data.`;
     
     // Store to memory
     await this._storeDailyReport(report);
+    
+    // Store to narrative memory for long-term historical context
+    if (this.narrativeMemory) {
+      try {
+        await this.narrativeMemory.storeDailyNarrative({
+          date: report.date,
+          events: report.summary.totalEvents,
+          users: report.summary.activeUsers,
+          topTopics: report.summary.topTopics,
+          emergingStories: report.summary.emergingStories || [],
+          sentiment: report.summary.overallSentiment,
+          narrative: report.narrative || null
+        });
+        this.logger.debug('[CONTEXT] Stored daily narrative to long-term memory');
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Failed to store daily narrative:', err.message);
+      }
+    }
     
     // Clear daily events for next day
     this.dailyEvents = [];

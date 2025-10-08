@@ -47,14 +47,38 @@ async function listEventsByTopic(pool, relays, topic, opts = {}) {
   const events = Array.from(uniqueEvents.values());
   const lc = t;
   const topicWords = lc.split(/\s+/).filter(w => w.length > 2);
-  const relevant = events.filter(event => {
+  
+  // Filter relevant events - handle both sync and async semantic matching
+  const relevant = [];
+  for (const event of events) {
     const content = (event?.content || '').toLowerCase();
     const tags = Array.isArray(event.tags) ? event.tags.flat().join(' ').toLowerCase() : '';
     const fullText = content + ' ' + tags;
-    const hasTopicMatch = topicWords.some(word => fullText.includes(word) || content.includes(lc) || isSemanticMatch(content, topic));
-    if (!hasTopicMatch) return false;
-    return isQualityContent(event, topic);
-  });
+    
+    // Check topic match (handle async semantic matching)
+    let hasTopicMatch = false;
+    
+    // First try quick keyword check
+    if (topicWords.some(word => fullText.includes(word) || content.includes(lc))) {
+      hasTopicMatch = true;
+    } else {
+      // Try semantic matching (may be async)
+      const semanticResult = isSemanticMatch(content, topic);
+      if (semanticResult instanceof Promise) {
+        hasTopicMatch = await semanticResult;
+      } else {
+        hasTopicMatch = semanticResult;
+      }
+    }
+    
+    if (!hasTopicMatch) continue;
+    
+    // Check quality
+    if (!isQualityContent(event, topic)) continue;
+    
+    relevant.push(event);
+  }
+  
   return relevant;
 }
 

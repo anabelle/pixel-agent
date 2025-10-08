@@ -274,7 +274,7 @@ Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropa
         .split(',')
         .map(t => t.trim().toLowerCase())
         .filter(t => t.length > 0 && t.length < 50) // Reasonable length
-        .filter(t => !t.includes('general') && !t.includes('various')); // Filter out vague terms
+        .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion'); // Filter out only exact vague terms
       
       // Limit to 3 topics
       const topics = topicsRaw.slice(0, 3);

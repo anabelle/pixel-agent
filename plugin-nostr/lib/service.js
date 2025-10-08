@@ -543,7 +543,7 @@ class NostrService {
        }
      }
 
-     const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness?${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
+     const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Should a creative AI agent interact with this post? Be generous - respond to posts about technology, art, community, creativity, or that seem interesting/fun. Only say NO for obvious spam, scams, or complete gibberish.${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
 
      const type = this._getSmallModelType();
 
@@ -612,18 +612,18 @@ class NostrService {
 Analyze this mention: "${evt.content.slice(0, 500)}"
 ${contextInfo}
 
-Should we respond? Say YES unless it's clearly:
-- Obvious spam or scam
-- Hostile/abusive
-- Complete gibberish
-- Bot-generated noise
+Should we respond? Be very generous - respond to almost all genuine human messages. Only say NO if it's clearly:
+- Obvious spam, scams, or malicious content
+- Extreme hostility or abuse
+- Complete gibberish with no meaning
+- Automated bot spam (repeated identical messages)
 
 HIGHER PRIORITY for mentions that:
 - Relate to current trending topics in the community
 - Are thoughtful questions or discussions
 - Show genuine engagement
 
-Most real human messages deserve a response, even if casual or brief. When in doubt, say YES.
+RESPOND TO MOST MESSAGES: Casual greetings, brief comments, simple questions, and general interactions all deserve responses. When in doubt, say YES. Only filter out the truly problematic content.
 
 Response (YES/NO):`;
 
@@ -2150,7 +2150,11 @@ Response (YES/NO):`;
       const threadContent = thread.map(e => e.content || '').join(' ').toLowerCase();
       const relevantKeywords = [
         'art', 'pixel', 'creative', 'canvas', 'design', 'nostr', 'bitcoin', 
-        'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community'
+        'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community',
+        'technology', 'innovation', 'crypto', 'blockchain', 'gaming', 'music',
+        'photography', 'writing', 'coding', 'programming', 'science', 'space',
+        'environment', 'politics', 'economy', 'finance', 'health', 'fitness',
+        'travel', 'food', 'sports', 'entertainment', 'news', 'education'
       ];
       
       const hasRelevantContent = relevantKeywords.some(keyword => 

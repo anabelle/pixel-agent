@@ -171,21 +171,45 @@ class ContextAccumulator {
     
     // Topic extraction: Try LLM first (if enabled), fallback to keyword-based
     let topics = [];
-    
+    let topicSource = 'none';
+
     if (this.llmTopicExtractionEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
         content.length >= this.llmTopicMinLength && content.length <= this.llmTopicMaxLength) {
       // Use LLM for intelligent topic extraction
       topics = await this._extractTopicsWithLLM(content);
+      if (topics.length > 0) {
+        topicSource = 'llm';
+      }
+    } else if (this.llmTopicExtractionEnabled) {
+      if (!this.runtime || typeof this.runtime.generateText !== 'function') {
+        topicSource = 'llm-unavailable';
+      } else if (content.length < this.llmTopicMinLength) {
+        topicSource = 'llm-too-short';
+      } else if (content.length > this.llmTopicMaxLength) {
+        topicSource = 'llm-too-long';
+      }
+    } else {
+      topicSource = 'llm-disabled';
     }
     
     // If LLM didn't work or returned nothing, use keyword-based extraction
     if (topics.length === 0) {
-      topics = extractTopicsFromEvent(evt);
+      const keywordTopics = extractTopicsFromEvent(evt);
+      if (keywordTopics.length > 0) {
+        topics = keywordTopics;
+        topicSource = topicSource === 'llm' ? 'llm-fallback-keyword' : 'keyword';
+      }
     }
     
     // If still no topics, use 'general' as fallback
     if (topics.length === 0) {
       topics = ['general'];
+      topicSource = topicSource === 'keyword' ? 'keyword-fallback-general' : 'fallback-general';
+    }
+
+    if (this.logger?.debug) {
+      const idSnippet = typeof evt.id === 'string' ? evt.id.slice(0, 8) : 'unknown';
+      this.logger.debug(`[CONTEXT] Topics(${topicSource}) evt=${idSnippet} -> ${topics.join(', ')}`);
     }
     
     // Sentiment analysis: Try LLM first (if enabled and content is substantial), fallback to keyword-based

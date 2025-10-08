@@ -2052,35 +2052,83 @@ Response (YES/NO):`;
         }
       }
 
-      // Fetch the thread events
+      // Fetch the COMPLETE thread by building full chain from root to current event
       const threadEvents = [];
       const eventIds = new Set();
+      const eventMap = new Map();
 
       // Add the current event
       threadEvents.push(evt);
       eventIds.add(evt.id);
+      eventMap.set(evt.id, evt);
 
-      // Fetch root and parent if we have them
-      const eventsToFetch = [];
-      if (rootId && !eventIds.has(rootId)) {
-        eventsToFetch.push(rootId);
-        eventIds.add(rootId);
-      }
-      if (parentId && !eventIds.has(parentId) && parentId !== rootId) {
-        eventsToFetch.push(parentId);
-        eventIds.add(parentId);
-      }
-
-      if (eventsToFetch.length > 0) {
+      // If we have a root, fetch entire thread starting from root
+      if (rootId) {
         try {
-          const fetchedEvents = await this._list(this.relays, [
-            { ids: eventsToFetch }
-          ]);
-
-          threadEvents.push(...fetchedEvents);
+          // Fetch all events that reference this root (the entire thread)
+          const threadQuery = [
+            { ids: [rootId] }, // Get the root itself
+            { kinds: [1], '#e': [rootId], limit: 100 } // Get all replies in the thread
+          ];
+          
+          const fetchedEvents = await this._list(this.relays, threadQuery);
+          
+          for (const event of fetchedEvents) {
+            if (!eventIds.has(event.id)) {
+              threadEvents.push(event);
+              eventIds.add(event.id);
+              eventMap.set(event.id, event);
+            }
+          }
+          
+          logger?.debug?.(`[NOSTR] Fetched complete thread: ${threadEvents.length} events for root ${rootId.slice(0, 8)}`);
         } catch (err) {
-          logger?.debug?.('[NOSTR] Failed to fetch thread context events:', err?.message || err);
+          logger?.debug?.('[NOSTR] Failed to fetch full thread context:', err?.message || err);
         }
+      } else if (parentId) {
+        // No root found, try to build chain by following parent references
+        let currentId = parentId;
+        let depth = 0;
+        const maxDepth = 50; // Safety limit to prevent infinite loops
+        
+        while (currentId && depth < maxDepth) {
+          if (eventIds.has(currentId)) break;
+          
+          try {
+            const parentEvents = await this._list(this.relays, [{ ids: [currentId] }]);
+            if (parentEvents.length === 0) break;
+            
+            const parentEvent = parentEvents[0];
+            threadEvents.push(parentEvent);
+            eventIds.add(parentEvent.id);
+            eventMap.set(parentEvent.id, parentEvent);
+            
+            // Find the next parent in the chain
+            const parentTags = parentEvent.tags || [];
+            const parentETags = parentTags.filter(t => t[0] === 'e');
+            
+            if (parentETags.length === 0) break; // Reached root
+            
+            // Try NIP-10 parsing first
+            try {
+              if (nip10Parse) {
+                const refs = nip10Parse(parentEvent);
+                currentId = refs?.reply?.id || refs?.root?.id;
+              } else {
+                currentId = parentETags[0][1]; // Fallback to first e-tag
+              }
+            } catch {
+              currentId = parentETags[0][1];
+            }
+            
+            depth++;
+          } catch (err) {
+            logger?.debug?.('[NOSTR] Error fetching parent in chain:', err?.message || err);
+            break;
+          }
+        }
+        
+        logger?.debug?.(`[NOSTR] Built thread chain: ${threadEvents.length} events (depth: ${depth})`);
       }
 
       // Sort events by created_at for chronological order
@@ -2369,8 +2417,17 @@ Response (YES/NO):`;
         logger.debug('[NOSTR] Image processing disabled by configuration');
       }
 
+      // Fetch full thread context for better conversation understanding
+      let threadContext = null;
+      try {
+        threadContext = await this._getThreadContext(evt);
+        logger.info(`[NOSTR] Thread context for mention: ${threadContext.thread.length} events (isRoot: ${threadContext.isRoot})`);
+      } catch (err) {
+        logger.debug(`[NOSTR] Failed to fetch thread context for mention: ${err?.message || err}`);
+      }
+
       logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
-      const replyText = await this.generateReplyTextLLM(evt, roomId, null, imageContext);
+      const replyText = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
       
       // Check if LLM generation failed (returned null)
       if (!replyText || !replyText.trim()) {

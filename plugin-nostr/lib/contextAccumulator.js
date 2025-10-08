@@ -40,6 +40,49 @@ class ContextAccumulator {
     this.llmSentimentMaxLength = 500; // Maximum content length for LLM sentiment
     this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
     this.llmTopicMaxLength = 500; // Maximum content length for LLM topic extraction
+
+    // Cached system context information for persistence
+    this._systemContext = null;
+    this._systemContextPromise = null;
+  }
+
+  async _getSystemContext() {
+    if (!this.runtime) return null;
+    if (this._systemContext) return this._systemContext;
+
+    if (!this._systemContextPromise) {
+      try {
+        const { ensureNostrContextSystem } = require('./context');
+        const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
+        let channelType = null;
+        try {
+          if (this.runtime?.ChannelType) {
+            channelType = this.runtime.ChannelType;
+          } else {
+            const core = require('@elizaos/core');
+            if (core?.ChannelType) channelType = core.ChannelType;
+          }
+        } catch {}
+
+        this._systemContextPromise = ensureNostrContextSystem(this.runtime, {
+          createUniqueUuid,
+          ChannelType: channelType,
+          logger: this.logger
+        });
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Failed to initiate system context ensure:', err?.message || err);
+        return null;
+      }
+    }
+
+    try {
+      this._systemContext = await this._systemContextPromise;
+      return this._systemContext;
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Failed to ensure system context:', err?.message || err);
+      this._systemContextPromise = null;
+      return null;
+    }
   }
 
   async processEvent(evt) {
@@ -543,10 +586,16 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         return;
       }
       
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
+      const roomId = rooms.emergingStories || createUniqueUuid(this.runtime, 'nostr-emerging-stories');
+      const worldId = systemContext?.worldId;
+
       const memory = {
         id: createUniqueUuid(this.runtime, `nostr-context-emerging-story-${topicSlug}-${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr-emerging-stories'),
+        entityId,
+        roomId,
         agentId: this.runtime.agentId,
         content: {
           type: 'emerging_story',
@@ -563,11 +612,19 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         },
         createdAt: timestamp
       };
+
+      if (worldId) {
+        memory.worldId = worldId;
+      }
       
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
-      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-      this.logger.debug(`[CONTEXT] Stored emerging story: ${topic}`);
+      const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      if (result && (result === true || result.created)) {
+        this.logger.debug(`[CONTEXT] Stored emerging story: ${topic}`);
+      } else {
+        this.logger.warn(`[CONTEXT] Failed to persist emerging story for topic="${topic}"`);
+      }
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store emerging story:', err.message);
     }
@@ -822,10 +879,16 @@ Make it fascinating! Find the human story in the data.`;
         return;
       }
       
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
+      const roomId = rooms.hourlyDigests || createUniqueUuid(this.runtime, 'nostr-hourly-digests');
+      const worldId = systemContext?.worldId;
+
       const memory = {
         id: createUniqueUuid(this.runtime, `nostr-context-hourly-digest-${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr-digests'),
+        entityId,
+        roomId,
         agentId: this.runtime.agentId,
         content: {
           type: 'hourly_digest',
@@ -834,11 +897,19 @@ Make it fascinating! Find the human story in the data.`;
         },
         createdAt: timestamp
       };
+
+      if (worldId) {
+        memory.worldId = worldId;
+      }
       
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
-      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-      this.logger.debug('[CONTEXT] Stored hourly digest to memory');
+      const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      if (result && (result === true || result.created)) {
+        this.logger.debug('[CONTEXT] Stored hourly digest to memory');
+      } else {
+        this.logger.warn('[CONTEXT] Failed to persist hourly digest memory');
+      }
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store digest:', err.message);
     }
@@ -1053,10 +1124,16 @@ Make it profound! Find the deeper story in the data.`;
         return;
       }
       
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
+      const roomId = rooms.dailyReports || createUniqueUuid(this.runtime, 'nostr-daily-reports');
+      const worldId = systemContext?.worldId;
+
       const memory = {
         id: createUniqueUuid(this.runtime, `nostr-context-daily-report-${dateSlug}-${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr-reports'),
+        entityId,
+        roomId,
         agentId: this.runtime.agentId,
         content: {
           type: 'daily_report',
@@ -1065,11 +1142,19 @@ Make it profound! Find the deeper story in the data.`;
         },
         createdAt: timestamp
       };
+
+      if (worldId) {
+        memory.worldId = worldId;
+      }
       
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
-      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-      this.logger.info('[CONTEXT] ✅ Stored daily report to memory');
+      const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      if (result && (result === true || result.created)) {
+        this.logger.info('[CONTEXT] ✅ Stored daily report to memory');
+      } else {
+        this.logger.warn('[CONTEXT] Failed to persist daily report memory');
+      }
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store daily report:', err.message);
     }

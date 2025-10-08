@@ -16,6 +16,48 @@ class UserProfileManager {
     
     // Start periodic sync
     this.syncTimer = setInterval(() => this._syncProfilesToMemory(), this.profileSyncInterval);
+
+    this._systemContext = null;
+    this._systemContextPromise = null;
+  }
+
+  async _getSystemContext() {
+    if (!this.runtime) return null;
+    if (this._systemContext) return this._systemContext;
+
+    if (!this._systemContextPromise) {
+      try {
+        const { ensureNostrContextSystem } = require('./context');
+        const createUniqueUuid = this.runtime?.createUniqueUuid;
+        let channelType = null;
+        try {
+          if (this.runtime?.ChannelType) {
+            channelType = this.runtime.ChannelType;
+          } else {
+            const core = require('@elizaos/core');
+            if (core?.ChannelType) channelType = core.ChannelType;
+          }
+        } catch {}
+
+        this._systemContextPromise = ensureNostrContextSystem(this.runtime, {
+          createUniqueUuid,
+          ChannelType: channelType,
+          logger: this.logger
+        });
+      } catch (err) {
+        this.logger.debug('[USER-PROFILE] Failed to initiate system context ensure:', err?.message || err);
+        return null;
+      }
+    }
+
+    try {
+      this._systemContext = await this._systemContextPromise;
+      return this._systemContext;
+    } catch (err) {
+      this.logger.debug('[USER-PROFILE] Failed to ensure system context:', err?.message || err);
+      this._systemContextPromise = null;
+      return null;
+    }
   }
 
   async getProfile(pubkey) {
@@ -284,9 +326,14 @@ class UserProfileManager {
     let synced = 0;
     const profiles = Array.from(this.profiles.values()).filter(p => p.needsSync);
 
+    const systemContext = await this._getSystemContext();
+    const rooms = systemContext?.rooms || {};
+    const worldId = systemContext?.worldId;
+    const baseRoomId = rooms.userProfiles || createUniqueUuid(this.runtime, 'nostr-user-profiles');
+
     for (const profile of profiles) {
       try {
-        const roomId = createUniqueUuid(this.runtime, 'nostr-user-profiles');
+        const roomId = baseRoomId || createUniqueUuid(this.runtime, 'nostr-user-profiles');
         const entityId = createUniqueUuid(this.runtime, profile.pubkey);
         const memoryId = createUniqueUuid(this.runtime, `nostr-user-profile-${profile.pubkey}-${Date.now()}`);
 
@@ -311,11 +358,19 @@ class UserProfileManager {
           createdAt: Date.now()
         };
 
+        if (worldId) {
+          memory.worldId = worldId;
+        }
+
         // Use createMemorySafe from context.js for retry logic
         const { createMemorySafe } = require('./context');
-        await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-        profile.needsSync = false;
-        synced++;
+        const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+        if (result && (result === true || result.created)) {
+          profile.needsSync = false;
+          synced++;
+        } else {
+          this.logger.warn(`[USER-PROFILE] Failed to persist profile ${profile.pubkey.slice(0, 8)}`);
+        }
       } catch (err) {
         this.logger.debug(`[USER-PROFILE] Failed to sync profile ${profile.pubkey.slice(0, 8)}:`, err.message);
       }

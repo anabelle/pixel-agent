@@ -43,19 +43,34 @@ function pickDiscoveryTopics() {
   return Array.from(finalTopics);
 }
 
+/**
+ * Legacy synchronous semantic matching (kept for backwards compatibility)
+ * For intelligent matching, use SemanticAnalyzer directly
+ */
 function isSemanticMatch(content, topic) {
+  // Static keyword fallback for synchronous calls
   const semanticMappings = {
-    'pixel art': ['8-bit', 'sprite', 'retro', 'low-res', 'pixelated', 'bitmap'],
-    'lightning network': ['LN', 'sats', 'zap', 'invoice', 'channel', 'payment'],
-    'creative coding': ['generative', 'algorithm', 'procedural', 'interactive', 'visualization'],
-    'collaborative canvas': ['drawing', 'paint', 'sketch', 'artwork', 'contribute', 'place'],
-    'value4value': ['v4v', 'creator', 'support', 'donation', 'tip', 'creator economy'],
-    'nostr dev': ['relay', 'NIP', 'protocol', 'client', 'pubkey', 'event'],
-    'self-hosted': ['VPS', 'server', 'homelab', 'docker', 'self-custody', 'sovereignty'],
-    'bitcoin art': ['ordinals', 'inscription', 'on-chain', 'sat', 'btc art', 'digital collectible']
+    'pixel art': ['8-bit', 'sprite', 'retro', 'low-res', 'pixelated', 'bitmap', 'pixel'],
+    'lightning network': ['LN', 'sats', 'zap', 'invoice', 'channel', 'payment', 'lightning', 'bolt'],
+    'creative coding': ['generative', 'algorithm', 'procedural', 'interactive', 'visualization', 'p5js'],
+    'collaborative canvas': ['drawing', 'paint', 'sketch', 'artwork', 'contribute', 'place', 'canvas'],
+    'value4value': ['v4v', 'creator', 'support', 'donation', 'tip', 'creator economy', 'patronage'],
+    'nostr dev': ['relay', 'NIP', 'protocol', 'client', 'pubkey', 'event', 'nostr', 'decentralized'],
+    'self-hosted': ['VPS', 'server', 'homelab', 'docker', 'self-custody', 'sovereignty', 'self-host'],
+    'bitcoin art': ['ordinals', 'inscription', 'on-chain', 'sat', 'btc art', 'digital collectible'],
+    'AI agents': ['agent', 'autonomous', 'AI', 'artificial intelligence', 'bot', 'automation', 'LLM'],
+    'community': ['community', 'social', 'network', 'connection', 'together', 'collective']
   };
-  const relatedTerms = semanticMappings[topic.toLowerCase()] || [];
-  return relatedTerms.some(term => content.toLowerCase().includes(term.toLowerCase()));
+  
+  const contentLower = content.toLowerCase();
+  const topicLower = topic.toLowerCase();
+  
+  // Quick check: direct topic mention
+  if (contentLower.includes(topicLower)) return true;
+  
+  // Check related terms
+  const relatedTerms = semanticMappings[topicLower] || [];
+  return relatedTerms.some(term => contentLower.includes(term.toLowerCase()));
 }
 
 async function analyzeAccountWithLLM(authorEvents, serviceInstance) {

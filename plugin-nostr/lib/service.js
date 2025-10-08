@@ -318,6 +318,28 @@ class NostrService {
       this.contextAccumulator.disable();
     }
     
+    // Semantic Analyzer - LLM-powered semantic understanding beyond keywords
+    const { SemanticAnalyzer } = require('./semanticAnalyzer');
+    this.semanticAnalyzer = new SemanticAnalyzer(runtime, this.logger);
+    this.logger.info(`[NOSTR] Semantic analyzer initialized (LLM: ${this.semanticAnalyzer.llmSemanticEnabled ? 'ON' : 'OFF'})`);
+    
+    // User Profile Manager - Persistent per-user learning and tracking
+    const { UserProfileManager } = require('./userProfileManager');
+    this.userProfileManager = new UserProfileManager(runtime, this.logger);
+    this.logger.info(`[NOSTR] User profile manager initialized`);
+    
+    // Narrative Memory - Historical narrative storage and temporal analysis
+    const { NarrativeMemory } = require('./narrativeMemory');
+    this.narrativeMemory = new NarrativeMemory(runtime, this.logger);
+    this.logger.info(`[NOSTR] Narrative memory initialized`);
+    
+    // Connect managers to context accumulator for integrated intelligence
+    if (this.contextAccumulator) {
+      this.contextAccumulator.userProfileManager = this.userProfileManager;
+      this.contextAccumulator.narrativeMemory = this.narrativeMemory;
+      this.logger.info(`[NOSTR] Long-term memory systems connected to context accumulator`);
+    }
+    
     // Schedule hourly digest generation
     this.hourlyDigestTimer = null;
     
@@ -450,11 +472,16 @@ class NostrService {
     try {
       const content = { source: 'nostr', type: 'interaction_counts', counts: Object.fromEntries(this.userInteractionCount) };
       const now = Date.now();
-      const idSeed = `nostr:interaction_counts:${now}`;
-      const generatedId = this.createUniqueUuid(this.runtime, idSeed);
-      const id = typeof generatedId === 'string' && generatedId.includes('nostr:interaction_counts:') ? generatedId : idSeed;
-      const entityId = this.createUniqueUuid(this.runtime, 'nostr:system');
-      const roomId = this.createUniqueUuid(this.runtime, 'nostr:counts');
+      const idSeed = `nostr-interaction-counts-${now}`;
+      const id = this.createUniqueUuid(this.runtime, idSeed);
+      const entityId = this.createUniqueUuid(this.runtime, 'nostr-system');
+      const roomId = this.createUniqueUuid(this.runtime, 'nostr-counts');
+      
+      if (!id || !entityId || !roomId) {
+        this.logger.debug('[NOSTR] Failed to generate UUIDs for interaction counts');
+        return;
+      }
+      
       await this._createMemorySafe({
         id,
         entityId,
@@ -926,9 +953,14 @@ Response (YES/NO):`;
       const now = Math.floor(Date.now() / 1000);
       const strictness = searchParams.strictness || this.discoveryQualityStrictness;
 
+      // Use intelligent semantic matching if available
+      const semanticMatchFn = this.semanticAnalyzer && this.semanticAnalyzer.llmSemanticEnabled
+        ? async (c, t) => await this.semanticAnalyzer.isSemanticMatch(c, t)
+        : (c, t) => this._isSemanticMatch(c, t);
+
       const relevant = await listEventsByTopic(this.pool, this.relays, topic, {
         listFn: async (pool, relays, filters) => this._list.call(this, relays, filters),
-        isSemanticMatch: (c, t) => this._isSemanticMatch(c, t),
+        isSemanticMatch: semanticMatchFn,
         isQualityContent: (e, t) => this._isQualityContent(e, t, strictness),
         now: now,
         ...searchParams
@@ -974,8 +1006,24 @@ Response (YES/NO):`;
     return Math.max(0, Math.min(1, baseScore)); // Clamp to [0, 1]
   }
 
+  /**
+   * Semantic matching with LLM intelligence
+   * Async version - use when possible for intelligent matching
+   */
+  async isSemanticMatchAsync(content, topic) {
+    if (this.semanticAnalyzer) {
+      return await this.semanticAnalyzer.isSemanticMatch(content, topic);
+    }
+    // Fallback to static
+    return isSemanticMatch(content, topic);
+  }
+
+  /**
+   * Legacy synchronous semantic matching
+   * Uses static keywords only - prefer async version
+   */
   _isSemanticMatch(content, topic) {
-  return isSemanticMatch(content, topic);
+    return isSemanticMatch(content, topic);
   }
 
   _isQualityContent(event, topic, strictness = null) {
@@ -2225,6 +2273,23 @@ Response (YES/NO):`;
               createdAt: Date.now(), 
             };
             await this._createMemorySafe(replyMemory, 'messages');
+            
+            // Track user interaction for profile learning
+            if (this.userProfileManager) {
+              try {
+                const topics = extractTopicsFromEvent(evt);
+                await this.userProfileManager.recordInteraction(evt.pubkey, {
+                  type: 'mention',
+                  success: true,
+                  topics,
+                  engagement: 1.0, // User mentioned us, high engagement
+                  timestamp: Date.now()
+                });
+                logger.debug(`[NOSTR] Recorded mention interaction for user ${evt.pubkey.slice(0, 8)}`);
+              } catch (err) {
+                logger.debug('[NOSTR] Failed to record user interaction:', err.message);
+              }
+            }
           }
           return replyOk;
         }
@@ -3248,6 +3313,18 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
       await this.contextAccumulator.processEvent(evt);
     }
     
+    // Update user topic interests from home feed
+    if (this.userProfileManager && evt.pubkey && evt.content) {
+      try {
+        const topics = extractTopicsFromEvent(evt);
+        for (const topic of topics) {
+          await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to record topic interests:', err.message);
+      }
+    }
+    
     // Update user quality tracking
     if (evt.pubkey && evt.content) {
       this._updateUserQualityScore(evt.pubkey, evt);
@@ -3443,6 +3520,9 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
     if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch {} } this.pendingReplyTimers.clear(); }
+    if (this.semanticAnalyzer) { try { this.semanticAnalyzer.destroy(); } catch {} this.semanticAnalyzer = null; }
+    if (this.userProfileManager) { try { await this.userProfileManager.destroy(); } catch {} this.userProfileManager = null; }
+    if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch {} this.narrativeMemory = null; }
     logger.info('[NOSTR] Service stopped');
   }
 
@@ -3466,6 +3546,83 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
   getTopicTimeline(topic, limit = 10) {
     if (!this.contextAccumulator) return [];
     return this.contextAccumulator.getTopicTimeline(topic, limit);
+  }
+
+  getSemanticAnalyzerStats() {
+    if (!this.semanticAnalyzer) return null;
+    return this.semanticAnalyzer.getCacheStats();
+  }
+
+  // Long-Term Memory Query Methods
+  
+  async getUserProfile(pubkey) {
+    if (!this.userProfileManager) return null;
+    try {
+      return await this.userProfileManager.getProfile(pubkey);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get user profile:', err.message);
+      return null;
+    }
+  }
+
+  async getTopicExperts(topic, limit = 5) {
+    if (!this.userProfileManager) return [];
+    try {
+      return await this.userProfileManager.getTopicExperts(topic, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get topic experts:', err.message);
+      return [];
+    }
+  }
+
+  async getUserRecommendations(pubkey, limit = 5) {
+    if (!this.userProfileManager) return [];
+    try {
+      return await this.userProfileManager.getUserRecommendations(pubkey, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get user recommendations:', err.message);
+      return [];
+    }
+  }
+
+  async getHistoricalContext(days = 7) {
+    if (!this.narrativeMemory) return [];
+    try {
+      return await this.narrativeMemory.getHistoricalContext(days);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get historical context:', err.message);
+      return [];
+    }
+  }
+
+  async getTopicEvolution(topic, days = 30) {
+    if (!this.narrativeMemory) return null;
+    try {
+      return await this.narrativeMemory.getTopicEvolution(topic, days);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get topic evolution:', err.message);
+      return null;
+    }
+  }
+
+  async compareWithHistory(currentDigest) {
+    if (!this.narrativeMemory) return null;
+    try {
+      return await this.narrativeMemory.compareWithHistory(currentDigest);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to compare with history:', err.message);
+      return null;
+    }
+  }
+
+  async getSimilarPastMoments(currentDigest, limit = 3) {
+    if (!this.narrativeMemory) return [];
+    try {
+      return await this.narrativeMemory.getSimilarPastMoments(currentDigest, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get similar past moments:', err.message);
+      return [];
+    }
   }
 }
 

@@ -22,7 +22,7 @@ class ContextAccumulator {
     // Configuration
     this.maxHourlyDigests = 24; // Keep last 24 hours
     this.maxTopicTimelineEvents = 50; // Per topic
-    this.maxDailyEvents = 1000; // For daily report
+    this.maxDailyEvents = process.env.MAX_DAILY_EVENTS ? parseInt(process.env.MAX_DAILY_EVENTS) : 5000; // For daily report - increased from 1000
     this.emergingStoryThreshold = 3; // Min users to qualify as "emerging"
     this.emergingStoryMentionThreshold = 5; // Min mentions
     
@@ -40,6 +40,8 @@ class ContextAccumulator {
     this.llmSentimentMaxLength = 500; // Maximum content length for LLM sentiment
     this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
     this.llmTopicMaxLength = 500; // Maximum content length for LLM topic extraction
+    this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 100; // Posts to sample for narratives
+    this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 8000; // Max content for LLM analysis
 
     // Cached system context information for persistence
     this._systemContext = null;
@@ -782,12 +784,13 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
           sentiment: this._dominantSentiment(data.sentiments)
         }));
 
-      // Sample diverse content for LLM
+      // Sample diverse content for LLM - now using configurable sample size
       const sampleContent = recentEvents
-        .sort(() => 0.5 - Math.random()) // Shuffle
-        .slice(0, 15) // Take 15 random posts
+        .sort(() => 0.5 - Math.random()) // Shuffle for diversity
+        .slice(0, this.llmNarrativeSampleSize) // Use configurable sample size (default 100)
         .map(e => `[${e.author}] ${e.content}`)
-        .join('\n\n');
+        .join('\n\n')
+        .slice(0, this.llmNarrativeMaxContentLength); // Limit total content length
 
       // Get historical context for comparison
       let historicalContext = '';
@@ -846,7 +849,7 @@ Make it fascinating! Find the human story in the data.`;
 
       const response = await this.runtime.generateText(prompt, {
         temperature: 0.7,
-        maxTokens: 500
+        maxTokens: 800 // Increased from 500 to handle larger content analysis
       });
 
       // Parse JSON response with error handling
@@ -872,7 +875,7 @@ Make it fascinating! Find the human story in the data.`;
         };
       }
       
-      this.logger.info(`[CONTEXT] 🎯 Generated LLM narrative for hour`);
+      this.logger.info(`[CONTEXT] 🎯 Generating hourly narrative from ${recentEvents.length} events, sampling ${this.llmNarrativeSampleSize} posts for LLM analysis`);
       return narrative;
 
     } catch (err) {
@@ -1037,8 +1040,8 @@ Make it fascinating! Find the human story in the data.`;
     }
 
     try {
-      // Sample diverse events from throughout the day
-      const sampleSize = Math.min(30, this.dailyEvents.length);
+      // Sample diverse events from throughout the day - now much larger sample
+      const sampleSize = Math.min(this.llmNarrativeSampleSize, this.dailyEvents.length); // Use configurable sample size
       const sampledEvents = [];
       const step = Math.floor(this.dailyEvents.length / sampleSize);
       
@@ -1068,7 +1071,7 @@ EMERGING STORIES:
 ${report.summary.emergingStories.length > 0 ? report.summary.emergingStories.map(s => `- ${s.topic}: ${s.mentions} mentions from ${s.users} users (${s.sentiment})`).join('\n') : 'None detected'}
 
 SAMPLE POSTS FROM THROUGHOUT THE DAY:
-${sampledEvents.map(e => `[${e.author}] ${e.content}`).join('\n\n').slice(0, 3000)}
+${sampledEvents.map(e => `[${e.author}] ${e.content}`).join('\n\n').slice(0, this.llmNarrativeMaxContentLength)}
 
 ANALYZE THE DAY:
 1. What was the arc of the day? How did conversations evolve?
@@ -1094,7 +1097,7 @@ Make it profound! Find the deeper story in the data.`;
 
       const response = await this.runtime.generateText(prompt, {
         temperature: 0.8,
-        maxTokens: 700
+        maxTokens: 1000 // Increased from 700 to handle larger content analysis
       });
 
       // Parse JSON response with error handling
@@ -1122,7 +1125,7 @@ Make it profound! Find the deeper story in the data.`;
         };
       }
       
-      this.logger.info(`[CONTEXT] 🎯 Generated LLM daily narrative`);
+      this.logger.info(`[CONTEXT] 🎯 Generating daily narrative from ${this.dailyEvents.length} total events, sampling ${sampleSize} posts for LLM analysis`);
       return narrative;
 
     } catch (err) {
@@ -1293,7 +1296,9 @@ Make it profound! Find the deeper story in the data.`;
         llmSentimentMinLength: this.llmSentimentMinLength,
         llmSentimentMaxLength: this.llmSentimentMaxLength,
         llmTopicMinLength: this.llmTopicMinLength,
-        llmTopicMaxLength: this.llmTopicMaxLength
+        llmTopicMaxLength: this.llmTopicMaxLength,
+        llmNarrativeSampleSize: this.llmNarrativeSampleSize,
+        llmNarrativeMaxContentLength: this.llmNarrativeMaxContentLength
       }
     };
   }

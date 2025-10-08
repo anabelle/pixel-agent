@@ -21,7 +21,7 @@ const {
   decryptDirectMessageMock: vi.fn().mockResolvedValue('Decrypted DM content'),
   isSelfAuthorMock: vi.fn().mockReturnValue(false),
   getConversationIdFromEventMock: vi.fn().mockReturnValue('conversation-id'),
-  extractTopicsFromEventMock: vi.fn().mockReturnValue([]),
+   extractTopicsFromEventMock: vi.fn().mockResolvedValue([]),
   buildZapThanksPostMock: vi.fn(() => ({
     parent: { id: 'parent-event-id', pubkey: 'sender-pubkey' },
     text: 'Thanks for the zap!',
@@ -95,7 +95,8 @@ describe('NostrService Handler Integration', () => {
       ensureWorldExists: vi.fn().mockResolvedValue(true),
       ensureRoomExists: vi.fn().mockResolvedValue(true),
       ensureConnection: vi.fn().mockResolvedValue(true),
-      agentId: 'test-agent'
+      agentId: 'test-agent',
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn() }
     };
 
     service = new NostrService(mockRuntime);

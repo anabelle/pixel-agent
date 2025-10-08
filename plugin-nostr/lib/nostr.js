@@ -10,24 +10,40 @@ function getConversationIdFromEvent(evt) {
   return evt?.id || 'nostr';
 }
 
-function extractTopicsFromEvent(event) {
+async function extractTopicsFromEvent(event, runtime) {
   if (!event || !event.content) return [];
   const content = event.content.toLowerCase();
   const topics = [];
+
+  // Extract hashtags first
   const hashtags = content.match(/#\w+/g) || [];
   topics.push(...hashtags.map((h) => h.slice(1)));
-  const topicKeywords = {
-    art: ['art', 'paint', 'draw', 'creative', 'canvas', 'design', 'visual', 'aesthetic'],
-    bitcoin: ['bitcoin', 'btc', 'sats', 'satoshi', 'hodl', 'stack'],
-    lightning: ['lightning', 'ln', 'zap', 'bolt', 'channel', 'invoice'],
-    nostr: ['nostr', 'relay', 'note', 'event', 'pubkey', 'nip'],
-    tech: ['code', 'program', 'develop', 'build', 'tech', 'software'],
-    community: ['community', 'together', 'collaborate', 'share', 'group'],
-    creativity: ['create', 'make', 'build', 'generate', 'craft', 'invent'],
-  };
-  for (const [topic, keywords] of Object.entries(topicKeywords)) {
-    if (keywords.some((k) => content.includes(k))) topics.push(topic);
+
+  // Use LLM to extract additional topics
+  if (runtime?.useModel) {
+    try {
+      const prompt = `Extract key topics and themes from this text. Focus on current events, trends, and important concepts. Return only a comma-separated list of topics (no explanations, no quotes around individual topics):
+
+${event.content}`;
+
+      const response = await runtime.useModel('TEXT_SMALL', {
+        prompt,
+        maxTokens: 100,
+        temperature: 0.3
+      });
+
+      if (response?.text) {
+        const llmTopics = response.text.split(',')
+          .map(t => t.trim().toLowerCase())
+          .filter(t => t.length > 0 && t.length < 50); // reasonable length limits
+        topics.push(...llmTopics);
+      }
+    } catch (error) {
+      // Fallback to empty if LLM fails
+      console.debug('[NOSTR] LLM topic extraction failed:', error.message);
+    }
   }
+
   return [...new Set(topics)];
 }
 

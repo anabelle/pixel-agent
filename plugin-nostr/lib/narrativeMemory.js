@@ -24,6 +24,48 @@ class NarrativeMemory {
     this.maxMonthlyCache = 24; // 24 months
     
     this.initialized = false;
+
+    this._systemContext = null;
+    this._systemContextPromise = null;
+  }
+
+  async _getSystemContext() {
+    if (!this.runtime) return null;
+    if (this._systemContext) return this._systemContext;
+
+    if (!this._systemContextPromise) {
+      try {
+        const { ensureNostrContextSystem } = require('./context');
+        const createUniqueUuid = this.runtime?.createUniqueUuid;
+        let channelType = null;
+        try {
+          if (this.runtime?.ChannelType) {
+            channelType = this.runtime.ChannelType;
+          } else {
+            const core = require('@elizaos/core');
+            if (core?.ChannelType) channelType = core.ChannelType;
+          }
+        } catch {}
+
+        this._systemContextPromise = ensureNostrContextSystem(this.runtime, {
+          createUniqueUuid,
+          ChannelType: channelType,
+          logger: this.logger
+        });
+      } catch (err) {
+        this.logger.debug('[NARRATIVE-MEMORY] Failed to initiate system context ensure:', err?.message || err);
+        return null;
+      }
+    }
+
+    try {
+      this._systemContext = await this._systemContextPromise;
+      return this._systemContext;
+    } catch (err) {
+      this.logger.debug('[NARRATIVE-MEMORY] Failed to ensure system context:', err?.message || err);
+      this._systemContextPromise = null;
+      return null;
+    }
   }
 
   async initialize() {
@@ -653,9 +695,19 @@ OUTPUT JSON:
       if (!createUniqueUuid) return;
 
       const timestamp = Date.now();
-      const roomId = createUniqueUuid(this.runtime, `nostr-narratives-${type}`);
-      const entityId = createUniqueUuid(this.runtime, 'nostr-narrative-memory');
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const narrativeRooms = {
+        hourly: rooms.narrativesHourly,
+        daily: rooms.narrativesDaily,
+        weekly: rooms.narrativesWeekly,
+        monthly: rooms.narrativesMonthly
+      };
+
+      const roomId = narrativeRooms[type] || createUniqueUuid(this.runtime, `nostr-narratives-${type}`);
+      const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-narrative-memory');
       const memoryId = createUniqueUuid(this.runtime, `nostr-narrative-${type}-${timestamp}`);
+      const worldId = systemContext?.worldId;
 
       if (!roomId || !entityId || !memoryId) {
         this.logger.debug(`[NARRATIVE-MEMORY] Failed to generate UUIDs for ${type} narrative`);
@@ -675,10 +727,18 @@ OUTPUT JSON:
         createdAt: timestamp
       };
 
+      if (worldId) {
+        memory.worldId = worldId;
+      }
+
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
-      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-      this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative`);
+      const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      if (result && (result === true || result.created)) {
+        this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative`);
+      } else {
+        this.logger.warn(`[NARRATIVE-MEMORY] Failed to persist ${type} narrative (storage)`);
+      }
     } catch (err) {
       this.logger.debug(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);
     }

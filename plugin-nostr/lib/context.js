@@ -31,6 +31,88 @@ async function ensureLNPixelsContext(runtime, deps) {
   return { worldId, canvasRoomId, locksRoomId, entityId };
 }
 
+// Ensure shared Nostr analysis context (world + rooms) exists for system memories
+async function ensureNostrContextSystem(runtime, deps = {}) {
+  if (!runtime) {
+    return {};
+  }
+
+  const { createUniqueUuid, ChannelType, logger } = deps;
+  const makeId = (seed) => {
+    if (typeof createUniqueUuid === 'function') {
+      try {
+        return createUniqueUuid(runtime, seed);
+      } catch (err) {
+        logger?.debug?.('[NOSTR] Failed to create UUID for seed', seed, err?.message || err);
+      }
+    }
+    return seed;
+  };
+
+  const worldId = makeId('nostr:context');
+  const entityId = makeId('nostr:context:system');
+
+  const rooms = {
+    emergingStories: makeId('nostr-emerging-stories'),
+    hourlyDigests: makeId('nostr-hourly-digests'),
+    dailyReports: makeId('nostr-daily-reports'),
+    userProfiles: makeId('nostr-user-profiles'),
+    narrativesHourly: makeId('nostr-narratives-hourly'),
+    narrativesDaily: makeId('nostr-narratives-daily'),
+    narrativesWeekly: makeId('nostr-narratives-weekly'),
+    narrativesMonthly: makeId('nostr-narratives-monthly')
+  };
+
+  try {
+    await runtime.ensureWorldExists({
+      id: worldId,
+      name: 'Nostr Context Engine',
+      agentId: runtime.agentId,
+      serverId: 'nostr:context',
+      metadata: { system: true, source: 'nostr' }
+    }).catch(() => {});
+
+    const ensureRoom = async (roomId, name, channelId) => {
+      if (!roomId) return;
+      await runtime.ensureRoomExists({
+        id: roomId,
+        name,
+        source: 'nostr',
+        type: ChannelType ? ChannelType.FEED : undefined,
+        channelId,
+        serverId: 'nostr:context',
+        worldId
+      }).catch(() => {});
+      await runtime.ensureConnection({
+        entityId,
+        roomId,
+        userName: 'nostr-context',
+        name: 'Nostr Context Engine',
+        source: 'nostr',
+        type: ChannelType ? ChannelType.FEED : undefined,
+        worldId
+      }).catch(() => {});
+    };
+
+    await Promise.all([
+      ensureRoom(rooms.emergingStories, 'Nostr Emerging Stories', 'nostr:context:emerging'),
+      ensureRoom(rooms.hourlyDigests, 'Nostr Hourly Digests', 'nostr:context:hourly'),
+      ensureRoom(rooms.dailyReports, 'Nostr Daily Reports', 'nostr:context:daily'),
+      ensureRoom(rooms.userProfiles, 'Nostr User Profiles', 'nostr:context:user-profiles'),
+      ensureRoom(rooms.narrativesHourly, 'Nostr Narratives (Hourly)', 'nostr:context:narratives:hourly'),
+      ensureRoom(rooms.narrativesDaily, 'Nostr Narratives (Daily)', 'nostr:context:narratives:daily'),
+      ensureRoom(rooms.narrativesWeekly, 'Nostr Narratives (Weekly)', 'nostr:context:narratives:weekly'),
+      ensureRoom(rooms.narrativesMonthly, 'Nostr Narratives (Monthly)', 'nostr:context:narratives:monthly')
+    ]);
+
+    logger?.info?.('[NOSTR] Context system ensured world=%s', worldId);
+  } catch (err) {
+    logger?.debug?.('[NOSTR] Failed ensuring context system:', err?.message || err);
+  }
+
+  return { worldId, entityId, rooms };
+}
+
 async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetries = 3, logger) {
   let lastErr = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -64,4 +146,4 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   }
 }
 
-module.exports = { ensureNostrContext, ensureLNPixelsContext, createMemorySafe, saveInteractionMemory };
+module.exports = { ensureNostrContext, ensureLNPixelsContext, ensureNostrContextSystem, createMemorySafe, saveInteractionMemory };

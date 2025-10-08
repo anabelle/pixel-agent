@@ -60,7 +60,8 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
     narrativesHourly: makeId('nostr-narratives-hourly'),
     narrativesDaily: makeId('nostr-narratives-daily'),
     narrativesWeekly: makeId('nostr-narratives-weekly'),
-    narrativesMonthly: makeId('nostr-narratives-monthly')
+    narrativesMonthly: makeId('nostr-narratives-monthly'),
+    selfReflection: makeId('nostr-self-reflection')
   };
 
   try {
@@ -113,7 +114,8 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
       ensureRoom(rooms.narrativesHourly, 'Nostr Narratives (Hourly)', 'nostr:context:narratives:hourly'),
       ensureRoom(rooms.narrativesDaily, 'Nostr Narratives (Daily)', 'nostr:context:narratives:daily'),
       ensureRoom(rooms.narrativesWeekly, 'Nostr Narratives (Weekly)', 'nostr:context:narratives:weekly'),
-      ensureRoom(rooms.narrativesMonthly, 'Nostr Narratives (Monthly)', 'nostr:context:narratives:monthly')
+      ensureRoom(rooms.narrativesMonthly, 'Nostr Narratives (Monthly)', 'nostr:context:narratives:monthly'),
+      ensureRoom(rooms.selfReflection, 'Nostr Self Reflection', 'nostr:context:self-reflection')
     ]);
 
     logger?.info?.('[NOSTR] Context system ensured world=%s', worldId);

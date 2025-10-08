@@ -1,6 +1,6 @@
 // Text-related helpers: prompt builders and sanitization
 
-function buildPostPrompt(character, contextData = null) {
+function buildPostPrompt(character, contextData = null, reflection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const topics = Array.isArray(ch.topics)
@@ -19,7 +19,7 @@ function buildPostPrompt(character, contextData = null) {
   // NEW: Build context section if available
   let contextSection = '';
   if (contextData) {
-    const { emergingStories, currentActivity, recentDigest } = contextData;
+    const { emergingStories, currentActivity } = contextData;
     
     if (emergingStories && emergingStories.length > 0) {
       const topStory = emergingStories[0];
@@ -41,6 +41,45 @@ function buildPostPrompt(character, contextData = null) {
       contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider engaging with these community trends naturally, but ONLY if it fits your authentic voice. Don't force it. You can also post about something completely different.`;
     }
   }
+
+  let reflectionSection = '';
+  if (reflection) {
+    const strengths = Array.isArray(reflection.strengths) ? reflection.strengths.slice(0, 3) : [];
+    const weaknesses = Array.isArray(reflection.weaknesses) ? reflection.weaknesses.slice(0, 3) : [];
+    const recommendations = Array.isArray(reflection.recommendations) ? reflection.recommendations.slice(0, 3) : [];
+    const patterns = Array.isArray(reflection.patterns) ? reflection.patterns.slice(0, 3) : [];
+    const lines = [];
+    if (strengths.length) {
+      lines.push(`Lean into: ${strengths.join('; ')}`);
+    }
+    if (weaknesses.length) {
+      lines.push(`Dial back: ${weaknesses.join('; ')}`);
+    }
+    if (patterns.length) {
+      lines.push(`Pattern watch: ${patterns.join('; ')}`);
+    }
+    if (recommendations.length) {
+      lines.push(`Action focus: ${recommendations.join('; ')}`);
+    }
+    if (reflection.exampleGoodReply) {
+      lines.push(`Best recent reply: "${reflection.exampleGoodReply}"`);
+    }
+    if (reflection.exampleBadReply) {
+      lines.push(`Avoid repeating: "${reflection.exampleBadReply}"`);
+    }
+
+    if (lines.length) {
+      let stamp = null;
+      if (typeof reflection.generatedAtIso === 'string') {
+        stamp = reflection.generatedAtIso;
+      } else if (Number.isFinite(reflection.generatedAt)) {
+        try {
+          stamp = new Date(reflection.generatedAt).toISOString();
+        } catch {}
+      }
+      reflectionSection = `\n\nSELF-REFLECTION${stamp ? ` (${stamp})` : ''}:\n${lines.join('\n')}\n\nAPPLY: Let these lessons guide tone and content subtly. Never mention that you're following a reflection.`;
+    }
+  }
   
   return [
     `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah," On Nostr, you can subtly invite zaps through humor, charm, and creativity - never begging. Zaps are organic appreciation, not obligation.`,
@@ -51,11 +90,12 @@ function buildPostPrompt(character, contextData = null) {
     whitelist,
     'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
     contextSection, // NEW: Include community context
+    reflectionSection, // NEW: Include self-reflection insights
     'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, selfReflection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -190,6 +230,50 @@ ${proactiveInsight.message}
 SUGGESTION: You could naturally weave this insight into your reply if it adds value to the conversation. Don't force it, but it's interesting context you're aware of. Type: ${proactiveInsight.type}`;
   }
 
+  // NEW: Apply self-reflection adjustments
+  let selfReflectionSection = '';
+  if (selfReflection) {
+    const strengths = Array.isArray(selfReflection.strengths) ? selfReflection.strengths.slice(0, 2) : [];
+    const weaknesses = Array.isArray(selfReflection.weaknesses) ? selfReflection.weaknesses.slice(0, 2) : [];
+    const recommendations = Array.isArray(selfReflection.recommendations) ? selfReflection.recommendations.slice(0, 2) : [];
+    const patterns = Array.isArray(selfReflection.patterns) ? selfReflection.patterns.slice(0, 2) : [];
+    const lines = [];
+    if (strengths.length) {
+      lines.push(`Lean into: ${strengths.join('; ')}`);
+    }
+    if (weaknesses.length) {
+      lines.push(`Avoid: ${weaknesses.join('; ')}`);
+    }
+    if (patterns.length) {
+      lines.push(`Watch out for: ${patterns.join('; ')}`);
+    }
+    if (recommendations.length) {
+      lines.push(`Adjust by: ${recommendations.join('; ')}`);
+    }
+    if (selfReflection.exampleGoodReply) {
+      lines.push(`Best recent reply: "${selfReflection.exampleGoodReply}"`);
+    }
+    if (selfReflection.exampleBadReply) {
+      lines.push(`Pitfall to avoid: "${selfReflection.exampleBadReply}"`);
+    }
+
+    if (lines.length) {
+      let stamp = null;
+      if (typeof selfReflection.generatedAtIso === 'string') {
+        stamp = selfReflection.generatedAtIso;
+      } else if (Number.isFinite(selfReflection.generatedAt)) {
+        try {
+          stamp = new Date(selfReflection.generatedAt).toISOString();
+        } catch {}
+      }
+      selfReflectionSection = `
+SELF-REFLECTION${stamp ? ` (${stamp})` : ''}:
+${lines.join('\n')}
+
+GUIDE: Weave these improvements into your tone and structure. Never mention that you're following a reflection.`;
+    }
+  }
+
     return [
       `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}${proactiveInsight ? ' You have detected a significant pattern worth mentioning.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
@@ -197,8 +281,9 @@ SUGGESTION: You could naturally weave this insight into your reply if it adds va
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
       userProfileSection, // NEW: User profile context
-      narrativeContextSection, // NEW: Narrative context
-      proactiveInsightSection, // NEW: Proactive insight
+  narrativeContextSection, // NEW: Narrative context
+  proactiveInsightSection, // NEW: Proactive insight
+  selfReflectionSection, // NEW: Self-reflection insights
       threadContextSection,
       imageContextSection,
       history,

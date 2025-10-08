@@ -31,6 +31,7 @@ const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSender
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
 const { ContextAccumulator } = require('./contextAccumulator');
 const { NarrativeContextProvider } = require('./narrativeContextProvider');
+const { SelfReflectionEngine } = require('./selfReflection');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -349,6 +350,15 @@ class NostrService {
       this.contextAccumulator.narrativeMemory = this.narrativeMemory;
       this.logger.info(`[NOSTR] Long-term memory systems connected to context accumulator`);
     }
+
+    // Self Reflection Engine - periodic learning loops
+    this.selfReflectionEngine = new SelfReflectionEngine(runtime, this.logger, {
+      createUniqueUuid: this.createUniqueUuid,
+      ChannelType,
+      userProfileManager: this.userProfileManager
+    });
+
+    this.selfReflectionTimer = null;
     
     // Schedule hourly digest generation
     this.hourlyDigestTimer = null;
@@ -828,6 +838,10 @@ Response (YES/NO):`;
       svc.scheduleDailyReport();
     }
 
+    if (svc.selfReflectionEngine && svc.selfReflectionEngine.enabled) {
+      svc.scheduleSelfReflection();
+    }
+
     // Load existing mute list during startup
     if (svc.pool && svc.pkHex) {
       try {
@@ -929,6 +943,57 @@ Response (YES/NO):`;
     
     const hoursUntil = Math.round(delayMs / (60 * 60 * 1000));
     this.logger.info(`[NOSTR] Next daily report in ~${hoursUntil} hours`);
+  }
+
+  scheduleSelfReflection() {
+    if (!this.selfReflectionEngine || !this.selfReflectionEngine.enabled) return;
+
+    const now = new Date();
+    const targetHour = Number(this.runtime?.getSetting('NOSTR_SELF_REFLECTION_UTC_HOUR') ?? '4');
+    const jitterWindowMinutes = Math.max(0, Number(this.runtime?.getSetting('NOSTR_SELF_REFLECTION_JITTER_MINUTES') ?? '30'));
+
+    const nextRun = new Date(now);
+    nextRun.setUTCSeconds(0, 0);
+    nextRun.setUTCHours(targetHour, 0, 0, 0);
+    if (nextRun <= now) {
+      nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+    }
+
+    const jitterRangeMs = jitterWindowMinutes * 60 * 1000;
+    if (jitterRangeMs > 0) {
+      const jitter = Math.floor((Math.random() - 0.5) * 2 * jitterRangeMs);
+      nextRun.setTime(nextRun.getTime() + jitter);
+      if (nextRun <= now) {
+        nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+      }
+    }
+
+    const delayMs = Math.max(nextRun.getTime() - now.getTime(), 5 * 60 * 1000);
+
+    if (this.selfReflectionTimer) clearTimeout(this.selfReflectionTimer);
+
+    this.selfReflectionTimer = setTimeout(async () => {
+      try {
+        await this.runSelfReflectionNow();
+      } catch (err) {
+        this.logger.warn('[NOSTR] Self-reflection run failed:', err?.message || err);
+      } finally {
+        this.scheduleSelfReflection();
+      }
+    }, delayMs);
+
+    const minutesUntil = Math.round(delayMs / (60 * 1000));
+    this.logger.info(`[NOSTR] Next self-reflection in ~${minutesUntil} minutes`);
+  }
+
+  async runSelfReflectionNow(options = {}) {
+    if (!this.selfReflectionEngine || !this.selfReflectionEngine.enabled) return null;
+    try {
+      return await this.selfReflectionEngine.analyzeInteractionQuality(options);
+    } catch (err) {
+      this.logger.warn('[NOSTR] Self-reflection analysis failed:', err?.message || err);
+      return null;
+    }
   }
 
   _pickDiscoveryTopics() { return pickDiscoveryTopics(); }
@@ -1524,14 +1589,14 @@ Response (YES/NO):`;
 
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
-  _buildPostPrompt(contextData = null) { return buildPostPrompt(this.runtime.character, contextData); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null) {
+  _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, reflectionInsights = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight);
+    logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ')');
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, reflectionInsights);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1558,8 +1623,20 @@ Response (YES/NO):`;
         logger.debug('[NOSTR] Failed to gather context for post:', err.message);
       }
     }
+
+    let reflectionInsights = null;
+    if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
+      try {
+        reflectionInsights = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168 });
+        if (reflectionInsights) {
+          logger.debug('[NOSTR] Loaded self-reflection insights for post prompt');
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to load self-reflection insights for post prompt:', err?.message || err);
+      }
+    }
     
-    const prompt = this._buildPostPrompt(contextData);
+    const prompt = this._buildPostPrompt(contextData, reflectionInsights);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     const text = await generateWithModelOrFallback(
@@ -1715,13 +1792,22 @@ Response (YES/NO):`;
       }
     }
     
+    let selfReflectionContext = null;
+    if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
+      try {
+        selfReflectionContext = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168, cacheMs: 60 * 1000 });
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to load self-reflection insights for reply prompt:', err?.message || err);
+      }
+    }
+
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight);
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, selfReflectionContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
     // Log prompt details for debugging
-    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}`);
+    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}, Has reflection: ${!!selfReflectionContext}`);
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;
@@ -3556,6 +3642,7 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
     if (this.hourlyDigestTimer) { clearTimeout(this.hourlyDigestTimer); this.hourlyDigestTimer = null; }
     if (this.dailyReportTimer) { clearTimeout(this.dailyReportTimer); this.dailyReportTimer = null; }
+    if (this.selfReflectionTimer) { clearTimeout(this.selfReflectionTimer); this.selfReflectionTimer = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }

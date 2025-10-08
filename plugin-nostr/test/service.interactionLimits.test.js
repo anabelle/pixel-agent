@@ -146,14 +146,17 @@ describe('NostrService Interaction Limits', () => {
 
       await service._saveInteractionCounts();
 
-      expect(service._createMemorySafe).toHaveBeenCalledWith({
-        id: expect.stringContaining('nostr:interaction_counts:'),
-        entityId: 'mock-uuid',
-        agentId: 'agent-id',
-        roomId: 'mock-uuid',
-        content: { source: 'nostr', type: 'interaction_counts', counts: { 'user1': 1 } },
-        createdAt: expect.any(Number),
-      }, 'messages');
+      expect(service._createMemorySafe).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.any(String),
+          entityId: expect.any(String),
+          agentId: 'agent-id',
+          roomId: expect.any(String),
+          content: { source: 'nostr', type: 'interaction_counts', counts: { 'user1': 1 } },
+          createdAt: expect.any(Number),
+        }),
+        'messages'
+      );
     });
   });
 

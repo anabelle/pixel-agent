@@ -165,6 +165,9 @@ class NostrService {
     this.logger = runtimeLogger && typeof runtimeLogger.info === 'function'
       ? runtimeLogger
       : (logger ?? console);
+    this._decryptDirectMessage = typeof runtime?.decryptDirectMessage === 'function'
+      ? runtime.decryptDirectMessage.bind(runtime)
+      : null;
     const prevCreateUuid = typeof createUniqueUuid === 'function' ? createUniqueUuid : null;
     const runtimeCreateUuid = typeof runtime?.createUniqueUuid === 'function'
       ? runtime.createUniqueUuid.bind(runtime)
@@ -2804,9 +2807,9 @@ Response (YES/NO):`;
       if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to DM'); return; }
       if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send DM reply'); return; }
 
-      // Decrypt the DM content
-      const { decryptDirectMessage } = require('./nostr');
-      const decryptedContent = await decryptDirectMessage(evt, this.sk, this.pkHex, nip04?.decrypt || null);
+  // Decrypt the DM content (allow runtime override for testing or custom behavior)
+  const decryptDirectMessageImpl = this._decryptDirectMessage || require('./nostr').decryptDirectMessage;
+  const decryptedContent = await decryptDirectMessageImpl(evt, this.sk, this.pkHex, nip04?.decrypt || null);
       if (!decryptedContent) {
         logger.warn('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8));
         return;
@@ -3215,7 +3218,19 @@ Response (YES/NO):`;
 
   async _setupConnection() {
     const enablePing = String(this.runtime.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
-    this.pool = new SimplePool({ enablePing });
+    const poolFactory = typeof this.runtime?.createSimplePool === 'function'
+      ? this.runtime.createSimplePool.bind(this.runtime)
+      : null;
+
+    try {
+      const poolInstance = poolFactory
+        ? poolFactory({ enablePing })
+        : new SimplePool({ enablePing });
+      this.pool = poolInstance;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to create SimplePool instance:', err?.message || err);
+      this.pool = null;
+    }
 
     if (!this.relays.length || !this.pool || !this.pkHex) {
       return;

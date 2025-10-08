@@ -2,8 +2,48 @@ const { describe, it, expect, vi, beforeEach, afterEach } = globalThis;
 const { NostrService } = require('../lib/service.js');
 
 function makeSvc() {
-  // minimal runtime stub
-  return new NostrService({ agentId: 'agent' });
+  const settings = {
+    'NOSTR_RELAYS': '',
+    'NOSTR_PRIVATE_KEY': '',
+    'NOSTR_PUBLIC_KEY': '',
+    'NOSTR_LISTEN_ENABLE': 'false',
+    'NOSTR_POST_ENABLE': 'false',
+    'NOSTR_REPLY_ENABLE': 'false',
+    'NOSTR_DISCOVERY_ENABLE': 'false',
+    'NOSTR_HOME_FEED_ENABLE': 'false',
+    'NOSTR_CONTEXT_ACCUMULATOR_ENABLED': 'false',
+    'NOSTR_CONTEXT_LLM_ANALYSIS': 'false',
+    'NOSTR_ENABLE_PING': 'false',
+    'NOSTR_POST_DAILY_DIGEST_ENABLE': 'false',
+    'NOSTR_CONNECTION_MONITOR_ENABLE': 'false',
+    'NOSTR_UNFOLLOW_ENABLE': 'false',
+    'NOSTR_DM_ENABLE': 'false',
+    'NOSTR_DM_REPLY_ENABLE': 'false',
+    'NOSTR_DM_THROTTLE_SEC': '60',
+    'NOSTR_REPLY_THROTTLE_SEC': '60',
+    'NOSTR_REPLY_INITIAL_DELAY_MIN_MS': '0',
+    'NOSTR_REPLY_INITIAL_DELAY_MAX_MS': '0',
+    'NOSTR_DISCOVERY_INTERVAL_MIN': '900',
+    'NOSTR_DISCOVERY_INTERVAL_MAX': '1800',
+    'NOSTR_HOME_FEED_INTERVAL_MIN': '300',
+    'NOSTR_HOME_FEED_INTERVAL_MAX': '900',
+    'NOSTR_HOME_FEED_REACTION_CHANCE': '0',
+    'NOSTR_HOME_FEED_REPOST_CHANCE': '0',
+    'NOSTR_HOME_FEED_QUOTE_CHANCE': '0',
+    'NOSTR_HOME_FEED_MAX_INTERACTIONS': '1',
+    'NOSTR_MIN_DELAY_BETWEEN_POSTS_MS': '15000',
+    'NOSTR_MAX_DELAY_BETWEEN_POSTS_MS': '120000',
+    'NOSTR_MENTION_PRIORITY_BOOST_MS': '5000',
+    'NOSTR_MAX_EVENT_AGE_DAYS': '2',
+    'NOSTR_DM_THROTTLE_SEC': '60',
+    'NOSTR_ZAP_THANKS_ENABLE': 'false',
+  };
+
+  return new NostrService({
+    agentId: 'agent',
+    getSetting: vi.fn((key) => settings[key] ?? ''),
+    getMemories: vi.fn(async () => []),
+  });
 }
 
 describe('NostrService._list', () => {

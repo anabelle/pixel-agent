@@ -8,6 +8,8 @@ class PostingQueue {
     this.queue = [];
     this.isProcessing = false;
     this.lastPostTime = 0;
+    this.activeIds = new Set();
+    this.processingScheduled = false;
     
     // Configurable delays (in milliseconds)
     this.minDelayBetweenPosts = config.minDelayBetweenPosts || 15000; // 15 seconds minimum
@@ -47,7 +49,7 @@ class PostingQueue {
     }
 
     // Deduplication check
-    if (this.queue.some(task => task.id === id)) {
+    if (id && this.activeIds.has(id)) {
       logger.debug(`[QUEUE] Duplicate post ${id} rejected`);
       this.stats.dropped++;
       return false;
@@ -58,7 +60,10 @@ class PostingQueue {
       logger.warn('[QUEUE] Queue at capacity (50), dropping lowest priority task');
       const lowestPriorityIndex = this.queue.reduce((minIdx, task, idx, arr) => 
         task.priority > arr[minIdx].priority ? idx : minIdx, 0);
-      this.queue.splice(lowestPriorityIndex, 1);
+      const [removed] = this.queue.splice(lowestPriorityIndex, 1);
+      if (removed?.id) {
+        this.activeIds.delete(removed.id);
+      }
       this.stats.dropped++;
     }
 
@@ -73,6 +78,9 @@ class PostingQueue {
 
     this.queue.push(task);
     this.stats.queued++;
+    if (id) {
+      this.activeIds.add(id);
+    }
 
     // Sort queue by priority (lower number = higher priority)
     this.queue.sort((a, b) => {
@@ -86,11 +94,20 @@ class PostingQueue {
     logger.info(`[QUEUE] Enqueued ${type} post (id: ${id.slice(0, 8)}, priority: ${priority}, queue: ${this.queue.length})`);
 
     // Start processing if not already running
-    if (!this.isProcessing) {
-      this._processQueue();
-    }
+    this._ensureProcessingScheduled();
 
     return true;
+  }
+
+  _ensureProcessingScheduled() {
+    if (this.isProcessing || this.processingScheduled) {
+      return;
+    }
+    this.processingScheduled = true;
+    setTimeout(() => {
+      this.processingScheduled = false;
+      this._processQueue();
+    }, 0);
   }
 
   /**
@@ -102,7 +119,7 @@ class PostingQueue {
 
     while (this.queue.length > 0) {
       const task = this.queue.shift();
-      
+
       try {
         // Calculate delay since last post
         const now = Date.now();
@@ -127,20 +144,25 @@ class PostingQueue {
         }
 
         // Execute the post action
-        logger.info(`[QUEUE] Processing ${task.type} post (id: ${task.id.slice(0, 8)}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
+        const idLabel = task.id ? task.id.slice(0, 8) : 'unknown';
+        logger.info(`[QUEUE] Processing ${task.type} post (id: ${idLabel}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
         
         const result = await task.action();
         
         if (result) {
           this.lastPostTime = Date.now();
           this.stats.processed++;
-          logger.info(`[QUEUE] Successfully posted ${task.type} (total processed: ${this.stats.processed})`);
+          logger.info(`[QUEUE] Successfully posted ${task.type} (id: ${idLabel}, total processed: ${this.stats.processed})`);
         } else {
-          logger.warn(`[QUEUE] Post action failed for ${task.type} (id: ${task.id.slice(0, 8)})`);
+          logger.warn(`[QUEUE] Post action failed for ${task.type} (id: ${idLabel})`);
         }
 
       } catch (error) {
         logger.error(`[QUEUE] Error processing ${task.type} post: ${error.message}`);
+      } finally {
+        if (task?.id) {
+          this.activeIds.delete(task.id);
+        }
       }
 
       // Add a small random delay between queue items for natural feel
@@ -148,6 +170,9 @@ class PostingQueue {
     }
 
     this.isProcessing = false;
+    if (this.queue.length > 0) {
+      this._ensureProcessingScheduled();
+    }
     logger.debug(`[QUEUE] Queue empty, processing stopped. Stats: ${JSON.stringify(this.stats)}`);
   }
 
@@ -173,6 +198,8 @@ class PostingQueue {
   clear() {
     const dropped = this.queue.length;
     this.queue = [];
+    this.activeIds.clear();
+    this.processingScheduled = false;
     this.stats.dropped += dropped;
     logger.warn(`[QUEUE] Cleared ${dropped} queued posts`);
   }

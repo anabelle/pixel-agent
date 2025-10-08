@@ -28,7 +28,7 @@ async function extractTopicsFromEvent(event, runtime) {
      try {
          const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
 
-Post: "${event.content.slice(0, 400)}"
+Post: "${event.content.slice(0, 800)}"
 
 Examples of good topics:
 - Instead of "tech": "AI agents", "nostr protocol", "bitcoin mining"
@@ -37,11 +37,11 @@ Examples of good topics:
 
 Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropayments, value4value"):`;
 
-        const response = await runtime.useModel('TEXT_SMALL', {
-          prompt,
-          maxTokens: 150,
-          temperature: 0.3
-        });
+       const response = await runtime.useModel('TEXT_SMALL', {
+         prompt,
+         maxTokens: 60,
+         temperature: 0.3
+       });
 
         if (response?.text) {
           const llmTopics = response.text.trim()

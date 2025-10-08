@@ -40,12 +40,28 @@ class ContextAccumulator {
     this.llmSentimentMaxLength = 500; // Maximum content length for LLM sentiment
     this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
     this.llmTopicMaxLength = 500; // Maximum content length for LLM topic extraction
-    this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 100; // Posts to sample for narratives
-    this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 8000; // Max content for LLM analysis
+    this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 500; // Posts to sample for narratives - increased from 100
+    this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 15000; // Max content for LLM analysis - increased from 8000
+    
+    // Real-time analysis configuration
+    this.realtimeAnalysisEnabled = process.env.REALTIME_ANALYSIS_ENABLED === 'true' || false;
+    this.quarterHourAnalysisEnabled = process.env.QUARTER_HOUR_ANALYSIS_ENABLED === 'true' || false;
+    this.adaptiveSamplingEnabled = process.env.ADAPTIVE_SAMPLING_ENABLED === 'true' || true; // Default enabled
+    this.rollingWindowSize = process.env.ROLLING_WINDOW_SIZE ? parseInt(process.env.ROLLING_WINDOW_SIZE) : 1000; // Rolling window for real-time analysis
 
     // Cached system context information for persistence
     this._systemContext = null;
     this._systemContextPromise = null;
+
+    // Initialize real-time analysis intervals
+    this.quarterHourInterval = null;
+    this.rollingWindowInterval = null;
+    this.trendDetectionInterval = null;
+
+    // Start real-time analysis if enabled
+    if (this.realtimeAnalysisEnabled) {
+      setTimeout(() => this.startRealtimeAnalysis(), 10000); // Start after 10 seconds
+    }
   }
 
   async _getSystemContext() {
@@ -1276,12 +1292,437 @@ Make it profound! Find the deeper story in the data.`;
     this.logger.info('[CONTEXT] Context accumulator disabled');
   }
 
+  // Real-time analysis methods
+  
+  startRealtimeAnalysis() {
+    if (!this.realtimeAnalysisEnabled) {
+      this.logger.info('[CONTEXT] Real-time analysis disabled');
+      return;
+    }
+
+    this.logger.info('[CONTEXT] 🚀 Starting real-time analysis system');
+
+    // Quarter-hour analysis (every 15 minutes)
+    if (this.quarterHourAnalysisEnabled) {
+      this.quarterHourInterval = setInterval(async () => {
+        try {
+          await this.performQuarterHourAnalysis();
+        } catch (err) {
+          this.logger.debug('[CONTEXT] Quarter-hour analysis failed:', err.message);
+        }
+      }, 15 * 60 * 1000); // 15 minutes
+    }
+
+    // Rolling window analysis (every 5 minutes)
+    this.rollingWindowInterval = setInterval(async () => {
+      try {
+        await this.performRollingWindowAnalysis();
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Rolling window analysis failed:', err.message);
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    // Real-time trend detection (every 2 minutes)
+    this.trendDetectionInterval = setInterval(async () => {
+      try {
+        await this.detectRealtimeTrends();
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Trend detection failed:', err.message);
+      }
+    }, 2 * 60 * 1000); // 2 minutes
+  }
+
+  stopRealtimeAnalysis() {
+    if (this.quarterHourInterval) {
+      clearInterval(this.quarterHourInterval);
+      this.quarterHourInterval = null;
+    }
+    if (this.rollingWindowInterval) {
+      clearInterval(this.rollingWindowInterval);
+      this.rollingWindowInterval = null;
+    }
+    if (this.trendDetectionInterval) {
+      clearInterval(this.trendDetectionInterval);
+      this.trendDetectionInterval = null;
+    }
+    this.logger.info('[CONTEXT] Real-time analysis stopped');
+  }
+
+  async performQuarterHourAnalysis() {
+    if (!this.llmAnalysisEnabled) return;
+
+    const now = Date.now();
+    const quarterHourAgo = now - (15 * 60 * 1000);
+
+    // Get events from the last 15 minutes
+    const recentEvents = this.dailyEvents.filter(e => e.timestamp >= quarterHourAgo);
+
+    if (recentEvents.length < 10) {
+      this.logger.debug('[CONTEXT] Not enough events for quarter-hour analysis');
+      return;
+    }
+
+    const adaptiveSampleSize = this.getAdaptiveSampleSize(recentEvents.length);
+    const sampleEvents = recentEvents
+      .sort(() => 0.5 - Math.random())
+      .slice(0, adaptiveSampleSize);
+
+    // Aggregate quarter-hour metrics
+    const users = new Set(sampleEvents.map(e => e.author));
+    const topics = new Map();
+    const sentiment = { positive: 0, negative: 0, neutral: 0 };
+
+    for (const evt of sampleEvents) {
+      evt.topics.forEach(t => topics.set(t, (topics.get(t) || 0) + 1));
+      if (evt.sentiment) sentiment[evt.sentiment]++;
+    }
+
+    const topTopics = Array.from(topics.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+
+    const prompt = `Analyze the last 15 minutes of Nostr activity and provide real-time insights.
+
+RECENT ACTIVITY:
+- ${recentEvents.length} posts from ${users.size} users
+- Top topics: ${topTopics.map(([t, c]) => `${t}(${c})`).join(', ')}
+- Sentiment: ${sentiment.positive} positive, ${sentiment.neutral} neutral, ${sentiment.negative} negative
+
+SAMPLE POSTS:
+${sampleEvents.slice(0, 20).map(e => `[${e.author.slice(0, 8)}] ${e.content.slice(0, 150)}`).join('\n')}
+
+WHAT'S HAPPENING RIGHT NOW?
+1. What's the immediate vibe and energy level?
+2. Any emerging trends or patterns in the last 15 minutes?
+3. How are users interacting? Any notable conversations?
+4. What's surprising or noteworthy about this moment?
+
+OUTPUT JSON:
+{
+  "vibe": "Current energy level (one word: electric, calm, heated, collaborative, etc.)",
+  "trends": ["Immediate trend 1", "Emerging pattern 2"],
+  "keyInteractions": ["Notable conversation or interaction"],
+  "insights": ["Real-time insight 1", "Observation 2"],
+  "moment": "What's defining this exact moment (1 sentence)"
+}`;
+
+    try {
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.6,
+        maxTokens: 400
+      });
+
+      let analysis;
+      try {
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(response.trim());
+      } catch (parseErr) {
+        analysis = {
+          vibe: 'active',
+          trends: [],
+          keyInteractions: [],
+          insights: [response.slice(0, 200)],
+          moment: 'Community activity in progress'
+        };
+      }
+
+      this.logger.info(`[CONTEXT] ⏰ QUARTER-HOUR ANALYSIS: ${analysis.vibe} vibe, ${recentEvents.length} posts, top: ${topTopics[0]?.[0] || 'N/A'}`);
+      if (analysis.trends.length > 0) {
+        this.logger.info(`[CONTEXT] 📈 Trends: ${analysis.trends.join(', ')}`);
+      }
+
+      // Store quarter-hour analysis
+      await this._storeRealtimeAnalysis('quarter-hour', analysis, {
+        events: recentEvents.length,
+        users: users.size,
+        topTopics,
+        sentiment
+      });
+
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Quarter-hour LLM analysis failed:', err.message);
+    }
+  }
+
+  async performRollingWindowAnalysis() {
+    if (!this.llmAnalysisEnabled) return;
+
+    const now = Date.now();
+    const windowStart = now - (this.rollingWindowSize * 60 * 1000); // Rolling window in minutes
+
+    // Get events within rolling window
+    const windowEvents = this.dailyEvents.filter(e => e.timestamp >= windowStart);
+
+    if (windowEvents.length < 20) {
+      this.logger.debug('[CONTEXT] Not enough events for rolling window analysis');
+      return;
+    }
+
+    const adaptiveSampleSize = this.getAdaptiveSampleSize(windowEvents.length);
+    const sampleEvents = windowEvents
+      .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
+      .slice(0, adaptiveSampleSize);
+
+    // Calculate rolling metrics
+    const users = new Set(sampleEvents.map(e => e.author));
+    const topics = new Map();
+    const sentiment = { positive: 0, negative: 0, neutral: 0 };
+    const recentTopics = new Map(); // Topics in last 10 minutes
+
+    const tenMinutesAgo = now - (10 * 60 * 1000);
+    const veryRecentEvents = windowEvents.filter(e => e.timestamp >= tenMinutesAgo);
+
+    for (const evt of sampleEvents) {
+      evt.topics.forEach(t => topics.set(t, (topics.get(t) || 0) + 1));
+    }
+
+    for (const evt of veryRecentEvents) {
+      evt.topics.forEach(t => recentTopics.set(t, (recentTopics.get(t) || 0) + 1));
+      if (evt.sentiment) sentiment[evt.sentiment]++;
+    }
+
+    const topTopics = Array.from(topics.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+
+    const emergingTopics = Array.from(recentTopics.entries())
+      .filter(([_, count]) => count >= 3)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    const prompt = `Analyze the rolling window of Nostr activity and identify emerging patterns.
+
+ROLLING WINDOW (${this.rollingWindowSize} minutes):
+- ${windowEvents.length} total posts from ${users.size} users
+- Very recent (last 10 min): ${veryRecentEvents.length} posts
+- Top topics overall: ${topTopics.slice(0, 5).map(([t, c]) => `${t}(${c})`).join(', ')}
+- Emerging in last 10 min: ${emergingTopics.map(([t, c]) => `${t}(${c})`).join(', ') || 'None'}
+
+SAMPLE RECENT POSTS:
+${sampleEvents.slice(0, 25).map(e => `[${e.author.slice(0, 8)}] ${e.content.slice(0, 120)}`).join('\n')}
+
+ANALYZE THE FLOW:
+1. What's accelerating or decelerating in activity?
+2. Which topics are gaining traction?
+3. How is sentiment evolving?
+4. Any conversations building momentum?
+5. What's the trajectory - where is this heading?
+
+OUTPUT JSON:
+{
+  "acceleration": "Activity trend (accelerating, decelerating, steady, spiking)",
+  "emergingTopics": ["Topic gaining traction 1", "New topic 2"],
+  "sentimentShift": "How sentiment is changing (improving, worsening, stable)",
+  "momentum": ["Conversation gaining steam 1", "Building discussion 2"],
+  "trajectory": "Where this is heading in the next 15-30 minutes (1 sentence)",
+  "hotspots": ["Area of intense activity 1", "Focus point 2"]
+}`;
+
+    try {
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.7,
+        maxTokens: 500
+      });
+
+      let analysis;
+      try {
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        analysis = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(response.trim());
+      } catch (parseErr) {
+        analysis = {
+          acceleration: 'steady',
+          emergingTopics: emergingTopics.map(([t]) => t),
+          sentimentShift: 'stable',
+          momentum: [],
+          trajectory: 'Continuing current patterns',
+          hotspots: []
+        };
+      }
+
+      this.logger.info(`[CONTEXT] 🔄 ROLLING WINDOW: ${analysis.acceleration} activity, emerging: ${analysis.emergingTopics.join(', ') || 'none'}`);
+      if (analysis.momentum.length > 0) {
+        this.logger.info(`[CONTEXT] ⚡ Momentum: ${analysis.momentum.join(', ')}`);
+      }
+
+      // Store rolling window analysis
+      await this._storeRealtimeAnalysis('rolling-window', analysis, {
+        windowSize: this.rollingWindowSize,
+        totalEvents: windowEvents.length,
+        recentEvents: veryRecentEvents.length,
+        users: users.size,
+        topTopics,
+        emergingTopics
+      });
+
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Rolling window LLM analysis failed:', err.message);
+    }
+  }
+
+  async detectRealtimeTrends() {
+    const now = Date.now();
+    const fiveMinutesAgo = now - (5 * 60 * 1000);
+    const tenMinutesAgo = now - (10 * 60 * 1000);
+
+    // Compare last 5 minutes vs previous 5 minutes
+    const recentEvents = this.dailyEvents.filter(e => e.timestamp >= fiveMinutesAgo);
+    const previousEvents = this.dailyEvents.filter(e =>
+      e.timestamp >= tenMinutesAgo && e.timestamp < fiveMinutesAgo
+    );
+
+    if (recentEvents.length < 5 || previousEvents.length < 5) {
+      return; // Not enough data for trend detection
+    }
+
+    // Calculate trend metrics
+    const recentUsers = new Set(recentEvents.map(e => e.author));
+    const previousUsers = new Set(previousEvents.map(e => e.author));
+
+    const recentTopics = new Map();
+    const previousTopics = new Map();
+
+    recentEvents.forEach(e => e.topics.forEach(t => recentTopics.set(t, (recentTopics.get(t) || 0) + 1)));
+    previousEvents.forEach(e => e.topics.forEach(t => previousTopics.set(t, (previousTopics.get(t) || 0) + 1)));
+
+    // Detect topic spikes
+    const topicSpikes = [];
+    for (const [topic, recentCount] of recentTopics.entries()) {
+      const previousCount = previousTopics.get(topic) || 0;
+      const spikeRatio = previousCount > 0 ? recentCount / previousCount : recentCount;
+
+      if (spikeRatio >= 2.0 && recentCount >= 3) { // At least 2x increase and 3+ mentions
+        topicSpikes.push({ topic, recent: recentCount, previous: previousCount, ratio: spikeRatio.toFixed(1) });
+      }
+    }
+
+    // Detect user activity spikes
+    const userSpikes = [];
+    const recentUserCounts = {};
+    const previousUserCounts = {};
+
+    recentEvents.forEach(e => recentUserCounts[e.author] = (recentUserCounts[e.author] || 0) + 1);
+    previousEvents.forEach(e => previousUserCounts[e.author] = (previousUserCounts[e.author] || 0) + 1);
+
+    for (const [user, recentCount] of Object.entries(recentUserCounts)) {
+      const previousCount = previousUserCounts[user] || 0;
+      const spikeRatio = previousCount > 0 ? recentCount / previousCount : recentCount;
+
+      if (spikeRatio >= 3.0 && recentCount >= 5) { // At least 3x increase and 5+ posts
+        userSpikes.push({ user: user.slice(0, 8), recent: recentCount, previous: previousCount });
+      }
+    }
+
+    // Activity level change
+    const activityChange = recentEvents.length > previousEvents.length * 1.5 ? 'spiking' :
+                          recentEvents.length < previousEvents.length * 0.7 ? 'dropping' : 'steady';
+
+    // New users appearing
+    const newUsers = Array.from(recentUsers).filter(u => !previousUsers.has(u)).length;
+
+    if (topicSpikes.length > 0 || userSpikes.length > 0 || activityChange !== 'steady' || newUsers >= 3) {
+      const trends = {
+        activityChange,
+        topicSpikes: topicSpikes.slice(0, 3),
+        userSpikes: userSpikes.slice(0, 3),
+        newUsers,
+        timestamp: now
+      };
+
+      this.logger.info(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
+
+      if (topicSpikes.length > 0) {
+        this.logger.info(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
+      }
+
+      // Store trend detection
+      await this._storeRealtimeAnalysis('trend-detection', trends, {
+        recentEvents: recentEvents.length,
+        previousEvents: previousEvents.length,
+        recentUsers: recentUsers.size,
+        previousUsers: previousUsers.size
+      });
+    }
+  }
+
+  getAdaptiveSampleSize(eventCount) {
+    if (!this.adaptiveSamplingEnabled) {
+      return this.llmNarrativeSampleSize;
+    }
+
+    // Adaptive sampling based on activity levels
+    if (eventCount >= 1000) return Math.min(800, this.llmNarrativeSampleSize * 2); // High activity
+    if (eventCount >= 500) return Math.min(600, this.llmNarrativeSampleSize * 1.5); // Medium-high
+    if (eventCount >= 200) return this.llmNarrativeSampleSize; // Normal
+    if (eventCount >= 50) return Math.max(100, this.llmNarrativeSampleSize * 0.7); // Low-medium
+    return Math.max(50, this.llmNarrativeSampleSize * 0.5); // Low activity
+  }
+
+  async _storeRealtimeAnalysis(type, analysis, metrics) {
+    if (!this.runtime || typeof this.runtime.createMemory !== 'function') {
+      return;
+    }
+
+    try {
+      const timestamp = Date.now();
+
+      // Use createUniqueUuid passed in constructor or from runtime
+      const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
+
+      if (!createUniqueUuid) {
+        this.logger.warn('[CONTEXT] Cannot store realtime analysis - createUniqueUuid not available');
+        return;
+      }
+
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
+      const roomId = rooms.realtimeAnalysis || createUniqueUuid(this.runtime, 'nostr-realtime-analysis');
+      const worldId = systemContext?.worldId;
+
+      const memory = {
+        id: createUniqueUuid(this.runtime, `nostr-context-realtime-${type}-${timestamp}`),
+        entityId,
+        roomId,
+        agentId: this.runtime.agentId,
+        content: {
+          type: `realtime_${type}`,
+          source: 'nostr',
+          data: {
+            analysis,
+            metrics,
+            timestamp
+          }
+        },
+        createdAt: timestamp
+      };
+
+      if (worldId) {
+        memory.worldId = worldId;
+      }
+
+      // Use createMemorySafe from context.js for retry logic
+      const { createMemorySafe } = require('./context');
+      const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      if (result && (result === true || result.created)) {
+        this.logger.debug(`[CONTEXT] Stored realtime ${type} analysis`);
+      } else {
+        this.logger.warn(`[CONTEXT] Failed to persist realtime ${type} analysis`);
+      }
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Failed to store realtime analysis:', err.message);
+    }
+  }
+
   getStats() {
     return {
       enabled: this.enabled,
       llmAnalysisEnabled: this.llmAnalysisEnabled,
       llmSentimentEnabled: this.llmSentimentEnabled,
       llmTopicExtractionEnabled: this.llmTopicExtractionEnabled,
+      realtimeAnalysisEnabled: this.realtimeAnalysisEnabled,
+      quarterHourAnalysisEnabled: this.quarterHourAnalysisEnabled,
+      adaptiveSamplingEnabled: this.adaptiveSamplingEnabled,
+      rollingWindowSize: this.rollingWindowSize,
       hourlyDigests: this.hourlyDigests.size,
       emergingStories: this.emergingStories.size,
       topicTimelines: this.topicTimelines.size,

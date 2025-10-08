@@ -3730,18 +3730,18 @@ Response (YES/NO):`;
     try {
       // Load current contacts (followed users)
       const contacts = await this._loadCurrentContacts();
-      if (!contacts.size) {
-        logger.debug('[NOSTR] No contacts to follow for home feed');
-        return;
-      }
+      // if (!contacts.size) {
+      //   logger.debug('[NOSTR] No contacts to follow for home feed');
+      //   return;
+      // }
 
-      const authors = Array.from(contacts);
+      const authors = contacts.size ? Array.from(contacts) : [];
       logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
 
       // Subscribe to posts from followed users
       this.homeFeedUnsub = this.pool.subscribeMany(
         this.relays,
-        [{ kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 3600 }], // Last hour
+        [{ kinds: [1], limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last hour
         {
           onevent: (evt) => {
             this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
@@ -4025,6 +4025,8 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
    }
 
   async handleHomeFeedEvent(evt) {
+    logger.info('handleHomeFeedEvent called for', evt.id);
+    logger.info('this.runtime.useModel', !!this.runtime?.useModel);
     // Deduplicate events (same event can arrive from multiple relays)
     if (!evt || !evt.id) return;
     if (this.homeFeedQualityTracked.has(evt.id)) return;
@@ -4046,7 +4048,7 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     }
     
     // Update user topic interests from home feed
-    if (this.userProfileManager && evt.pubkey && evt.content) {
+    if (evt.pubkey && evt.content) {
       try {
         const topics = await extractTopicsFromEvent(evt, this.runtime);
         for (const topic of topics) {

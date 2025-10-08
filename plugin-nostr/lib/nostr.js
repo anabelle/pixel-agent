@@ -11,7 +11,11 @@ function getConversationIdFromEvent(evt) {
 }
 
 async function extractTopicsFromEvent(event, runtime) {
+  console.log('extracting topics for event', event.id);
+  console.log('runtime.useModel', !!runtime?.useModel);
   if (!event || !event.content) return [];
+  console.log('extracting topics for event', event.id);
+  console.log('runtime.useModel', !!runtime?.useModel);
   const content = event.content.toLowerCase();
   const topics = [];
 
@@ -19,10 +23,10 @@ async function extractTopicsFromEvent(event, runtime) {
   const hashtags = content.match(/#\w+/g) || [];
   topics.push(...hashtags.map((h) => h.slice(1)));
 
-  // Use LLM to extract additional topics
-  if (runtime?.useModel) {
-    try {
-       const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
+   // Use LLM to extract additional topics
+   if (runtime?.useModel) {
+     try {
+         const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
 
 Post: "${event.content.slice(0, 400)}"
 
@@ -33,23 +37,23 @@ Examples of good topics:
 
 Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropayments, value4value"):`;
 
-       const response = await runtime.useModel('TEXT_SMALL', {
-         prompt,
-         maxTokens: 150,
-         temperature: 0.3
-       });
+        const response = await runtime.useModel('TEXT_SMALL', {
+          prompt,
+          maxTokens: 150,
+          temperature: 0.3
+        });
 
-       if (response?.text) {
-         const llmTopics = response.text.trim()
-           .split(',')
-           .map(t => t.trim().toLowerCase())
-           .filter(t => t.length > 0 && t.length < 500) // Reasonable length
-           .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion'); // Filter out vague terms
-         topics.push(...llmTopics);
-       }
+        if (response?.text) {
+          const llmTopics = response.text.trim()
+            .split(',')
+            .map(t => t.trim().toLowerCase())
+            .filter(t => t.length > 0 && t.length < 500) // Reasonable length
+            .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion'); // Filter out vague terms
+          topics.push(...llmTopics);
+        }
     } catch (error) {
       // Fallback to empty if LLM fails
-      console.debug('[NOSTR] LLM topic extraction failed:', error.message);
+      console.log('[NOSTR] LLM topic extraction failed:', error.message);
     }
   }
 

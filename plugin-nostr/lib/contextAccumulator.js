@@ -804,6 +804,21 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
           sentiment: this._dominantSentiment(data.sentiments)
         }));
 
+      // Compute topic metrics from digest
+      const topicEntries = Array.from(digest.topics.entries());
+      const totalTopicMentions = topicEntries.reduce((sum, [, c]) => sum + c, 0) || 0;
+      const uniqueTopicsCount = topicEntries.length;
+      const sortedTopics = topicEntries.sort((a, b) => b[1] - a[1]);
+      const topTopicsForMetrics = sortedTopics.slice(0, 5);
+      const top3Sum = sortedTopics.slice(0, 3).reduce((s, [, c]) => s + c, 0);
+      const concentrationTop3 = totalTopicMentions > 0 ? (top3Sum / totalTopicMentions) : 0;
+      const hhi = totalTopicMentions > 0
+        ? sortedTopics.reduce((s, [, c]) => {
+            const share = c / totalTopicMentions; return s + share * share;
+          }, 0)
+        : 0;
+      const hhiLabel = hhi < 0.15 ? 'fragmented' : hhi < 0.25 ? 'moderate' : 'concentrated';
+
       // Sample diverse content for LLM - now using configurable sample size
       const sampleContent = recentEvents
         .sort(() => 0.5 - Math.random()) // Shuffle for diversity
@@ -811,6 +826,28 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         .map(e => `[${e.author}] ${e.content}`)
         .join('\n\n')
         .slice(0, this.llmNarrativeMaxContentLength); // Limit total content length
+
+      // Build per-topic sample snippets (focus on top 3 topics)
+      const perTopicSamples = (() => {
+        const top3Topics = sortedTopics.slice(0, 3).map(([t]) => t);
+        const buckets = new Map(top3Topics.map(t => [t, []]));
+        for (const e of recentEvents) {
+          if (!Array.isArray(e.topics)) continue;
+          for (const t of e.topics) {
+            if (buckets.has(t) && buckets.get(t).length < 3) {
+              buckets.get(t).push(`[${e.author}] ${String(e.content || '').slice(0, 280)}`);
+              break; // only bucket once per event
+            }
+          }
+        }
+        const lines = [];
+        for (const [t, arr] of buckets.entries()) {
+          if (arr.length > 0) {
+            lines.push(`- ${t}:\n  - ${arr.join('\n  - ')}`);
+          }
+        }
+        return lines.join('\n');
+      })();
 
       // Get historical context for comparison
       let historicalContext = '';
@@ -833,7 +870,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         }
       }
 
-      const prompt = `Analyze this hour's activity on Nostr and create a compelling narrative summary.
+  const prompt = `Analyze this hour's activity on Nostr and create a compelling narrative summary.
 
 ACTIVITY DATA:
 - ${digest.eventCount} posts from ${digest.users.size} users
@@ -841,19 +878,30 @@ ACTIVITY DATA:
 - Sentiment: ${digest.sentiment.positive} positive, ${digest.sentiment.neutral} neutral, ${digest.sentiment.negative} negative
 - ${digest.conversations.size} active threads
 
+TOPIC METRICS:
+- Unique topics: ${uniqueTopicsCount}
+- Total topic mentions: ${totalTopicMentions}
+- Concentration (top 3 share): ${(concentrationTop3 * 100).toFixed(1)}%
+- HHI: ${hhi.toFixed(3)} (${hhiLabel})
+- Top topics (5): ${topTopicsForMetrics.map(([t, c]) => `${t}(${c})`).join(', ')}
+
 KEY PLAYERS:
 ${keyPlayers.map(p => `- ${p.author}: ${p.posts} posts about ${p.topics.join(', ')} (${p.sentiment} tone)`).join('\n')}
 
 SAMPLE POSTS:
 ${sampleContent.slice(0, 2000)}${historicalContext}
 
+SAMPLE POSTS BY TOPIC (top 3):
+${perTopicSamples}
+
 ANALYZE:
 1. What narrative is emerging? What's the story being told?
 2. How are users interacting? Any interesting connections or debates?
 3. What's the emotional vibe? Energy level?
 4. Any surprising insights or patterns?
-5. If you could describe this hour in one compelling sentence, what would it be?
-6. ${historicalContext ? 'How does this compare to last week at this time?' : ''}
+5. How do the topic dynamics (diversity, concentration) shape the hour's story?
+6. If you could describe this hour in one compelling sentence, what would it be?
+7. ${historicalContext ? 'How does this compare to last week at this time?' : ''}
 
 OUTPUT JSON:
 {

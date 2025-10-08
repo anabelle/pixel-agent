@@ -307,7 +307,8 @@ class NostrService {
     // NEW: Enable LLM-powered analysis by default
     const llmAnalysisEnabled = String(runtime.getSetting('NOSTR_CONTEXT_LLM_ANALYSIS') ?? 'true').toLowerCase() === 'true';
     this.contextAccumulator = new ContextAccumulator(runtime, this.logger, {
-      llmAnalysis: llmAnalysisEnabled
+      llmAnalysis: llmAnalysisEnabled,
+      createUniqueUuid: this.createUniqueUuid
     });
     
     const contextEnabled = String(runtime.getSetting('NOSTR_CONTEXT_ACCUMULATOR_ENABLED') ?? 'true').toLowerCase() === 'true';
@@ -1515,13 +1516,13 @@ Response (YES/NO):`;
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null) { return buildPostPrompt(this.runtime.character, contextData); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    logger.debug('[NOSTR] Building regular reply prompt (narrative context:', !!narrativeContext, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext);
+    logger.debug('[NOSTR] Building regular reply prompt (narrative context:', !!narrativeContext, ', user profile:', !!userProfile, ')');
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1645,6 +1646,34 @@ Response (YES/NO):`;
       }
     } catch {}
     
+    // NEW: Get user profile for personalization
+    let userProfile = null;
+    if (this.userProfileManager && evt && evt.pubkey) {
+      try {
+        const profile = await this.userProfileManager.getProfile(evt.pubkey);
+        if (profile && profile.totalInteractions > 0) {
+          // Extract relevant info for context
+          const topInterests = Object.entries(profile.topicInterests || {})
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([topic]) => topic);
+          
+          userProfile = {
+            topInterests,
+            dominantSentiment: profile.dominantSentiment || 'neutral',
+            relationshipDepth: profile.totalInteractions > 10 ? 'regular' : 
+                              profile.totalInteractions > 3 ? 'familiar' : 'new',
+            engagementScore: profile.engagementScore || 0,
+            totalInteractions: profile.totalInteractions
+          };
+          
+          logger.debug(`[NOSTR] User profile loaded - ${profile.totalInteractions} interactions, interests: ${topInterests.join(', ')}`);
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to load user profile for reply:', err.message);
+      }
+    }
+    
     // NEW: Gather narrative context if relevant to the reply topic
     let narrativeContext = null;
     if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
@@ -1675,13 +1704,13 @@ Response (YES/NO):`;
       }
     }
     
-    // Use thread context, image context, and narrative context for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext);
+    // Use thread context, image context, narrative context, and user profile for better responses
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
     // Log prompt details for debugging
-    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}`);
+    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}`);
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;

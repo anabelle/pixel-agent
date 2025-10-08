@@ -2,9 +2,10 @@
 const { extractTopicsFromEvent } = require('./nostr');
 
 class ContextAccumulator {
-  constructor(runtime, logger) {
+  constructor(runtime, logger, options = {}) {
     this.runtime = runtime;
     this.logger = logger || console;
+    this.createUniqueUuid = options.createUniqueUuid || null;
     
     // Hourly digests: hour timestamp -> digest data
     this.hourlyDigests = new Map();
@@ -534,9 +535,8 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       const timestamp = Date.now();
       const topicSlug = topic.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
       
-      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
-      // It will try @elizaos/core first, then fall back to deterministic UUID generation
-      const createUniqueUuid = this.runtime.createUniqueUuid;
+      // Use createUniqueUuid passed in constructor or from runtime
+      const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
       
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store emerging story - createUniqueUuid not available');
@@ -544,9 +544,9 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `nostr:context:emerging-story:${topicSlug}:${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr:emerging-stories'),
+        id: createUniqueUuid(this.runtime, `nostr-context-emerging-story-${topicSlug}-${timestamp}`),
+        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
+        roomId: createUniqueUuid(this.runtime, 'nostr-emerging-stories'),
         agentId: this.runtime.agentId,
         content: {
           type: 'emerging_story',
@@ -812,8 +812,8 @@ Make it fascinating! Find the human story in the data.`;
     try {
       const timestamp = Date.now();
       
-      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
-      const createUniqueUuid = this.runtime.createUniqueUuid;
+      // Use createUniqueUuid passed in constructor or from runtime
+      const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
       
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store digest - createUniqueUuid not available');
@@ -821,9 +821,9 @@ Make it fascinating! Find the human story in the data.`;
       }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `nostr:context:hourly-digest:${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr:digests'),
+        id: createUniqueUuid(this.runtime, `nostr-context-hourly-digest-${timestamp}`),
+        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
+        roomId: createUniqueUuid(this.runtime, 'nostr-digests'),
         agentId: this.runtime.agentId,
         content: {
           type: 'hourly_digest',
@@ -1041,8 +1041,8 @@ Make it profound! Find the deeper story in the data.`;
       const timestamp = Date.now();
       const dateSlug = report.date.replace(/[^0-9]/g, '');
       
-      // Use runtime's createUniqueUuid - same pattern as other parts of the codebase
-      const createUniqueUuid = this.runtime.createUniqueUuid;
+      // Use createUniqueUuid passed in constructor or from runtime
+      const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
       
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store daily report - createUniqueUuid not available');
@@ -1050,9 +1050,9 @@ Make it profound! Find the deeper story in the data.`;
       }
       
       const memory = {
-        id: createUniqueUuid(this.runtime, `nostr:context:daily-report:${dateSlug}:${timestamp}`),
-        entityId: createUniqueUuid(this.runtime, 'nostr:context-accumulator'),
-        roomId: createUniqueUuid(this.runtime, 'nostr:reports'),
+        id: createUniqueUuid(this.runtime, `nostr-context-daily-report-${dateSlug}-${timestamp}`),
+        entityId: createUniqueUuid(this.runtime, 'nostr-context-accumulator'),
+        roomId: createUniqueUuid(this.runtime, 'nostr-reports'),
         agentId: this.runtime.agentId,
         content: {
           type: 'daily_report',

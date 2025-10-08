@@ -55,7 +55,7 @@ function buildPostPrompt(character, contextData = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -128,12 +128,40 @@ SUGGESTION: You're joining an active discussion. Your reply can naturally refere
     }
   }
 
+  // NEW: Build user profile context section if available
+  let userProfileSection = '';
+  if (userProfile && userProfile.totalInteractions > 0) {
+    const relationshipText = userProfile.relationshipDepth === 'regular' 
+      ? 'You\'ve talked with this person regularly'
+      : userProfile.relationshipDepth === 'familiar'
+      ? 'You\'ve chatted with this person a few times'
+      : 'This is a new connection';
+    
+    const interestsText = userProfile.topInterests && userProfile.topInterests.length > 0
+      ? `They're interested in: ${userProfile.topInterests.join(', ')}`
+      : '';
+    
+    const sentimentText = userProfile.dominantSentiment === 'positive'
+      ? 'Generally positive and enthusiastic'
+      : userProfile.dominantSentiment === 'negative'
+      ? 'Often critical or skeptical - engage thoughtfully'
+      : 'Balanced and neutral in tone';
+    
+    userProfileSection = `
+USER CONTEXT:
+${relationshipText} (${userProfile.totalInteractions} interactions). ${sentimentText}.
+${interestsText}
+
+PERSONALIZATION: Tailor your response to their interests and established rapport. ${userProfile.relationshipDepth === 'regular' ? 'You can reference past conversations naturally.' : userProfile.relationshipDepth === 'familiar' ? 'Build on your growing connection.' : 'Make a good first impression.'}`;
+  }
+
     return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}`,
+      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
+      userProfileSection, // NEW: User profile context
       narrativeContextSection, // NEW: Narrative context
       threadContextSection,
       imageContextSection,

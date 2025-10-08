@@ -26,6 +26,7 @@ const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
 const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('./discovery');
 const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildDailyDigestPostPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
+const { getUserHistory } = require('./providers/userHistoryProvider');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
@@ -399,7 +400,7 @@ class NostrService {
       maxDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MAX_DELAY_BETWEEN_POSTS_MS') ?? '120000'), // 2min default
       mentionPriorityBoost: Number(runtime.getSetting('NOSTR_MENTION_PRIORITY_BOOST_MS') ?? '5000'), // 5s faster for mentions
     });
-    logger.info(`[NOSTR] Posting queue initialized: minDelay=${this.postingQueue.minDelayBetweenPosts}ms, maxDelay=${this.postingQueue.maxDelayBetweenPosts}ms`);
+    this.logger.info(`[NOSTR] Posting queue initialized: minDelay=${this.postingQueue.minDelayBetweenPosts}ms, maxDelay=${this.postingQueue.maxDelayBetweenPosts}ms`);
 
     try {
       const { emitter } = require('./bridge');
@@ -1240,7 +1241,7 @@ Response (YES/NO):`;
   return isQualityAuthor(authorEvents);
   }
 
-  _extractTopicsFromEvent(event) { return extractTopicsFromEvent(event); }
+  async _extractTopicsFromEvent(event) { return await extractTopicsFromEvent(event, this.runtime); }
 
   async _selectFollowCandidates(scoredEvents, currentContacts, options = {}) {
     return await selectFollowCandidates(
@@ -1561,7 +1562,7 @@ Response (YES/NO):`;
         continue;
       }
 
-      const eventTopics = this._extractTopicsFromEvent(evt);
+      const eventTopics = await this._extractTopicsFromEvent(evt);
       const hasUsedTopic = eventTopics.some(topic => usedTopics.has(topic));
       if (hasUsedTopic && usedTopics.size > 0 && Math.random() < 0.7) { continue; }
 
@@ -1638,13 +1639,13 @@ Response (YES/NO):`;
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, reflectionInsights = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
     logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, reflectionInsights);
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1938,13 +1939,79 @@ Response (YES/NO):`;
       }
     }
 
+    // Optionally build a compact user history section (feature-flagged)
+    let userHistorySection = null;
+    try {
+      const historyEnabled = String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true';
+      if (historyEnabled && this.userProfileManager && evt?.pubkey) {
+        const hist = await getUserHistory(this.userProfileManager, evt.pubkey, { limit: Number(this.runtime?.getSetting?.('CTX_USER_HISTORY_LIMIT') ?? 8) });
+        if (hist && hist.hasHistory) {
+          const cap = Math.max(1, Math.min(8, Number(this.runtime?.getSetting?.('CTX_USER_HISTORY_LINES') ?? 5)));
+          const lines = (hist.summaryLines || []).slice(0, cap);
+          const totals = `totalInteractions: ${hist.totalInteractions}${Number.isFinite(hist.successfulInteractions) ? ` | successful: ${hist.successfulInteractions}` : ''}${hist.lastInteractionAt ? ` | last: ${new Date(hist.lastInteractionAt).toISOString()}` : ''}`;
+          userHistorySection = `USER HISTORY:\n${totals}${lines.length ? `\nrecent:\n- ${lines.join('\n- ')}` : ''}`;
+        }
+      }
+    } catch (e) { try { (this.logger || console).debug?.('[NOSTR] user history section error:', e?.message || e); } catch {} }
+
+    // Optionally build a concise global timeline snapshot (feature-flagged)
+    let globalTimelineSection = null;
+    try {
+      const globalEnabled = String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true';
+      if (globalEnabled && this.contextAccumulator && this.contextAccumulator.enabled) {
+        const stories = this.getEmergingStories(3);
+        const activity = this.getCurrentActivity();
+        const parts = [];
+        if (stories && stories.length) {
+          const top = stories[0];
+          parts.push(`Trending: "${top.topic}" (${top.mentions} mentions, ${top.users} users)`);
+          const also = stories.slice(1, 3).map(s => s.topic);
+          if (also.length) parts.push(`Also: ${also.join(', ')}`);
+        }
+        if (activity && activity.events) {
+          const hot = (activity.topics || []).slice(0,3).map(t => t.topic).join(', ');
+          parts.push(`Activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot: ${hot}` : ''}`);
+        }
+        if (parts.length) {
+          globalTimelineSection = `GLOBAL TIMELINE:\n${parts.join('\n')}`;
+        }
+      }
+    } catch (e) { try { (this.logger || console).debug?.('[NOSTR] global timeline section error:', e?.message || e); } catch {} }
+
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, selfReflectionContext);
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
     // Log prompt details for debugging
     logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}, Has reflection: ${!!selfReflectionContext}`);
+
+    // Optional: structured context debug (no chain-of-thought)
+    try {
+      const debugCtx = String(this.runtime?.getSetting?.('DEBUG_CONTEXT_SECTIONS') ?? process?.env?.DEBUG_CONTEXT_SECTIONS ?? 'false').toLowerCase() === 'true';
+      if (debugCtx) {
+        const meta = {
+          evt: { id: evt?.id ? String(evt.id).slice(0, 8) : undefined, kind: evt?.kind, author: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : undefined },
+          included: {
+            thread: !!threadContext,
+            image: !!imageContext,
+            userProfile: !!userProfile,
+            narrative: !!narrativeContext,
+            proactive: !!proactiveInsight,
+            reflection: !!selfReflectionContext,
+            userHistory: !!userHistorySection,
+            globalTimeline: !!globalTimelineSection,
+          },
+          profile: userProfile ? {
+            topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
+            dominantSentiment: userProfile.dominantSentiment,
+            relationshipDepth: userProfile.relationshipDepth,
+          } : null,
+          narrativeSummary: narrativeContext?.summary ? String(narrativeContext.summary).slice(0, 160) : null,
+        };
+        logger.debug(`[NOSTR][DEBUG] Reply context meta: ${JSON.stringify(meta)}`);
+      }
+    } catch {}
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;
@@ -1960,7 +2027,17 @@ Response (YES/NO):`;
           () => { throw new Error('LLM generation failed'); } // Force retry on fallback
         );
         if (text && String(text).trim()) {
-          return String(text).trim();
+          const out = String(text).trim();
+          // Optional: log a truncated, sanitized snippet of the model output
+          try {
+            const dbgEnabled = String(this.runtime?.getSetting?.('DEBUG_RESPONSES_ENABLE') ?? process?.env?.DEBUG_RESPONSES_ENABLE ?? 'false').toLowerCase() === 'true';
+            if (dbgEnabled) {
+              const maxChars = Number(this.runtime?.getSetting?.('DEBUG_RESPONSES_MAX_CHARS') ?? process?.env?.DEBUG_RESPONSES_MAX_CHARS ?? 200);
+              const sample = out.replace(/\s+/g, ' ').slice(0, Math.max(0, maxChars));
+              logger.info(`[NOSTR][DEBUG] Reply generated (${out.length} chars, model=${type}): "${sample}${out.length > sample.length ? '…' : ''}"`);
+            }
+          } catch {}
+          return out;
         }
       } catch (error) {
         logger.warn(`[NOSTR] LLM generation attempt ${attempt} failed: ${error.message}`);
@@ -2679,7 +2756,7 @@ Response (YES/NO):`;
             // Track user interaction for profile learning
             if (this.userProfileManager) {
               try {
-                const topics = extractTopicsFromEvent(evt);
+                const topics = await extractTopicsFromEvent(evt, this.runtime);
                 await this.userProfileManager.recordInteraction(evt.pubkey, {
                   type: 'mention',
                   success: true,
@@ -2700,7 +2777,7 @@ Response (YES/NO):`;
       if (!queueSuccess) {
         logger.warn(`[NOSTR] Failed to queue mention reply for ${evt.id.slice(0, 8)}`);
       }
-    } catch (err) { logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
+    } catch (err) { this.logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
   }
 
   async _restoreHandledEventIds() {
@@ -2795,6 +2872,20 @@ Response (YES/NO):`;
        }
 
        await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => {});
+       // Record a concise interaction summary for user profile history
+       try {
+         if (this.userProfileManager && parentAuthorPk) {
+            const topics = typeof parentEvtOrId === 'object' ? await extractTopicsFromEvent(parentEvtOrId, this.runtime) : [];
+           const snippet = (typeof parentEvtOrId === 'object' && parentEvtOrId.content) ? String(parentEvtOrId.content).slice(0, 120) : undefined;
+           await this.userProfileManager.recordInteraction(parentAuthorPk, {
+             type: isMention ? 'mention_reply' : 'reply',
+             success: true,
+             topics,
+             engagement: isMention ? 0.9 : 0.6,
+             summary: snippet,
+           });
+         }
+       } catch {}
        if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => {}); }
         return true;
      } catch (err) { this.logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
@@ -2809,6 +2900,20 @@ Response (YES/NO):`;
   const signed = this._finalizeEvent(evtTemplate);
        await this.pool.publish(this.relays, signed);
        this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}"`);
+       // Record reaction as a lightweight interaction for the author
+       try {
+         if (this.userProfileManager && parentEvt.pubkey) {
+            const topics = await extractTopicsFromEvent(parentEvt, this.runtime);
+           const snippet = parentEvt.content ? String(parentEvt.content).slice(0, 120) : undefined;
+           await this.userProfileManager.recordInteraction(parentEvt.pubkey, {
+             type: 'reaction',
+             success: true,
+             topics,
+             engagement: 0.2,
+             summary: snippet,
+           });
+         }
+       } catch {}
       return true;
     } catch (err) { logger.debug('[NOSTR] Reaction failed:', err?.message || err); return false; }
   }
@@ -2893,7 +2998,20 @@ Response (YES/NO):`;
   logger.info(`[NOSTR] Zap thanks: replying to ${String(parentLog||'').slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
   await this.postReply(prepared.parent, prepared.text, prepared.options);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => {});
-    } catch (err) { logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
+      // Record a zap interaction for the sender (improves history)
+      try {
+        if (this.userProfileManager && sender) {
+          const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
+          const summary = sats ? `zap: ${sats} sats` : 'zap received';
+          await this.userProfileManager.recordInteraction(sender, {
+            type: 'zap',
+            success: true,
+            engagement: 0.7,
+            summary,
+          });
+        }
+      } catch {}
+    } catch (err) { this.logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
   }
 
   async handleDM(evt) {
@@ -3019,6 +3137,18 @@ Response (YES/NO):`;
                   content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId },
                   createdAt: now2,
                 }, 'messages').catch(() => {});
+                // Record DM interaction for user profile history (scheduled)
+                try {
+                  if (this.userProfileManager && pubkey) {
+                    const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
+                    await this.userProfileManager.recordInteraction(pubkey, {
+                      type: 'dm',
+                      success: true,
+                      engagement: 0.8,
+                      summary: snippet,
+                    });
+                  }
+                } catch {}
               }
             } catch (e) {
               logger.warn('[NOSTR] Scheduled DM reply failed:', e?.message || e);
@@ -3083,9 +3213,21 @@ Response (YES/NO):`;
           createdAt: now,
         };
         await this._createMemorySafe(replyMemory, 'messages');
+        // Record DM interaction for user profile history (immediate)
+        try {
+          if (this.userProfileManager && evt.pubkey) {
+            const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
+            await this.userProfileManager.recordInteraction(evt.pubkey, {
+              type: 'dm',
+              success: true,
+              engagement: 0.8,
+              summary: snippet,
+            });
+          }
+        } catch {}
       }
     } catch (err) {
-      logger.warn('[NOSTR] handleDM failed:', err?.message || err);
+      this.logger.warn('[NOSTR] handleDM failed:', err?.message || err);
     }
   }
 
@@ -3189,6 +3331,18 @@ Response (YES/NO):`;
               if (ok) {
                 const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
                 await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId }, createdAt: now2, }, 'messages').catch(() => {});
+                // Record sealed DM interaction (scheduled)
+                try {
+                  if (this.userProfileManager && pubkey) {
+                    const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
+                    await this.userProfileManager.recordInteraction(pubkey, {
+                      type: 'dm',
+                      success: true,
+                      engagement: 0.8,
+                      summary: snippet,
+                    });
+                  }
+                } catch {}
               }
             } catch (e2) { logger.warn('[NOSTR] Scheduled sealed DM reply failed:', e2?.message || e2); }
           }, waitMs);
@@ -3224,6 +3378,18 @@ Response (YES/NO):`;
       if (replyOk) {
         const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };
         await this._createMemorySafe(replyMemory, 'messages');
+        // Record sealed DM interaction (immediate)
+        try {
+          if (this.userProfileManager && evt.pubkey) {
+            const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
+            await this.userProfileManager.recordInteraction(evt.pubkey, {
+              type: 'dm',
+              success: true,
+              engagement: 0.8,
+              summary: snippet,
+            });
+          }
+        } catch {}
       }
     } catch (err) {
       logger.debug('[NOSTR] handleSealedDM failed:', err?.message || err);
@@ -3730,7 +3896,7 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     // Update user topic interests from home feed
     if (this.userProfileManager && evt.pubkey && evt.content) {
       try {
-        const topics = extractTopicsFromEvent(evt);
+        const topics = await extractTopicsFromEvent(evt, this.runtime);
         for (const topic of topics) {
           await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
         }

@@ -39,7 +39,7 @@ vi.mock('../lib/text', () => ({
 
 vi.mock('../lib/nostr', () => ({
   getConversationIdFromEvent: vi.fn(() => 'conv-id'),
-  extractTopicsFromEvent: vi.fn(() => ['topic']),
+  extractTopicsFromEvent: vi.fn(async () => ['topic']),
   isSelfAuthor: vi.fn(() => false),
 }));
 
@@ -95,6 +95,7 @@ describe('NostrService Interaction Limits', () => {
       }),
       getMemories: vi.fn(() => Promise.resolve([])),
       agentId: 'agent-id',
+      logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn() },
     };
 
      service = new NostrService(runtime);

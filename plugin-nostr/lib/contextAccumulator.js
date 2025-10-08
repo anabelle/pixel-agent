@@ -212,7 +212,7 @@ class ContextAccumulator {
     
     // If LLM didn't work or returned nothing, use keyword-based extraction
     if (topics.length === 0) {
-      const keywordTopics = extractTopicsFromEvent(evt);
+      const keywordTopics = await extractTopicsFromEvent(evt, this.runtime);
       if (keywordTopics.length > 0) {
         topics = keywordTopics;
         topicSource = topicSource === 'llm' ? 'llm-fallback-keyword' : 'keyword';

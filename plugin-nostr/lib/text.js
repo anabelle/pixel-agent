@@ -95,7 +95,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, selfReflection = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -280,7 +280,9 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
-      userProfileSection, // NEW: User profile context
+    userProfileSection, // NEW: User profile context
+      userHistorySection, // NEW: Compact user history (optional)
+    globalTimelineSection, // NEW: Global timeline snapshot (optional)
   narrativeContextSection, // NEW: Narrative context
   proactiveInsightSection, // NEW: Proactive insight
   selfReflectionSection, // NEW: Self-reflection insights

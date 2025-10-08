@@ -240,6 +240,8 @@ pixel-agent/
    NOSTR_DISCOVERY_ENABLE=true
    ```
 
+For topic extraction and narrative summaries (hourly/daily) tuning and behavior, see `plugin-nostr/TOPIC_ANALYSIS_AND_NARRATIVE.md` and the overview in `plugin-nostr/README.md`.
+
 ## 🎭 Character Development & Customization
 
 Pixel's personality is defined in `src/character.ts` using ElizaOS's character schema. The character file controls everything from basic information to complex behavioral patterns.

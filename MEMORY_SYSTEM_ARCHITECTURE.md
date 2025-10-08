@@ -97,10 +97,40 @@ The Context Accumulator is responsible for building comprehensive context before
 - **Real-time Updates**: Continuously updates context as conversations evolve
 
 **Content Analysis Scale:**
-- **Hourly Analysis**: Samples up to 100 posts from recent activity for LLM narrative generation
-- **Daily Analysis**: Samples up to 100 posts from the full day's activity (up to 5,000 total events stored)
-- **Content Limits**: 8,000 characters maximum per LLM analysis to manage token costs
-- **Real-time Processing**: Every post processed for topics, sentiment, and emerging stories
+- **Real-time Analysis**: Continuous monitoring with 15-minute, 5-minute, and 2-minute analysis cycles
+- **Rolling Window Analysis**: Configurable time windows (default 1000 minutes) for trend detection
+- **Adaptive Sampling**: Dynamic sample sizes based on activity levels (50-800 posts)
+- **Hourly Analysis**: Samples up to 500 posts from recent activity for LLM narrative generation
+- **Daily Analysis**: Samples up to 500 posts from the full day's activity (up to 20,000 total events stored)
+- ### Real-Time Analysis System
+
+The Real-Time Analysis System provides continuous monitoring and immediate insights into community activity patterns.
+
+**Analysis Cycles:**
+- **Quarter-Hour Analysis (15 minutes)**: Captures immediate vibe, emerging trends, and key interactions
+- **Rolling Window Analysis (5 minutes)**: Tracks acceleration/deceleration, topic momentum, and trajectory predictions
+- **Trend Detection (2 minutes)**: Identifies activity spikes, topic surges, and user activity patterns
+
+**Adaptive Intelligence:**
+- **Activity-Based Sampling**: Automatically adjusts analysis depth based on event volume
+- **Smart Filtering**: Focuses on significant changes and emerging patterns
+- **Real-Time Alerts**: Immediate notifications for important trend shifts
+
+**Configuration Options:**
+```env
+# Real-time Analysis Settings
+REALTIME_ANALYSIS_ENABLED=true
+QUARTER_HOUR_ANALYSIS_ENABLED=true
+ADAPTIVE_SAMPLING_ENABLED=true
+ROLLING_WINDOW_SIZE=1000  # minutes
+```
+
+**Analysis Types:**
+- **Vibe Detection**: Current energy levels and emotional tone
+- **Trend Spotting**: Emerging topics and conversation patterns
+- **Momentum Tracking**: Conversations gaining traction
+- **Activity Forecasting**: Predictions for next 15-30 minutes
+- **Spike Detection**: Sudden increases in topic or user activity
 
 ### Narrative Memory (`memory.js`)
 

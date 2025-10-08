@@ -22,8 +22,8 @@ export const settings = {
        process.env.OPENROUTER_MODEL || "tngtech/deepseek-r1t2-chimera:free",
    OPENROUTER_LARGE_MODEL:
      process.env.OPENROUTER_LARGE_MODEL || "mistralai/mistral-medium-3.1",
-    OPENROUTER_SMALL_MODEL:
-      process.env.OPENROUTER_SMALL_MODEL || "anthropic/claude-3-haiku",
+   OPENROUTER_SMALL_MODEL:
+     process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
   OPENROUTER_IMAGE_MODEL:
     process.env.OPENROUTER_IMAGE_MODEL || "mistralai/mistral-medium-3.1",
   OPENROUTER_BASE_URL:

@@ -311,7 +311,9 @@ class UserProfileManager {
           createdAt: Date.now()
         };
 
-        await this.runtime.createMemory(memory, 'messages');
+        // Use createMemorySafe from context.js for retry logic
+        const { createMemorySafe } = require('./context');
+        await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
         profile.needsSync = false;
         synced++;
       } catch (err) {

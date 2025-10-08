@@ -55,7 +55,7 @@ function buildPostPrompt(character, contextData = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -104,28 +104,50 @@ IMPORTANT: You have actually viewed these images and can reference their visual 
 
   // NEW: Build narrative context section if available
   let narrativeContextSection = '';
-  if (narrativeContext && narrativeContext.matchingStories && narrativeContext.matchingStories.length > 0) {
-    const matchingTopics = narrativeContext.matchingStories.map(s => s.topic).join(', ');
-    const topStory = narrativeContext.matchingStories[0];
-    
+  if (narrativeContext && narrativeContext.hasContext) {
     narrativeContextSection = `
 COMMUNITY NARRATIVE CONTEXT:
-This conversation relates to trending topics: ${matchingTopics}
+${narrativeContext.summary}`;
 
-"${topStory.topic}" is hot right now - ${topStory.mentions} mentions from ${topStory.users} users, ${Object.keys(topStory.sentiment).sort((a,b) => topStory.sentiment[b] - topStory.sentiment[a])[0]} sentiment.`;
-
-    // Include LLM-generated narrative if available
-    if (narrativeContext.digest && narrativeContext.digest.narrative) {
-      const narrative = narrativeContext.digest.narrative;
+    // Add emerging stories details if available
+    if (narrativeContext.emergingStories && narrativeContext.emergingStories.length > 0) {
+      const topStory = narrativeContext.emergingStories[0];
       narrativeContextSection += `
 
-CURRENT VIBE: "${narrative.summary}"
-${narrative.insights ? `\nKEY INSIGHT: ${narrative.insights[0]}` : ''}
-
-SUGGESTION: You're joining an active discussion. Your reply can naturally reference the broader community conversation happening around this topic. Make it feel timely and connected to the moment.`;
-    } else {
-      narrativeContextSection += `\n\nSUGGESTION: This topic is trending - your reply can acknowledge being part of a broader conversation in the community.`;
+TRENDING NOW: "${topStory.topic}" - ${topStory.mentions} mentions from ${topStory.users} users`;
+      
+      if (topStory.recentEvents && topStory.recentEvents.length > 0) {
+        const recentSample = topStory.recentEvents.slice(0, 2).map(e => 
+          `"${e.content.slice(0, 80)}..."`
+        ).join(' | ');
+        narrativeContextSection += `\nRecent samples: ${recentSample}`;
+      }
     }
+
+    // Add historical insights if available
+    if (narrativeContext.historicalInsights) {
+      const insights = narrativeContext.historicalInsights;
+      if (insights.topicChanges?.emerging && insights.topicChanges.emerging.length > 0) {
+        narrativeContextSection += `\n\nNEW TOPICS EMERGING: ${insights.topicChanges.emerging.slice(0, 3).join(', ')}`;
+      }
+      if (insights.eventTrend && Math.abs(insights.eventTrend.change) > 30) {
+        narrativeContextSection += `\n\nACTIVITY ALERT: ${insights.eventTrend.change > 0 ? '↑' : '↓'} ${Math.abs(insights.eventTrend.change)}% vs usual`;
+      }
+    }
+
+    // Add topic evolution if available
+    if (narrativeContext.topicEvolution && narrativeContext.topicEvolution.trend !== 'stable') {
+      const evo = narrativeContext.topicEvolution;
+      narrativeContextSection += `\n\nTOPIC MOMENTUM: "${evo.topic}" is ${evo.trend} (${evo.summary})`;
+    }
+
+    // Add similar moments if available
+    if (narrativeContext.similarMoments && narrativeContext.similarMoments.length > 0) {
+      const moment = narrativeContext.similarMoments[0];
+      narrativeContextSection += `\n\nDÉJÀ VU: Similar vibe to ${moment.date} - "${moment.summary.slice(0, 100)}..."`;
+    }
+
+    narrativeContextSection += `\n\nIMPLICATION: You're not just replying to an individual - you're part of a living community conversation. Reference these trends naturally if relevant, or bring a fresh perspective. Your awareness of the bigger picture makes you more interesting and timely.`;
   }
 
   // NEW: Build user profile context section if available
@@ -155,14 +177,28 @@ ${interestsText}
 PERSONALIZATION: Tailor your response to their interests and established rapport. ${userProfile.relationshipDepth === 'regular' ? 'You can reference past conversations naturally.' : userProfile.relationshipDepth === 'familiar' ? 'Build on your growing connection.' : 'Make a good first impression.'}`;
   }
 
+  // NEW: Build proactive insight section if detected
+  let proactiveInsightSection = '';
+  if (proactiveInsight && proactiveInsight.message) {
+    const priorityEmoji = proactiveInsight.priority === 'high' ? '🔥' : 
+                          proactiveInsight.priority === 'medium' ? '📈' : 'ℹ️';
+    
+    proactiveInsightSection = `
+PROACTIVE INSIGHT ${priorityEmoji}:
+${proactiveInsight.message}
+
+SUGGESTION: You could naturally weave this insight into your reply if it adds value to the conversation. Don't force it, but it's interesting context you're aware of. Type: ${proactiveInsight.type}`;
+  }
+
     return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}`,
+      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}${proactiveInsight ? ' You have detected a significant pattern worth mentioning.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
       userProfileSection, // NEW: User profile context
       narrativeContextSection, // NEW: Narrative context
+      proactiveInsightSection, // NEW: Proactive insight
       threadContextSection,
       imageContextSection,
       history,

@@ -96,26 +96,11 @@ The Context Accumulator is responsible for building comprehensive context before
 - **Context Window Management**: Efficiently manages context within LLM token limits
 - **Real-time Updates**: Continuously updates context as conversations evolve
 
-**Implementation:**
-```typescript
-class ContextAccumulator {
-  async buildContext(message: Message, runtime: IAgentRuntime): Promise<Context> {
-    const conversationHistory = await this.getConversationHistory(message.roomId);
-    const userProfile = await this.getUserProfile(message.userId);
-    const threadContext = await this.getThreadContext(message);
-    const platformContext = this.getPlatformContext(message.platform);
-    const temporalContext = this.getTemporalContext();
-
-    return this.mergeContexts({
-      conversationHistory,
-      userProfile,
-      threadContext,
-      platformContext,
-      temporalContext
-    });
-  }
-}
-```
+**Content Analysis Scale:**
+- **Hourly Analysis**: Samples up to 100 posts from recent activity for LLM narrative generation
+- **Daily Analysis**: Samples up to 100 posts from the full day's activity (up to 5,000 total events stored)
+- **Content Limits**: 8,000 characters maximum per LLM analysis to manage token costs
+- **Real-time Processing**: Every post processed for topics, sentiment, and emerging stories
 
 ### Narrative Memory (`memory.js`)
 

@@ -246,6 +246,27 @@ class NostrService {
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
 
+    const maxThreadContextRaw = runtime?.getSetting?.('NOSTR_MAX_THREAD_CONTEXT_EVENTS') ?? process?.env?.NOSTR_MAX_THREAD_CONTEXT_EVENTS ?? '80';
+    let maxThreadContextEvents = Number(maxThreadContextRaw);
+    if (!Number.isFinite(maxThreadContextEvents) || maxThreadContextEvents <= 0) {
+      maxThreadContextEvents = 80;
+    }
+    this.maxThreadContextEvents = Math.max(10, Math.min(200, Math.floor(maxThreadContextEvents)));
+
+    const threadFetchRoundsRaw = runtime?.getSetting?.('NOSTR_THREAD_CONTEXT_FETCH_ROUNDS') ?? process?.env?.NOSTR_THREAD_CONTEXT_FETCH_ROUNDS ?? '4';
+    let threadContextFetchRounds = Number(threadFetchRoundsRaw);
+    if (!Number.isFinite(threadContextFetchRounds) || threadContextFetchRounds <= 0) {
+      threadContextFetchRounds = 4;
+    }
+    this.threadContextFetchRounds = Math.max(1, Math.min(8, Math.floor(threadContextFetchRounds)));
+
+    const threadFetchBatchRaw = runtime?.getSetting?.('NOSTR_THREAD_CONTEXT_FETCH_BATCH') ?? process?.env?.NOSTR_THREAD_CONTEXT_FETCH_BATCH ?? '3';
+    let threadContextFetchBatch = Number(threadFetchBatchRaw);
+    if (!Number.isFinite(threadContextFetchBatch) || threadContextFetchBatch <= 0) {
+      threadContextFetchBatch = 3;
+    }
+    this.threadContextFetchBatch = Math.max(1, Math.min(6, Math.floor(threadContextFetchBatch)));
+
      // Home feed configuration (reduced for less spam)
      this.homeFeedEnabled = true;
      this.homeFeedTimer = null;
@@ -2131,18 +2152,32 @@ Response (YES/NO):`;
   }
 
   async _getThreadContext(evt) {
-    if (!this.pool || !evt) return { thread: [], isRoot: true };
+    if (!this.pool || !evt || !Array.isArray(this.relays) || this.relays.length === 0) {
+      const solo = evt ? [evt] : [];
+      return {
+        thread: solo,
+        isRoot: true,
+        contextQuality: solo.length ? this._assessThreadContextQuality(solo) : 0
+      };
+    }
+
+    const maxEvents = Number.isFinite(this.maxThreadContextEvents) ? this.maxThreadContextEvents : 80;
+    const maxRounds = Number.isFinite(this.threadContextFetchRounds) ? this.threadContextFetchRounds : 4;
+    const batchSize = Number.isFinite(this.threadContextFetchBatch) ? this.threadContextFetchBatch : 3;
 
     try {
-      const tags = evt.tags || [];
+      const tags = Array.isArray(evt.tags) ? evt.tags : [];
       const eTags = tags.filter(t => t[0] === 'e');
-      
-      // If no e-tags, this is a root event
+
       if (eTags.length === 0) {
-        return { thread: [evt], isRoot: true };
+        const soloThread = [evt];
+        return {
+          thread: soloThread,
+          isRoot: true,
+          contextQuality: this._assessThreadContextQuality(soloThread)
+        };
       }
 
-      // Get root and parent references using NIP-10 parsing
       let rootId = null;
       let parentId = null;
 
@@ -2154,7 +2189,6 @@ Response (YES/NO):`;
         }
       } catch {}
 
-      // Fallback to simple e-tag parsing if NIP-10 parsing fails
       if (!rootId && !parentId) {
         for (const tag of eTags) {
           if (tag[3] === 'root') {
@@ -2162,105 +2196,170 @@ Response (YES/NO):`;
           } else if (tag[3] === 'reply') {
             parentId = tag[1];
           } else if (!rootId) {
-            // First e-tag is often the root in older implementations
             rootId = tag[1];
           }
         }
       }
 
-      // Fetch the COMPLETE thread by building full chain from root to current event
       const threadEvents = [];
       const eventIds = new Set();
       const eventMap = new Map();
 
-      // Add the current event
-      threadEvents.push(evt);
-      eventIds.add(evt.id);
-      eventMap.set(evt.id, evt);
+      const addEvent = (event) => {
+        if (!event || !event.id || eventIds.has(event.id)) {
+          return false;
+        }
+        threadEvents.push(event);
+        eventIds.add(event.id);
+        eventMap.set(event.id, event);
+        return true;
+      };
 
-      // If we have a root, fetch entire thread starting from root
-      if (rootId) {
-        try {
-          // Fetch all events that reference this root (the entire thread)
-          const threadQuery = [
-            { ids: [rootId] }, // Get the root itself
-            { kinds: [1], '#e': [rootId], limit: 100 } // Get all replies in the thread
-          ];
-          
-          const fetchedEvents = await this._list(this.relays, threadQuery);
-          
-          for (const event of fetchedEvents) {
-            if (!eventIds.has(event.id)) {
-              threadEvents.push(event);
-              eventIds.add(event.id);
-              eventMap.set(event.id, event);
+      addEvent(evt);
+
+      const seedQueue = [];
+      const visitedSeeds = new Set();
+      const queuedSeeds = new Set();
+      const enqueueSeed = (id) => {
+        if (!id || visitedSeeds.has(id) || queuedSeeds.has(id)) return;
+        seedQueue.push(id);
+        queuedSeeds.add(id);
+      };
+
+      enqueueSeed(evt.id);
+      if (rootId) enqueueSeed(rootId);
+      if (parentId) enqueueSeed(parentId);
+
+      const ingestFetchedEvents = (events) => {
+        for (const event of events) {
+          if (!addEvent(event)) continue;
+          enqueueSeed(event.id);
+          if (Array.isArray(event?.tags)) {
+            for (const tag of event.tags) {
+              if (tag?.[0] === 'e' && tag[1]) {
+                enqueueSeed(tag[1]);
+              }
             }
           }
-          
-          logger?.debug?.(`[NOSTR] Fetched complete thread: ${threadEvents.length} events for root ${rootId.slice(0, 8)}`);
-        } catch (err) {
-          logger?.debug?.('[NOSTR] Failed to fetch full thread context:', err?.message || err);
+          if (eventIds.size >= maxEvents) {
+            break;
+          }
         }
-      } else if (parentId) {
-        // No root found, try to build chain by following parent references
+      };
+
+      if (rootId) {
+        try {
+          const limit = Math.min(200, maxEvents);
+          const rootResults = await this._list(this.relays, [
+            { ids: [rootId] },
+            { kinds: [1], '#e': [rootId], limit }
+          ]);
+          ingestFetchedEvents(rootResults);
+          logger?.debug?.(`[NOSTR] Thread root fetch ${rootId.slice(0, 8)} -> ${eventIds.size} events so far`);
+        } catch (err) {
+          logger?.debug?.('[NOSTR] Failed to fetch thread root context:', err?.message || err);
+        }
+      }
+
+      if (!rootId && parentId) {
         let currentId = parentId;
         let depth = 0;
-        const maxDepth = 50; // Safety limit to prevent infinite loops
-        
-        while (currentId && depth < maxDepth) {
+        const maxDepth = 50;
+
+        while (currentId && depth < maxDepth && eventIds.size < maxEvents) {
           if (eventIds.has(currentId)) break;
-          
+
           try {
             const parentEvents = await this._list(this.relays, [{ ids: [currentId] }]);
             if (parentEvents.length === 0) break;
-            
+
             const parentEvent = parentEvents[0];
-            threadEvents.push(parentEvent);
-            eventIds.add(parentEvent.id);
-            eventMap.set(parentEvent.id, parentEvent);
-            
-            // Find the next parent in the chain
-            const parentTags = parentEvent.tags || [];
+            if (!addEvent(parentEvent)) break;
+            enqueueSeed(parentEvent.id);
+
+            const parentTags = Array.isArray(parentEvent.tags) ? parentEvent.tags : [];
             const parentETags = parentTags.filter(t => t[0] === 'e');
-            
-            if (parentETags.length === 0) break; // Reached root
-            
-            // Try NIP-10 parsing first
+
+            if (parentETags.length === 0) break;
+
+            currentId = null;
             try {
               if (nip10Parse) {
                 const refs = nip10Parse(parentEvent);
-                currentId = refs?.reply?.id || refs?.root?.id;
-              } else {
-                currentId = parentETags[0][1]; // Fallback to first e-tag
+                currentId = refs?.reply?.id || refs?.root?.id || null;
               }
-            } catch {
+            } catch {}
+
+            if (!currentId && parentETags[0]) {
               currentId = parentETags[0][1];
             }
-            
+
             depth++;
           } catch (err) {
             logger?.debug?.('[NOSTR] Error fetching parent in chain:', err?.message || err);
             break;
           }
         }
-        
-        logger?.debug?.(`[NOSTR] Built thread chain: ${threadEvents.length} events (depth: ${depth})`);
+
+        logger?.debug?.(`[NOSTR] Built ancestor chain with ${eventIds.size} events (depth ${depth})`);
       }
 
-      // Sort events by created_at for chronological order
-      threadEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+      let rounds = 0;
+      while (seedQueue.length && eventIds.size < maxEvents && rounds < maxRounds) {
+        const batch = [];
+        while (batch.length < batchSize && seedQueue.length) {
+          const candidate = seedQueue.shift();
+          if (candidate) {
+            queuedSeeds.delete(candidate);
+          }
+          if (!candidate || visitedSeeds.has(candidate)) {
+            continue;
+          }
+          visitedSeeds.add(candidate);
+          batch.push(candidate);
+        }
+
+        if (batch.length === 0) {
+          break;
+        }
+
+        rounds++;
+        const filters = batch.map(id => ({ kinds: [1], '#e': [id], limit: Math.min(50, maxEvents) }));
+        try {
+          const fetched = await this._list(this.relays, filters);
+          ingestFetchedEvents(fetched);
+          logger?.debug?.(`[NOSTR] Thread fetch round ${rounds}: seeds=${batch.length} events=${eventIds.size}`);
+        } catch (err) {
+          logger?.debug?.(`[NOSTR] Failed fetching thread replies (round ${rounds}):`, err?.message || err);
+        }
+
+        if (eventIds.size >= maxEvents) {
+          break;
+        }
+      }
+
+      const uniqueEvents = Array.from(eventMap.values());
+      uniqueEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+
+      if (uniqueEvents.length > maxEvents) {
+        uniqueEvents.splice(0, uniqueEvents.length - maxEvents);
+      }
 
       return {
-        thread: threadEvents,
-        isRoot: eTags.length === 0,
+        thread: uniqueEvents,
+        isRoot: !parentId,
         rootId,
         parentId,
-        contextQuality: this._assessThreadContextQuality(threadEvents)
+        contextQuality: this._assessThreadContextQuality(uniqueEvents)
       };
 
     } catch (err) {
       logger?.debug?.('[NOSTR] Error getting thread context:', err?.message || err);
-      return { thread: [evt], isRoot: true };
+      return {
+        thread: [evt],
+        isRoot: true,
+        contextQuality: this._assessThreadContextQuality([evt])
+      };
     }
   }
 

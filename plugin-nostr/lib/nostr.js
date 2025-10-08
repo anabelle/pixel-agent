@@ -22,22 +22,31 @@ async function extractTopicsFromEvent(event, runtime) {
   // Use LLM to extract additional topics
   if (runtime?.useModel) {
     try {
-      const prompt = `Extract key topics and themes from this text. Focus on current events, trends, and important concepts. Return only a comma-separated list of topics (no explanations, no quotes around individual topics):
+       const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
 
-${event.content}`;
+Post: "${event.content.slice(0, 400)}"
 
-      const response = await runtime.useModel('TEXT_SMALL', {
-        prompt,
-        maxTokens: 100,
-        temperature: 0.3
-      });
+Examples of good topics:
+- Instead of "tech": "AI agents", "nostr protocol", "bitcoin mining"
+- Instead of "art": "pixel art", "collaborative canvas", "generative design"
+- Instead of "social": "community building", "decentralization", "privacy advocacy"
 
-      if (response?.text) {
-        const llmTopics = response.text.split(',')
-          .map(t => t.trim().toLowerCase())
-          .filter(t => t.length > 0 && t.length < 50); // reasonable length limits
-        topics.push(...llmTopics);
-      }
+Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropayments, value4value"):`;
+
+       const response = await runtime.useModel('TEXT_SMALL', {
+         prompt,
+         maxTokens: 150,
+         temperature: 0.3
+       });
+
+       if (response?.text) {
+         const llmTopics = response.text.trim()
+           .split(',')
+           .map(t => t.trim().toLowerCase())
+           .filter(t => t.length > 0 && t.length < 500) // Reasonable length
+           .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion'); // Filter out vague terms
+         topics.push(...llmTopics);
+       }
     } catch (error) {
       // Fallback to empty if LLM fails
       console.debug('[NOSTR] LLM topic extraction failed:', error.message);

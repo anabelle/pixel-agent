@@ -1688,6 +1688,22 @@ Response (YES/NO):`;
     const prompt = this._buildPostPrompt(contextData, reflectionInsights);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
+    // Debug meta about post prompt (no chain-of-thought)
+    try {
+      const dbg = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
+      if (dbg) {
+        const meta = {
+          hasContext: !!contextData,
+          hasReflection: !!reflectionInsights,
+          emergingStories: Array.isArray(contextData?.emergingStories) ? contextData.emergingStories.length : 0,
+          activityEvents: contextData?.currentActivity?.events ?? 0,
+        };
+        logger.debug(`[NOSTR][DEBUG] Post prompt meta (len=${prompt.length}, model=${type}): ${JSON.stringify(meta)}`);
+      }
+    } catch {}
     const text = await generateWithModelOrFallback(
       this.runtime,
       type,
@@ -1697,6 +1713,18 @@ Response (YES/NO):`;
       (s) => this._sanitizeWhitelist(s),
       () => this.pickPostText()
     );
+    // Debug generated post snippet
+    try {
+      const dbg = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
+      if (dbg && text) {
+        const out = String(text);
+        const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+        logger.debug(`[NOSTR][DEBUG] Post generated (${out.length} chars, model=${type}): "${sample}${out.length > sample.length ? '…' : ''}"`);
+      }
+    } catch {}
     return text || null;
   }
 
@@ -1745,6 +1773,20 @@ Response (YES/NO):`;
     const prompt = this._buildZapThanksPrompt(amountMsats, senderInfo);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
+    // Debug meta for zap thanks prompt
+    try {
+      const dbg = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
+      if (dbg) {
+        const meta = {
+          amountMsats: typeof amountMsats === 'number' ? amountMsats : null,
+          sender: senderInfo?.pubkey ? String(senderInfo.pubkey).slice(0, 8) : undefined,
+        };
+        logger.debug(`[NOSTR][DEBUG] ZapThanks prompt meta (len=${prompt.length}, model=${type}): ${JSON.stringify(meta)}`);
+      }
+    } catch {}
     const text = await generateWithModelOrFallback(
       this.runtime,
       type,
@@ -1754,6 +1796,18 @@ Response (YES/NO):`;
       (s) => this._sanitizeWhitelist(s),
       () => generateThanksText(amountMsats)
     );
+    // Debug generated zap thanks snippet
+    try {
+      const dbg = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
+      if (dbg && text) {
+        const out = String(text);
+        const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+        logger.debug(`[NOSTR][DEBUG] ZapThanks generated (${out.length} chars, model=${type}): "${sample}${out.length > sample.length ? '…' : ''}"`);
+      }
+    } catch {}
     return text || generateThanksText(amountMsats);
   }
 
@@ -1988,7 +2042,11 @@ Response (YES/NO):`;
 
     // Optional: structured context debug (no chain-of-thought)
     try {
-      const debugCtx = String(this.runtime?.getSetting?.('DEBUG_CONTEXT_SECTIONS') ?? process?.env?.DEBUG_CONTEXT_SECTIONS ?? 'false').toLowerCase() === 'true';
+      // Use existing context feature flags to control debug visibility; no new env vars
+      const debugCtx = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
       if (debugCtx) {
         const meta = {
           evt: { id: evt?.id ? String(evt.id).slice(0, 8) : undefined, kind: evt?.kind, author: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : undefined },
@@ -2028,13 +2086,16 @@ Response (YES/NO):`;
         );
         if (text && String(text).trim()) {
           const out = String(text).trim();
-          // Optional: log a truncated, sanitized snippet of the model output
+          // Optional: log a truncated, sanitized snippet of the model output (debug only)
           try {
-            const dbgEnabled = String(this.runtime?.getSetting?.('DEBUG_RESPONSES_ENABLE') ?? process?.env?.DEBUG_RESPONSES_ENABLE ?? 'false').toLowerCase() === 'true';
+            const dbgEnabled = (
+              String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+              || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+            );
             if (dbgEnabled) {
-              const maxChars = Number(this.runtime?.getSetting?.('DEBUG_RESPONSES_MAX_CHARS') ?? process?.env?.DEBUG_RESPONSES_MAX_CHARS ?? 200);
+              const maxChars = 200;
               const sample = out.replace(/\s+/g, ' ').slice(0, Math.max(0, maxChars));
-              logger.info(`[NOSTR][DEBUG] Reply generated (${out.length} chars, model=${type}): "${sample}${out.length > sample.length ? '…' : ''}"`);
+              logger.debug(`[NOSTR][DEBUG] Reply generated (${out.length} chars, model=${type}): \"${sample}${out.length > sample.length ? '…' : ''}\"`);
             }
           } catch {}
           return out;
@@ -2095,6 +2156,19 @@ Response (YES/NO):`;
       } catch {}
     }
     
+    // Optional debug: log final post content snippet before enqueue (no CoT)
+    try {
+      const dbg = (
+        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+      );
+      if (dbg && text) {
+        const out = String(text);
+        const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+        logger.debug(`[NOSTR][DEBUG] Post content ready (${out.length} chars, type=${isScheduledPost ? 'scheduled' : 'external'}): "${sample}${out.length > sample.length ? '…' : ''}"`);
+      }
+    } catch {}
+
     // For external/pixel posts, use CRITICAL priority and post immediately
     // For scheduled posts, queue with LOW priority
     const priority = isScheduledPost ? this.postingQueue.priorities.LOW : this.postingQueue.priorities.CRITICAL;
@@ -3033,6 +3107,21 @@ Response (YES/NO):`;
       }
 
       logger.info(`[NOSTR] DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+      // Debug DM prompt meta (no CoT)
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const meta = {
+            decryptedLen: decryptedContent?.length || 0,
+            hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
+            kind: evt.kind,
+          };
+          logger.debug(`[NOSTR][DEBUG] DM prompt meta: ${JSON.stringify(meta)}`);
+        }
+      } catch {}
 
       // Check for duplicate handling
       if (this.handledEventIds.has(evt.id)) {
@@ -3124,6 +3213,18 @@ Response (YES/NO):`;
                 logger.warn(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
                 return;
               }
+              // Debug generated scheduled DM snippet
+              try {
+                const dbg = (
+                  String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+                  || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+                );
+                if (dbg) {
+                  const out = String(replyText);
+                  const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+                  logger.debug(`[NOSTR][DEBUG] DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+                }
+              } catch {}
               
               logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
               const ok = await this.postDM(parentEvt, replyText);
@@ -3199,6 +3300,18 @@ Response (YES/NO):`;
         logger.warn(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
         return;
       }
+      // Debug generated DM reply snippet
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const out = String(replyText);
+          const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+          logger.debug(`[NOSTR][DEBUG] DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+        }
+      } catch {}
       
       logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
       const replyOk = await this.postDM(evt, replyText);
@@ -3267,6 +3380,21 @@ Response (YES/NO):`;
       }
 
       logger.info(`[NOSTR] Sealed DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+      // Debug sealed DM prompt meta
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const meta = {
+            decryptedLen: decryptedContent?.length || 0,
+            hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
+            kind: evt.kind,
+          };
+          logger.debug(`[NOSTR][DEBUG] Sealed DM prompt meta: ${JSON.stringify(meta)}`);
+        }
+      } catch {}
 
       // Dedup check
       if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping sealed DM ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
@@ -3326,6 +3454,18 @@ Response (YES/NO):`;
                 logger.warn(`[NOSTR] Skipping scheduled sealed DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
                 return;
               }
+              // Debug generated sealed DM scheduled reply snippet
+              try {
+                const dbg = (
+                  String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+                  || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+                );
+                if (dbg) {
+                  const out = String(replyText);
+                  const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+                  logger.debug(`[NOSTR][DEBUG] Sealed DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+                }
+              } catch {}
               
               const ok = await this.postDM(parentEvt, replyText);
               if (ok) {
@@ -3391,6 +3531,18 @@ Response (YES/NO):`;
           }
         } catch {}
       }
+      // Debug generated sealed DM reply snippet (immediate)
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const out = String(replyText);
+          const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+          logger.debug(`[NOSTR][DEBUG] Sealed DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+        }
+      } catch {}
     } catch (err) {
       logger.debug('[NOSTR] handleSealedDM failed:', err?.message || err);
     }

@@ -35,13 +35,17 @@ class ContextAccumulator {
     this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
     this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
     
-    // Performance tuning
-    this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment
-    this.llmSentimentMaxLength = 500; // Maximum content length for LLM sentiment
-    this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
-    this.llmTopicMaxLength = 500; // Maximum content length for LLM topic extraction
-    this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 500; // Posts to sample for narratives - increased from 100
-    this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 15000; // Max content for LLM analysis - increased from 8000
+  // Performance tuning
+  this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment
+  // Allow larger posts for LLM sentiment/topic extraction (overridable via ENV)
+  this.llmSentimentMaxLength = process.env.CONTEXT_LLM_SENTIMENT_MAXLEN ? parseInt(process.env.CONTEXT_LLM_SENTIMENT_MAXLEN) : 1000;
+  this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
+  this.llmTopicMaxLength = process.env.CONTEXT_LLM_TOPIC_MAXLEN ? parseInt(process.env.CONTEXT_LLM_TOPIC_MAXLEN) : 1000;
+  // Narrative sampling controls
+  this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 800; // Default increased from 500
+  this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 30000; // Default increased from 15000
+  // Hourly pool size for narrative sampling (how many recent events to consider)
+  this.llmHourlyPoolSize = process.env.LLM_HOURLY_POOL_SIZE ? parseInt(process.env.LLM_HOURLY_POOL_SIZE) : 200;
     
     // Real-time analysis configuration
     this.realtimeAnalysisEnabled = process.env.REALTIME_ANALYSIS_ENABLED === 'true' || false;
@@ -255,7 +259,7 @@ class ContextAccumulator {
     try {
       const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
 
-Post: "${content.slice(0, 400)}"
+Post: "${content.slice(0, 800)}"
 
 Examples of good topics:
 - Instead of "tech": "AI agents", "nostr protocol", "bitcoin mining"
@@ -764,7 +768,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     try {
       // Sample recent events for LLM analysis (limit to prevent token overflow)
       const recentEvents = this.dailyEvents
-        .slice(-50) // Last 50 events from this hour
+        .slice(-this.llmHourlyPoolSize) // Last N events from this hour (configurable)
         .map(e => ({
           author: e.author.slice(0, 8),
           content: e.content,
@@ -1066,7 +1070,7 @@ Make it fascinating! Find the human story in the data.`;
         const evt = this.dailyEvents[i];
         sampledEvents.push({
           author: evt.author.slice(0, 8),
-          content: evt.content.slice(0, 200),
+          content: evt.content.slice(0, 400),
           topics: evt.topics.slice(0, 3),
           sentiment: evt.sentiment
         });

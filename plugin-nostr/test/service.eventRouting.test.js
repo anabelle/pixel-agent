@@ -19,6 +19,33 @@ describe('NostrService Event Routing', () => {
           'NOSTR_REPLY_ENABLE': 'true',
           'NOSTR_DM_ENABLE': 'true',
           'NOSTR_DM_REPLY_ENABLE': 'true',
+          'NOSTR_CONTEXT_ACCUMULATOR_ENABLED': 'false',
+          'NOSTR_CONTEXT_LLM_ANALYSIS': 'false',
+          'NOSTR_HOME_FEED_ENABLE': 'false',
+          'NOSTR_DISCOVERY_ENABLE': 'false',
+          'NOSTR_ENABLE_PING': 'false',
+          'NOSTR_POST_DAILY_DIGEST_ENABLE': 'false',
+          'NOSTR_CONNECTION_MONITOR_ENABLE': 'false',
+          'NOSTR_UNFOLLOW_ENABLE': 'false',
+          'NOSTR_DM_THROTTLE_SEC': '60',
+          'NOSTR_DM_REPLY_ENABLE': 'true',
+          'NOSTR_DM_ENABLE': 'true',
+          'NOSTR_REPLY_THROTTLE_SEC': '60',
+          'NOSTR_REPLY_INITIAL_DELAY_MIN_MS': '0',
+          'NOSTR_REPLY_INITIAL_DELAY_MAX_MS': '0',
+          'NOSTR_DISCOVERY_INTERVAL_MIN': '900',
+          'NOSTR_DISCOVERY_INTERVAL_MAX': '1800',
+          'NOSTR_HOME_FEED_INTERVAL_MIN': '300',
+          'NOSTR_HOME_FEED_INTERVAL_MAX': '900',
+          'NOSTR_HOME_FEED_REACTION_CHANCE': '0',
+          'NOSTR_HOME_FEED_REPOST_CHANCE': '0',
+          'NOSTR_HOME_FEED_QUOTE_CHANCE': '0',
+          'NOSTR_HOME_FEED_MAX_INTERACTIONS': '1',
+          'NOSTR_MIN_DELAY_BETWEEN_POSTS_MS': '15000',
+          'NOSTR_MAX_DELAY_BETWEEN_POSTS_MS': '120000',
+          'NOSTR_MENTION_PRIORITY_BOOST_MS': '5000',
+          'NOSTR_MAX_EVENT_AGE_DAYS': '2',
+          'NOSTR_ZAP_THANKS_ENABLE': 'true'
         };
         return settings[key] || '';
       }),
@@ -34,31 +61,24 @@ describe('NostrService Event Routing', () => {
 
     // Mock pool to capture subscription setup
     mockPool = {
-      subscribeMany: vi.fn(),
+      subscribeMany: vi.fn(() => vi.fn()),
       publish: vi.fn(),
       close: vi.fn()
     };
 
-    service = new NostrService(mockRuntime);
-    service.pool = mockPool;
-    service.pkHex = 'test-pubkey-hex';
-    service.sk = 'test-private-key';
-    service.relays = ['wss://test.relay'];
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
 
-    // Spy on handler methods
-    vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
-    vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
-    vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
-    vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
+    service = null;
   });
 
   afterEach(() => {
+    mockPool.subscribeMany.mockClear();
     vi.restoreAllMocks();
   });
 
   describe('Subscription Setup', () => {
     it('subscribes to correct event kinds', async () => {
-      await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
 
       expect(mockPool.subscribeMany).toHaveBeenCalledWith(
         expect.any(Array),
@@ -76,13 +96,13 @@ describe('NostrService Event Routing', () => {
     });
 
     it('includes pubkey in subscription filters', async () => {
-      const testService = await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
 
       const subscribeCall = mockPool.subscribeMany.mock.calls[0];
       const filters = subscribeCall[1];
 
       filters.forEach(filter => {
-        expect(filter['#p']).toContain(testService.pkHex);
+        expect(filter['#p']).toContain(service.pkHex);
       });
     });
   });
@@ -91,7 +111,12 @@ describe('NostrService Event Routing', () => {
     let oneventHandler;
 
     beforeEach(async () => {
-      await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
+
+      vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
       
       // Extract the onevent handler from the subscribeMany call
       const subscribeCall = mockPool.subscribeMany.mock.calls[0];
@@ -210,7 +235,11 @@ describe('NostrService Event Routing', () => {
     let oneventHandler;
 
     beforeEach(async () => {
-      await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
+      vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
       const subscribeCall = mockPool.subscribeMany.mock.calls[0];
       oneventHandler = subscribeCall[2].onevent;
     });
@@ -226,8 +255,8 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      // Should not throw
-      await expect(oneventHandler(mentionEvent)).resolves.toBeUndefined();
+  // Should not throw
+  await oneventHandler(mentionEvent);
       expect(service.handleMention).toHaveBeenCalled();
     });
 
@@ -242,7 +271,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await expect(oneventHandler(dmEvent)).resolves.toBeUndefined();
+  await oneventHandler(dmEvent);
       expect(service.handleDM).toHaveBeenCalled();
     });
 
@@ -257,7 +286,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await expect(oneventHandler(zapEvent)).resolves.toBeUndefined();
+  await oneventHandler(zapEvent);
       expect(service.handleZap).toHaveBeenCalled();
     });
   });
@@ -266,7 +295,11 @@ describe('NostrService Event Routing', () => {
     let oneventHandler;
 
     beforeEach(async () => {
-      await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
+      vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
       const subscribeCall = mockPool.subscribeMany.mock.calls[0];
       oneventHandler = subscribeCall[2].onevent;
     });
@@ -358,7 +391,11 @@ describe('NostrService Event Routing', () => {
     let oneventHandler;
 
     beforeEach(async () => {
-      await NostrService.start(mockRuntime);
+      service = await NostrService.start(mockRuntime);
+      vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
+      vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
       const subscribeCall = mockPool.subscribeMany.mock.calls[0];
       oneventHandler = subscribeCall[2].onevent;
     });

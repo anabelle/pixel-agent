@@ -1,5 +1,5 @@
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the core module before importing the service
 vi.mock('@elizaos/core', () => ({
@@ -9,6 +9,44 @@ vi.mock('@elizaos/core', () => ({
     error: vi.fn(),
     info: vi.fn()
   }
+}));
+
+const {
+  decryptDirectMessageMock,
+  isSelfAuthorMock,
+  getConversationIdFromEventMock,
+  extractTopicsFromEventMock,
+  buildZapThanksPostMock,
+} = vi.hoisted(() => ({
+  decryptDirectMessageMock: vi.fn().mockResolvedValue('Decrypted DM content'),
+  isSelfAuthorMock: vi.fn().mockReturnValue(false),
+  getConversationIdFromEventMock: vi.fn().mockReturnValue('conversation-id'),
+  extractTopicsFromEventMock: vi.fn().mockReturnValue([]),
+  buildZapThanksPostMock: vi.fn(() => ({
+    parent: { id: 'parent-event-id', pubkey: 'sender-pubkey' },
+    text: 'Thanks for the zap!',
+    options: {},
+  })),
+}));
+
+function nostrMockFactory() {
+  return {
+    decryptDirectMessage: decryptDirectMessageMock,
+    isSelfAuthor: isSelfAuthorMock,
+    getConversationIdFromEvent: getConversationIdFromEventMock,
+    extractTopicsFromEvent: extractTopicsFromEventMock,
+  };
+}
+
+vi.mock('../lib/nostr', nostrMockFactory);
+vi.mock('../lib/nostr.js', nostrMockFactory);
+
+vi.mock('../lib/image-vision.js', () => ({
+  processImageContent: vi.fn().mockResolvedValue({ imageDescriptions: [], imageUrls: [] })
+}));
+
+vi.mock('../lib/zapHandler.js', () => ({
+  buildZapThanksPost: buildZapThanksPostMock
 }));
 
 import { NostrService } from '../lib/service.js';
@@ -76,11 +114,36 @@ describe('NostrService Handler Integration', () => {
     service.postReply = vi.fn().mockResolvedValue(true);
     service.saveInteractionMemory = vi.fn().mockResolvedValue(true);
     service._createMemorySafe = vi.fn().mockResolvedValue(true);
-    service.prepareZapThanks = vi.fn().mockResolvedValue({
-      parent: 'parent-event-id',
-      text: 'Thanks for the zap!',
-      options: {}
+    service.generateReplyTextLLM = vi.fn().mockResolvedValue('Reply text');
+    service.generateZapThanksTextLLM = vi.fn(async () => {
+      await mockRuntime.useModel('zap-thanks', { prompt: 'zap' });
+      return 'Thanks for the zap!';
     });
+    service._isActualMention = vi.fn().mockReturnValue(true);
+    service._isRelevantMention = vi.fn().mockResolvedValue(true);
+    service._isUserMuted = vi.fn().mockResolvedValue(false);
+    service._ensureNostrContext = vi.fn().mockResolvedValue({ roomId: 'room-1', entityId: 'entity-1' });
+    service._getThreadContext = vi.fn().mockResolvedValue({ thread: [], isRoot: true });
+    service.postDM = vi.fn().mockResolvedValue(true);
+    service.postingQueue.enqueue = vi.fn().mockResolvedValue(true);
+    service.replyInitialDelayMinMs = 0;
+    service.replyInitialDelayMaxMs = 0;
+    service.dmThrottleSec = 30;
+    service._decryptDirectMessage = decryptDirectMessageMock;
+  });
+
+  afterEach(() => {
+    decryptDirectMessageMock.mockClear();
+    decryptDirectMessageMock.mockResolvedValue('Decrypted DM content');
+    isSelfAuthorMock.mockReturnValue(false);
+    buildZapThanksPostMock.mockClear();
+    if (service?.pendingReplyTimers) {
+      for (const timer of service.pendingReplyTimers.values()) {
+        clearTimeout(timer);
+      }
+      service.pendingReplyTimers.clear();
+    }
+    vi.clearAllTimers();
   });
 
   describe('handleMention', () => {
@@ -96,7 +159,7 @@ describe('NostrService Handler Integration', () => {
 
       await service.handleMention(mentionEvent);
 
-      expect(mockRuntime.createMemory).toHaveBeenCalledWith(
+      expect(service._createMemorySafe).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.objectContaining({
             text: '@bot hello there!',
@@ -118,7 +181,7 @@ describe('NostrService Handler Integration', () => {
 
       await service.handleMention(selfMention);
 
-      expect(mockRuntime.createMemory).not.toHaveBeenCalled();
+      expect(service._createMemorySafe).not.toHaveBeenCalled();
     });
 
     it('respects throttling between replies', async () => {
@@ -146,7 +209,7 @@ describe('NostrService Handler Integration', () => {
       await service.handleMention(mention2);
 
       // Should create memory for both but only reply to first
-      expect(mockRuntime.createMemory).toHaveBeenCalledTimes(2);
+      expect(service._createMemorySafe).toHaveBeenCalledTimes(2);
       
       // Check that second reply was scheduled (pendingReplyTimers)
       expect(service.pendingReplyTimers.has(userPubkey)).toBe(true);
@@ -155,16 +218,13 @@ describe('NostrService Handler Integration', () => {
 
   describe('handleDM', () => {
     beforeEach(() => {
-      // Mock service methods needed for DM handling
-      service.decryptDirectMessage = vi.fn().mockResolvedValue('Decrypted DM content');
-      service.isSelfAuthor = vi.fn().mockReturnValue(false);
-      service.getConversationIdFromEvent = vi.fn().mockReturnValue('dm-conversation-id');
       service.shouldReplyToDM = vi.fn().mockReturnValue(true);
       service.postReply = vi.fn().mockResolvedValue(true);
       service.saveInteractionMemory = vi.fn().mockResolvedValue(true);
     });
 
     it('processes DM correctly when decryption succeeds', async () => {
+      decryptDirectMessageMock.mockResolvedValue('Decrypted DM content');
       const dmEvent = {
         id: 'dm-123',
         kind: 4,
@@ -176,7 +236,7 @@ describe('NostrService Handler Integration', () => {
 
       await service.handleDM(dmEvent);
 
-      expect(mockRuntime.createMemory).toHaveBeenCalledWith(
+      expect(service._createMemorySafe).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.objectContaining({
             source: 'nostr'
@@ -188,7 +248,7 @@ describe('NostrService Handler Integration', () => {
 
     it('skips DM when decryption fails', async () => {
       // Mock decryption failure
-      service.decryptDirectMessage.mockResolvedValue(null);
+      decryptDirectMessageMock.mockResolvedValueOnce(null);
 
       const dmEvent = {
         id: 'dm-fail-123',
@@ -201,12 +261,12 @@ describe('NostrService Handler Integration', () => {
 
       await service.handleDM(dmEvent);
 
-      expect(mockRuntime.createMemory).not.toHaveBeenCalled();
+      expect(service._createMemorySafe).not.toHaveBeenCalled();
     });
 
     it('respects DM-specific throttling', async () => {
       const userPubkey = 'dm-user';
-      service.dmThrottleSec = 30; // 30 second throttle for DMs
+      decryptDirectMessageMock.mockResolvedValue('Decrypted DM content');
 
       const dm1 = {
         id: 'dm-1',
@@ -341,14 +401,14 @@ describe('NostrService Handler Integration', () => {
       await service.handleDM(dm);
 
       // Both should be processed (different throttling pools)
-      expect(mockRuntime.createMemory).toHaveBeenCalledTimes(2);
+      expect(service._createMemorySafe).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('Error Handling and Recovery', () => {
     it('continues processing after handler errors', async () => {
       // Mock memory creation failure
-      mockRuntime.createMemory.mockRejectedValueOnce(new Error('Database error'));
+      service._createMemorySafe.mockRejectedValueOnce(new Error('Database error'));
 
       const mention = {
         id: 'mention-error',

@@ -384,6 +384,66 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
   ].filter(Boolean).join('\n\n');
 }
 
+function buildDailyDigestPostPrompt(character, report) {
+  const ch = character || {};
+  const name = ch.name || 'Agent';
+  const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
+  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Do not include URLs/addresses in every post. Focus on creativity, art, philosophy first. Only mention payment details when contextually appropriate.';
+
+  const summary = report?.summary || {};
+  const narrative = report?.narrative || {};
+
+  const topTopics = Array.isArray(summary.topTopics)
+    ? summary.topTopics.slice(0, 5).map((t) => `${t.topic} (${t.count})`).join(' • ')
+    : '';
+  const emergingStories = Array.isArray(summary.emergingStories)
+    ? summary.emergingStories.slice(0, 3).map((s) => `${s.topic} (${s.mentions})`).join(' • ')
+    : '';
+
+  const keyMoments = Array.isArray(narrative.keyMoments) && narrative.keyMoments.length
+    ? narrative.keyMoments.slice(0, 3).join(' | ')
+    : '';
+  const communities = Array.isArray(narrative.communities) && narrative.communities.length
+    ? narrative.communities.slice(0, 3).join(', ')
+    : '';
+
+  const metricsSection = summary.totalEvents && summary.activeUsers
+    ? `Daily pulse: ${summary.totalEvents} posts from ${summary.activeUsers} voices • Avg ${summary.eventsPerUser ?? '?'} posts/user`
+    : '';
+  const sentimentSection = summary.overallSentiment
+    ? `Sentiment ⇒ +${summary.overallSentiment.positive ?? 0} / ~${summary.overallSentiment.neutral ?? 0} / -${summary.overallSentiment.negative ?? 0}`
+    : '';
+
+  const headline = narrative.headline ? `Headline: ${narrative.headline}` : '';
+  const vibe = narrative.vibe ? `Vibe: ${narrative.vibe}` : '';
+  const tomorrow = narrative.tomorrow ? `Tomorrow watch: ${narrative.tomorrow}` : '';
+  const arc = narrative.arc ? `Arc: ${narrative.arc}` : '';
+
+  const insights = [
+    metricsSection,
+    topTopics ? `Top topics: ${topTopics}` : '',
+    emergingStories ? `Emerging sparks: ${emergingStories}` : '',
+    keyMoments ? `Moments: ${keyMoments}` : '',
+    communities ? `Communities: ${communities}` : '',
+    sentimentSection,
+    arc,
+    vibe,
+    tomorrow
+  ].filter(Boolean).join('\n');
+
+  return [
+    `You are ${name}. Write a single evocative Nostr post that distills today's community pulse. Never start your messages with "Ah,". Blend poetic storytelling with concrete detail.`,
+    ch.system ? `Persona/system: ${ch.system}` : '',
+    style.length ? `Style guidelines: ${style.join(' | ')}` : '',
+    whitelist,
+    headline,
+    narrative.summary ? `Daily story: ${narrative.summary}` : '',
+    insights ? `Supporting signals:\n${insights}` : '',
+    'Tone: reflective, hopeful, artful. Avoid sounding like a corporate report. Reference 1-2 specific details (topic, moment, vibe) naturally. Invite curiosity or gentle participation without hard CTA.',
+    'Constraints: Output ONLY the post text. 1 note. Aim for 150–260 characters. Respect whitelist. Optional: a subtle ⚡ reference if it flows naturally.'
+  ].filter(Boolean).join('\n\n');
+}
+
 function buildPixelBoughtPrompt(character, activity) {
   const ch = character || {};
   const name = ch.name || 'Agent';
@@ -453,6 +513,7 @@ module.exports = {
   buildReplyPrompt,
   buildDmReplyPrompt,
   buildZapThanksPrompt,
+  buildDailyDigestPostPrompt,
   buildPixelBoughtPrompt,
   extractTextFromModelResult,
   sanitizeWhitelist,

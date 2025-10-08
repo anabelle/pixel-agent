@@ -25,7 +25,7 @@ const {
 const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
 const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('./discovery');
-const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
+const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildDailyDigestPostPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
@@ -365,6 +365,8 @@ class NostrService {
     
     // Schedule daily report generation
     this.dailyReportTimer = null;
+      this.lastDailyDigestPostDate = null;
+      this.dailyDigestPostingEnabled = true;
 
     // Centralized posting queue for natural rate limiting
     const { PostingQueue } = require('./postingQueue');
@@ -476,6 +478,21 @@ class NostrService {
        }
      } catch (err) {
        this.logger.debug('[NOSTR] Failed to load interaction counts:', err?.message || err);
+    }
+  }
+
+  async _loadLastDailyDigestPostDate() {
+    try {
+      const memories = await this.runtime.getMemories({ tableName: 'messages', count: 5 });
+      const latest = memories
+        .filter(m => m.content?.source === 'nostr' && m.content?.type === 'daily_digest_post' && m.content?.data?.date)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+      if (latest?.content?.data?.date) {
+        this.lastDailyDigestPostDate = latest.content.data.date;
+        this.logger.info(`[NOSTR] Last daily digest post on record: ${this.lastDailyDigestPostDate}`);
+      }
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to load last daily digest post date:', err?.message || err);
     }
   }
 
@@ -691,6 +708,7 @@ Response (YES/NO):`;
      await ensureDeps();
      const svc = new NostrService(runtime);
      await svc._loadInteractionCounts();
+  await svc._loadLastDailyDigestPostDate();
      svc._setupResetTimer();
      const current = await svc._loadCurrentContacts();
      svc.followedUsers = current;
@@ -702,6 +720,7 @@ Response (YES/NO):`;
     const pingVal = runtime.getSetting('NOSTR_ENABLE_PING');
     const listenEnabled = String(listenVal ?? 'true').toLowerCase() === 'true';
     const postEnabled = String(postVal ?? 'false').toLowerCase() === 'true';
+  const dailyDigestPostVal = runtime.getSetting('NOSTR_POST_DAILY_DIGEST_ENABLE');
     const enablePing = String(pingVal ?? 'true').toLowerCase() === 'true';
     const minSec = normalizeSeconds(runtime.getSetting('NOSTR_POST_INTERVAL_MIN') ?? '3600', 'NOSTR_POST_INTERVAL_MIN');
     const maxSec = normalizeSeconds(runtime.getSetting('NOSTR_POST_INTERVAL_MAX') ?? '10800', 'NOSTR_POST_INTERVAL_MAX');
@@ -778,6 +797,7 @@ Response (YES/NO):`;
     svc.homeFeedRepostChance = Math.max(0, Math.min(1, homeFeedRepostChance));
     svc.homeFeedQuoteChance = Math.max(0, Math.min(1, homeFeedQuoteChance));
     svc.homeFeedMaxInteractions = Math.max(1, Math.min(10, homeFeedMaxInteractions));
+  svc.dailyDigestPostingEnabled = String(dailyDigestPostVal ?? 'true').toLowerCase() === 'true';
 
     svc.unfollowEnabled = String(unfollowVal ?? 'true').toLowerCase() === 'true';
     svc.unfollowMinQualityScore = Math.max(0, Math.min(1, unfollowMinQualityScore));
@@ -934,7 +954,10 @@ Response (YES/NO):`;
     
     this.dailyReportTimer = setTimeout(async () => {
       try {
-        await this.contextAccumulator.generateDailyReport();
+        const report = await this.contextAccumulator.generateDailyReport();
+        if (report) {
+          await this._handleGeneratedDailyReport(report);
+        }
       } catch (err) {
         this.logger.debug('[NOSTR] Daily report generation failed:', err.message);
       }
@@ -1590,6 +1613,7 @@ Response (YES/NO):`;
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
+  _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
   _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, reflectionInsights = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
@@ -1649,6 +1673,43 @@ Response (YES/NO):`;
       () => this.pickPostText()
     );
     return text || null;
+  }
+
+  async generateDailyDigestPostText(report) {
+    if (!report) return null;
+    try {
+      const prompt = this._buildDailyDigestPostPrompt(report);
+      const type = this._getLargeModelType();
+      const { generateWithModelOrFallback } = require('./generation');
+      const text = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 300, temperature: 0.75 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => this._sanitizeWhitelist(s),
+        () => {
+          const parts = [];
+          if (report?.narrative?.summary) {
+            parts.push(String(report.narrative.summary).slice(0, 260));
+          } else if (report?.summary) {
+            const totals = report.summary;
+            const topics = Array.isArray(totals.topTopics) && totals.topTopics.length
+              ? `Top threads: ${totals.topTopics.slice(0, 3).map((t) => t.topic).join(', ')}`
+              : '';
+            parts.push(`Daily pulse: ${totals.totalEvents || '?'} posts, ${totals.activeUsers || '?'} voices. ${topics}`.trim());
+          }
+          if (!parts.length) {
+            parts.push('Daily pulse captured—community energy logged, story continues tomorrow.');
+          }
+          return this._sanitizeWhitelist(parts.join(' ').trim());
+        }
+      );
+      return text?.trim?.() ? text.trim() : null;
+    } catch (err) {
+      this.logger.debug('[NOSTR] Daily digest post generation failed:', err?.message || err);
+      return null;
+    }
   }
 
   _buildZapThanksPrompt(amountMsats, senderInfo) { return buildZapThanksPrompt(this.runtime.character, amountMsats, senderInfo); }
@@ -1720,6 +1781,58 @@ Response (YES/NO):`;
       text = this._sanitizeWhitelist(text);
     } catch {}
     return text || '';
+  }
+
+  async _handleGeneratedDailyReport(report) {
+    if (!this.dailyDigestPostingEnabled) {
+      return;
+    }
+    if (!report || !report.date) {
+      this.logger.debug('[NOSTR] Daily report missing date, skipping post');
+      return;
+    }
+
+    const alreadyPosted = this.lastDailyDigestPostDate === report.date;
+    if (alreadyPosted) {
+      this.logger.debug(`[NOSTR] Daily digest for ${report.date} already posted, skipping`);
+      return;
+    }
+
+    const text = await this.generateDailyDigestPostText(report);
+    if (!text) {
+      this.logger.debug('[NOSTR] Daily digest post text unavailable, skipping');
+      return;
+    }
+
+    try {
+      const ok = await this.postOnce(text);
+      if (ok) {
+        this.lastDailyDigestPostDate = report.date;
+        this.logger.info(`[NOSTR] Posted daily digest for ${report.date}`);
+        try {
+          const timestamp = Date.now();
+          const id = this.createUniqueUuid(this.runtime, `nostr-daily-digest-post-${report.date}-${timestamp}`);
+          const entityId = this.createUniqueUuid(this.runtime, 'nostr-daily-digest');
+          const roomId = this.createUniqueUuid(this.runtime, 'nostr-daily-digest-posts');
+          await this._createMemorySafe({
+            id,
+            entityId,
+            agentId: this.runtime.agentId,
+            roomId,
+            content: {
+              type: 'daily_digest_post',
+              source: 'nostr',
+              data: { date: report.date, text, summary: report.summary || null, narrative: report.narrative || null }
+            },
+            createdAt: timestamp,
+          }, 'messages');
+        } catch (err) {
+          this.logger.debug('[NOSTR] Failed to store daily digest post memory:', err?.message || err);
+        }
+      }
+    } catch (err) {
+      this.logger.warn('[NOSTR] Failed to publish daily digest post:', err?.message || err);
+    }
   }
 
   async generateReplyTextLLM(evt, roomId, threadContext = null, imageContext = null) {

@@ -1,6 +1,6 @@
 // Text-related helpers: prompt builders and sanitization
 
-function buildPostPrompt(character) {
+function buildPostPrompt(character, contextData = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const topics = Array.isArray(ch.topics)
@@ -15,6 +15,33 @@ function buildPostPrompt(character) {
       : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
     : [];
   const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Do not include URLs/addresses in every post. Focus on creativity, art, philosophy first. Only mention payment details when contextually appropriate.';
+  
+  // NEW: Build context section if available
+  let contextSection = '';
+  if (contextData) {
+    const { emergingStories, currentActivity, recentDigest } = contextData;
+    
+    if (emergingStories && emergingStories.length > 0) {
+      const topStory = emergingStories[0];
+      contextSection += `COMMUNITY CONTEXT: There's active discussion about "${topStory.topic}" (${topStory.mentions} mentions by ${topStory.users} users, ${Object.keys(topStory.sentiment).sort((a,b) => topStory.sentiment[b] - topStory.sentiment[a])[0]} sentiment). `;
+      
+      if (emergingStories.length > 1) {
+        contextSection += `Also trending: ${emergingStories.slice(1, 3).map(s => s.topic).join(', ')}. `;
+      }
+    }
+    
+    if (currentActivity && currentActivity.events > 20) {
+      contextSection += `Current vibe: ${currentActivity.events} recent posts, ${currentActivity.users} active users. `;
+      if (currentActivity.topics && currentActivity.topics.length > 0) {
+        contextSection += `Hot topics: ${currentActivity.topics.slice(0, 3).map(t => t.topic).join(', ')}. `;
+      }
+    }
+    
+    if (contextSection) {
+      contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider engaging with these community trends naturally, but ONLY if it fits your authentic voice. Don't force it. You can also post about something completely different.`;
+    }
+  }
+  
   return [
     `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah," On Nostr, you can subtly invite zaps through humor, charm, and creativity - never begging. Zaps are organic appreciation, not obligation.`,
     ch.system ? `Persona/system: ${ch.system}` : '',
@@ -23,11 +50,12 @@ function buildPostPrompt(character) {
     examples.length ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join('\n- ')}` : '',
     whitelist,
     'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
+    contextSection, // NEW: Include community context
     'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -74,18 +102,45 @@ ${imageDescriptions}
 IMPORTANT: You have actually viewed these images and can reference their visual content naturally in your response. When relevant, mention specific visual elements, colors, subjects, composition, or artistic style as if you saw them firsthand. Make your response more engaging by reacting to what you observe in the images.`;
   }
 
+  // NEW: Build narrative context section if available
+  let narrativeContextSection = '';
+  if (narrativeContext && narrativeContext.matchingStories && narrativeContext.matchingStories.length > 0) {
+    const matchingTopics = narrativeContext.matchingStories.map(s => s.topic).join(', ');
+    const topStory = narrativeContext.matchingStories[0];
+    
+    narrativeContextSection = `
+COMMUNITY NARRATIVE CONTEXT:
+This conversation relates to trending topics: ${matchingTopics}
+
+"${topStory.topic}" is hot right now - ${topStory.mentions} mentions from ${topStory.users} users, ${Object.keys(topStory.sentiment).sort((a,b) => topStory.sentiment[b] - topStory.sentiment[a])[0]} sentiment.`;
+
+    // Include LLM-generated narrative if available
+    if (narrativeContext.digest && narrativeContext.digest.narrative) {
+      const narrative = narrativeContext.digest.narrative;
+      narrativeContextSection += `
+
+CURRENT VIBE: "${narrative.summary}"
+${narrative.insights ? `\nKEY INSIGHT: ${narrative.insights[0]}` : ''}
+
+SUGGESTION: You're joining an active discussion. Your reply can naturally reference the broader community conversation happening around this topic. Make it feel timely and connected to the moment.`;
+    } else {
+      narrativeContextSection += `\n\nSUGGESTION: This topic is trending - your reply can acknowledge being part of a broader conversation in the community.`;
+    }
+  }
+
     return [
-      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}`,
+      `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
+      narrativeContextSection, // NEW: Narrative context
       threadContextSection,
       imageContextSection,
       history,
       `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
       'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
-      `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}${imageContext ? ' and visually-aware (reference what you see in the images)' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
+      `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}${imageContext ? ' and visually-aware (reference what you see in the images)' : ''}${narrativeContext ? ' and community-aware (acknowledge trending topics naturally)' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
     ].filter(Boolean).join('\n\n');
 }
 

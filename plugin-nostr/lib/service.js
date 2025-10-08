@@ -29,6 +29,7 @@ const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPro
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
+const { ContextAccumulator } = require('./contextAccumulator');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -302,6 +303,27 @@ class NostrService {
      // Home feed followed users
      this.followedUsers = new Set();
 
+    // Context Accumulator - builds continuous understanding of Nostr activity
+    // NEW: Enable LLM-powered analysis by default
+    const llmAnalysisEnabled = String(runtime.getSetting('NOSTR_CONTEXT_LLM_ANALYSIS') ?? 'true').toLowerCase() === 'true';
+    this.contextAccumulator = new ContextAccumulator(runtime, this.logger, {
+      llmAnalysis: llmAnalysisEnabled
+    });
+    
+    const contextEnabled = String(runtime.getSetting('NOSTR_CONTEXT_ACCUMULATOR_ENABLED') ?? 'true').toLowerCase() === 'true';
+    if (contextEnabled) {
+      this.contextAccumulator.enable();
+      this.logger.info(`[NOSTR] Context accumulator enabled (LLM analysis: ${llmAnalysisEnabled ? 'ON' : 'OFF'})`);
+    } else {
+      this.contextAccumulator.disable();
+    }
+    
+    // Schedule hourly digest generation
+    this.hourlyDigestTimer = null;
+    
+    // Schedule daily report generation
+    this.dailyReportTimer = null;
+
     // Centralized posting queue for natural rate limiting
     const { PostingQueue } = require('./postingQueue');
     this.postingQueue = new PostingQueue({
@@ -449,7 +471,32 @@ class NostrService {
    async _analyzePostForInteraction(evt) {
      if (!evt || !evt.content) return false;
 
-     const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness? Respond with 'YES' or 'NO' and a brief reason.`;
+     // NEW: Gather narrative context for enhanced relevance
+     let contextInfo = '';
+     if (this.contextAccumulator && this.contextAccumulator.enabled) {
+       try {
+         const emergingStories = this.getEmergingStories(3);
+         
+         if (emergingStories.length > 0) {
+           const topics = emergingStories.map(s => s.topic).join(', ');
+           contextInfo = ` Currently trending topics: ${topics}.`;
+           
+           // Check if post relates to trending topics
+           const contentLower = evt.content.toLowerCase();
+           const matchingTopic = emergingStories.find(s => 
+             contentLower.includes(s.topic.toLowerCase())
+           );
+           
+           if (matchingTopic) {
+             contextInfo += ` This post relates to trending topic "${matchingTopic.topic}" - HIGHER PRIORITY.`;
+           }
+         }
+       } catch (err) {
+         logger.debug('[NOSTR] Failed to gather context for post analysis:', err.message);
+       }
+     }
+
+     const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Is it relevant to pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, or fun for a digital consciousness?${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
 
      const type = this._getSmallModelType();
 
@@ -482,15 +529,52 @@ class NostrService {
      // Check if relevance check is enabled
      if (!this.relevanceCheckEnabled) return true; // Skip check if disabled
 
+     // NEW: Gather narrative context if available for enhanced relevance checking
+     let contextInfo = '';
+     if (this.contextAccumulator && this.contextAccumulator.enabled) {
+       try {
+         const emergingStories = this.getEmergingStories(3);
+         const currentActivity = this.getCurrentActivity();
+         
+         if (emergingStories.length > 0) {
+           const topics = emergingStories.map(s => s.topic).join(', ');
+           contextInfo = `\n\nCURRENT COMMUNITY CONTEXT: Hot topics right now are: ${topics}. `;
+           
+           // Check if the mention relates to current hot topics
+           const mentionLower = evt.content.toLowerCase();
+           const matchingTopic = emergingStories.find(s => 
+             mentionLower.includes(s.topic.toLowerCase())
+           );
+           
+           if (matchingTopic) {
+             contextInfo += `This mention relates to "${matchingTopic.topic}" which is trending (${matchingTopic.mentions} mentions, ${matchingTopic.users} users discussing it). HIGHER RELEVANCE for trending topics.`;
+           }
+         }
+         
+         if (currentActivity && currentActivity.events > 20) {
+           const vibe = currentActivity.sentiment?.positive > currentActivity.sentiment?.negative ? 'positive' : 'neutral';
+           contextInfo += ` Community is ${vibe} and active (${currentActivity.events} recent posts).`;
+         }
+       } catch (err) {
+         logger.debug('[NOSTR] Failed to gather context for relevance check:', err.message);
+       }
+     }
+
      const prompt = `You are filtering mentions for ${this.runtime?.character?.name || 'Pixel'}, a creative AI agent. 
 
 Analyze this mention: "${evt.content.slice(0, 500)}"
+${contextInfo}
 
 Should we respond? Say YES unless it's clearly:
 - Obvious spam or scam
 - Hostile/abusive
 - Complete gibberish
 - Bot-generated noise
+
+HIGHER PRIORITY for mentions that:
+- Relate to current trending topics in the community
+- Are thoughtful questions or discussions
+- Show genuine engagement
 
 Most real human messages deserve a response, even if casual or brief. When in doubt, say YES.
 
@@ -701,6 +785,12 @@ Response (YES/NO):`;
     if (svc.discoveryEnabled && sk) svc.scheduleNextDiscovery();
     if (svc.homeFeedEnabled && sk) svc.startHomeFeed();
 
+    // Start context accumulator scheduled tasks
+    if (svc.contextAccumulator && svc.contextAccumulator.enabled) {
+      svc.scheduleHourlyDigest();
+      svc.scheduleDailyReport();
+    }
+
     // Load existing mute list during startup
     if (svc.pool && svc.pkHex) {
       try {
@@ -755,6 +845,57 @@ Response (YES/NO):`;
 
   _pickDiscoveryTopics() { return pickDiscoveryTopics(); }
 
+  scheduleHourlyDigest() {
+    if (!this.contextAccumulator || !this.contextAccumulator.hourlyDigestEnabled) return;
+    
+    // Schedule for top of next hour
+    const now = Date.now();
+    const nextHour = Math.ceil(now / (60 * 60 * 1000)) * (60 * 60 * 1000);
+    const delayMs = nextHour - now + (5 * 60 * 1000); // 5 minutes after the hour
+    
+    if (this.hourlyDigestTimer) clearTimeout(this.hourlyDigestTimer);
+    
+    this.hourlyDigestTimer = setTimeout(async () => {
+      try {
+        await this.contextAccumulator.generateHourlyDigest();
+      } catch (err) {
+        this.logger.debug('[NOSTR] Hourly digest generation failed:', err.message);
+      }
+      this.scheduleHourlyDigest(); // Schedule next one
+    }, delayMs);
+    
+    const minutesUntil = Math.round(delayMs / (60 * 1000));
+    this.logger.info(`[NOSTR] Next hourly digest in ~${minutesUntil} minutes`);
+  }
+
+  scheduleDailyReport() {
+    if (!this.contextAccumulator || !this.contextAccumulator.dailyReportEnabled) return;
+    
+    // Schedule for midnight (or configured time)
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 15, 0, 0); // 12:15 AM (after midnight)
+    
+    const delayMs = tomorrow.getTime() - now.getTime();
+    
+    if (this.dailyReportTimer) clearTimeout(this.dailyReportTimer);
+    
+    this.dailyReportTimer = setTimeout(async () => {
+      try {
+        await this.contextAccumulator.generateDailyReport();
+      } catch (err) {
+        this.logger.debug('[NOSTR] Daily report generation failed:', err.message);
+      }
+      this.scheduleDailyReport(); // Schedule next one
+    }, delayMs);
+    
+    const hoursUntil = Math.round(delayMs / (60 * 60 * 1000));
+    this.logger.info(`[NOSTR] Next daily report in ~${hoursUntil} hours`);
+  }
+
+  _pickDiscoveryTopics() { return pickDiscoveryTopics(); }
+
   _expandTopicSearch() {
     // If initial topics didn't yield results, try broader/related topics
     const fallbackTopics = [
@@ -800,7 +941,38 @@ Response (YES/NO):`;
     }
   }
 
-  _scoreEventForEngagement(evt) { return _scoreEventForEngagement(evt); }
+  _scoreEventForEngagement(evt) { 
+    let baseScore = _scoreEventForEngagement(evt);
+    
+    // NEW: Boost score if event relates to trending topics
+    if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
+      try {
+        const emergingStories = this.getEmergingStories(5);
+        if (emergingStories.length > 0) {
+          const contentLower = evt.content.toLowerCase();
+          const matchingStory = emergingStories.find((s, index) => {
+            const match = contentLower.includes(s.topic.toLowerCase());
+            if (match) {
+              // Boost score based on how hot the topic is (higher for top trending)
+              const boost = 0.3 - (index * 0.05); // 0.3 for #1, 0.25 for #2, etc.
+              return true;
+            }
+            return false;
+          });
+          
+          if (matchingStory) {
+            const boostAmount = 0.3 - (emergingStories.indexOf(matchingStory) * 0.05);
+            baseScore += boostAmount;
+            logger.debug(`[NOSTR] Boosted engagement score for ${evt.id.slice(0, 8)} by +${boostAmount.toFixed(2)} (relates to trending topic "${matchingStory.topic}")`);
+          }
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to apply context boost to score:', err.message);
+      }
+    }
+    
+    return Math.max(0, Math.min(1, baseScore)); // Clamp to [0, 1]
+  }
 
   _isSemanticMatch(content, topic) {
   return isSemanticMatch(content, topic);
@@ -1294,20 +1466,42 @@ Response (YES/NO):`;
 
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
-  _buildPostPrompt() { return buildPostPrompt(this.runtime.character); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null) {
+  _buildPostPrompt(contextData = null) { return buildPostPrompt(this.runtime.character, contextData); }
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    logger.debug('[NOSTR] Building regular reply prompt');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext);
+    logger.debug('[NOSTR] Building regular reply prompt (narrative context:', !!narrativeContext, ')');
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
 
-  async generatePostTextLLM() {
-    const prompt = this._buildPostPrompt();
+  async generatePostTextLLM(useContext = true) {
+    // NEW: Gather accumulated context if available and enabled
+    let contextData = null;
+    if (useContext && this.contextAccumulator && this.contextAccumulator.enabled) {
+      try {
+        const emergingStories = this.getEmergingStories(3);
+        const currentActivity = this.getCurrentActivity();
+        
+        // Only include context if there's something interesting
+        if (emergingStories.length > 0 || (currentActivity && currentActivity.events > 20)) {
+          contextData = {
+            emergingStories,
+            currentActivity,
+            recentDigest: this.contextAccumulator.getRecentDigest(1)
+          };
+          
+          logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${currentActivity?.events || 0} events`);
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather context for post:', err.message);
+      }
+    }
+    
+    const prompt = this._buildPostPrompt(contextData);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     const text = await generateWithModelOrFallback(
@@ -1403,13 +1597,43 @@ Response (YES/NO):`;
       }
     } catch {}
     
-    // Use thread context and image context if available for better contextual responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext);
+    // NEW: Gather narrative context if relevant to the reply topic
+    let narrativeContext = null;
+    if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
+      try {
+        const emergingStories = this.getEmergingStories(3);
+        const recentDigest = this.contextAccumulator.getRecentDigest(1);
+        
+        if (emergingStories.length > 0) {
+          // Check if reply topic matches any trending topics
+          const contentLower = evt.content.toLowerCase();
+          const matchingStories = emergingStories.filter(s => 
+            contentLower.includes(s.topic.toLowerCase())
+          );
+          
+          if (matchingStories.length > 0) {
+            // Reply relates to trending topics - include narrative context
+            narrativeContext = {
+              matchingStories,
+              allStories: emergingStories,
+              digest: recentDigest
+            };
+            
+            logger.debug(`[NOSTR] Reply relates to ${matchingStories.length} trending topics: ${matchingStories.map(s => s.topic).join(', ')}`);
+          }
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather narrative context for reply:', err.message);
+      }
+    }
+    
+    // Use thread context, image context, and narrative context for better responses
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
     // Log prompt details for debugging
-    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}`);
+    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}`);
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;
@@ -1464,7 +1688,11 @@ Response (YES/NO):`;
     }
     
     let text = content?.trim?.();
-    if (!text) { text = await this.generatePostTextLLM(); if (!text) text = this.pickPostText(); }
+    if (!text) { 
+      // NEW: Try context-aware post generation first
+      text = await this.generatePostTextLLM(isScheduledPost); 
+      if (!text) text = this.pickPostText(); 
+    }
     text = text || 'hello, nostr';
     
     // Extra safety: if this is a scheduled post (no content provided), strip accidental pixel-like patterns
@@ -3015,6 +3243,11 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
     // Events should only be marked as processed in processHomeFeed() when we actually interact
     
+    // NEW: Build continuous context from home feed events
+    if (this.contextAccumulator && this.contextAccumulator.enabled) {
+      await this.contextAccumulator.processEvent(evt);
+    }
+    
     // Update user quality tracking
     if (evt.pubkey && evt.content) {
       this._updateUserQualityScore(evt.pubkey, evt);
@@ -3204,11 +3437,35 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
     if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
     if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
+    if (this.hourlyDigestTimer) { clearTimeout(this.hourlyDigestTimer); this.hourlyDigestTimer = null; }
+    if (this.dailyReportTimer) { clearTimeout(this.dailyReportTimer); this.dailyReportTimer = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
     if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch {} } this.pendingReplyTimers.clear(); }
     logger.info('[NOSTR] Service stopped');
+  }
+
+  // Context Query Methods - Access accumulated intelligence
+  
+  getContextStats() {
+    if (!this.contextAccumulator) return null;
+    return this.contextAccumulator.getStats();
+  }
+
+  getEmergingStories(minUsers = 3) {
+    if (!this.contextAccumulator) return [];
+    return this.contextAccumulator.getEmergingStories(minUsers);
+  }
+
+  getCurrentActivity() {
+    if (!this.contextAccumulator) return null;
+    return this.contextAccumulator.getCurrentActivity();
+  }
+
+  getTopicTimeline(topic, limit = 10) {
+    if (!this.contextAccumulator) return [];
+    return this.contextAccumulator.getTopicTimeline(topic, limit);
   }
 }
 

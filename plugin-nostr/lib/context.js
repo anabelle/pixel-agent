@@ -90,7 +90,18 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
         name: 'Nostr Context Engine',
         source: 'nostr',
         type: ChannelType ? ChannelType.FEED : undefined,
-        worldId
+        worldId,
+        metadata: {
+          name: 'Nostr Context Engine',
+          userName: 'nostr-context',
+          system: true,
+          source: 'nostr',
+          category: 'context-engine',
+          nostr: {
+            name: 'Nostr Context Engine',
+            userName: 'nostr-context'
+          }
+        }
       }).catch(() => {});
     };
 

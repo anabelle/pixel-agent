@@ -208,4 +208,14 @@ The service handles text generation and posting. See `test/service.pixelBought.t
 Notes:
 - Pixel events are deduplicated within the service (5‑minute TTL) using `payment_hash` → `event_id`/`id` → `x,y,created_at` as the key.
 - To disable delegation memory writes in the listener, set `LNPIXELS_CREATE_DELEGATION_MEMORY=false` (default); set to `true` to persist a small reference memory.
-- Anti-spam: service posts at most one pixel note per hour by default; set `LNPIXELS_POST_MIN_INTERVAL_MS` to override. Non-posted events are still saved as `lnpixels_event` memories with throttled=true.
+- Anti-spam: service posts at most one pixel note per hour by default; set `LNPIXELS_POST_MIN_INTERVAL_MS` to override.
+
+## Topic Analysis & Narrative Summaries (overview)
+
+The plugin extracts concise topics per post and generates sliding-window hourly summaries plus longer daily summaries, including diversity metrics (unique topics, top-3 concentration, HHI) and per-topic samples to ground the analysis.
+
+- Sliding window adapts to new content via `LLM_HOURLY_POOL_SIZE`.
+- Narrative size/cost are tuned by `LLM_NARRATIVE_SAMPLE_SIZE` and `LLM_NARRATIVE_MAX_CONTENT`.
+- Per-post bounds are controlled by `CONTEXT_LLM_TOPIC_MAXLEN` and `CONTEXT_LLM_SENTIMENT_MAXLEN`.
+
+See `TOPIC_ANALYSIS_AND_NARRATIVE.md` for full details and tuning guidance.

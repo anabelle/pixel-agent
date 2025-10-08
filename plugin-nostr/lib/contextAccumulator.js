@@ -564,7 +564,9 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         createdAt: timestamp
       };
       
-      await this.runtime.createMemory(memory, 'messages');
+      // Use createMemorySafe from context.js for retry logic
+      const { createMemorySafe } = require('./context');
+      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       this.logger.debug(`[CONTEXT] Stored emerging story: ${topic}`);
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store emerging story:', err.message);
@@ -833,7 +835,9 @@ Make it fascinating! Find the human story in the data.`;
         createdAt: timestamp
       };
       
-      await this.runtime.createMemory(memory, 'messages');
+      // Use createMemorySafe from context.js for retry logic
+      const { createMemorySafe } = require('./context');
+      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       this.logger.debug('[CONTEXT] Stored hourly digest to memory');
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store digest:', err.message);
@@ -1062,7 +1066,9 @@ Make it profound! Find the deeper story in the data.`;
         createdAt: timestamp
       };
       
-      await this.runtime.createMemory(memory, 'messages');
+      // Use createMemorySafe from context.js for retry logic
+      const { createMemorySafe } = require('./context');
+      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       this.logger.info('[CONTEXT] ✅ Stored daily report to memory');
     } catch (err) {
       this.logger.debug('[CONTEXT] Failed to store daily report:', err.message);

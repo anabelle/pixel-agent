@@ -562,9 +562,78 @@ OUTPUT JSON:
   }
 
   async _loadRecentNarratives() {
-    // Load from database - implementation depends on your memory system
+    // Load from database using runtime memory system
     this.logger.debug('[NARRATIVE-MEMORY] Loading recent narratives from memory...');
-    // TODO: Implement based on your memory retrieval system
+    
+    if (!this.runtime || typeof this.runtime.getMemories !== 'function') {
+      this.logger.debug('[NARRATIVE-MEMORY] Runtime getMemories not available, skipping load');
+      return;
+    }
+
+    try {
+      // Load hourly narratives (last 7 days)
+      const hourlyMems = await this.runtime.getMemories({
+        tableName: 'messages',
+        count: this.maxHourlyCache,
+        // Filter by content type if your adapter supports it
+      }).catch(() => []);
+      
+      for (const mem of hourlyMems) {
+        if (mem.content?.type === 'narrative_hourly' && mem.content?.data) {
+          this.hourlyNarratives.push({
+            ...mem.content.data,
+            timestamp: mem.createdAt || Date.now(),
+            type: 'hourly'
+          });
+        }
+      }
+      
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+
+      // Load daily narratives (last 90 days)
+      const dailyMems = await this.runtime.getMemories({
+        tableName: 'messages',
+        count: this.maxDailyCache,
+      }).catch(() => []);
+      
+      for (const mem of dailyMems) {
+        if (mem.content?.type === 'narrative_daily' && mem.content?.data) {
+          this.dailyNarratives.push({
+            ...mem.content.data,
+            timestamp: mem.createdAt || Date.now(),
+            type: 'daily'
+          });
+        }
+      }
+      
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
+
+      // Load weekly narratives
+      const weeklyMems = await this.runtime.getMemories({
+        tableName: 'messages',
+        count: this.maxWeeklyCache,
+      }).catch(() => []);
+      
+      for (const mem of weeklyMems) {
+        if (mem.content?.type === 'narrative_weekly' && mem.content?.data) {
+          this.weeklyNarratives.push({
+            ...mem.content.data,
+            timestamp: mem.createdAt || Date.now(),
+            type: 'weekly'
+          });
+        }
+      }
+      
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
+
+      // Sort all by timestamp
+      this.hourlyNarratives.sort((a, b) => a.timestamp - b.timestamp);
+      this.dailyNarratives.sort((a, b) => a.timestamp - b.timestamp);
+      this.weeklyNarratives.sort((a, b) => a.timestamp - b.timestamp);
+
+    } catch (err) {
+      this.logger.error('[NARRATIVE-MEMORY] Failed to load narratives:', err.message);
+    }
   }
 
   async _rebuildTrends() {
@@ -606,7 +675,9 @@ OUTPUT JSON:
         createdAt: timestamp
       };
 
-      await this.runtime.createMemory(memory, 'messages');
+      // Use createMemorySafe from context.js for retry logic
+      const { createMemorySafe } = require('./context');
+      await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative`);
     } catch (err) {
       this.logger.debug(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);

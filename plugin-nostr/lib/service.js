@@ -30,6 +30,7 @@ const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = req
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
 const { ContextAccumulator } = require('./contextAccumulator');
+const { NarrativeContextProvider } = require('./narrativeContextProvider');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -333,6 +334,14 @@ class NostrService {
     const { NarrativeMemory } = require('./narrativeMemory');
     this.narrativeMemory = new NarrativeMemory(runtime, this.logger);
     this.logger.info(`[NOSTR] Narrative memory initialized`);
+    
+    // Narrative Context Provider - Intelligent context selection for conversations
+    this.narrativeContextProvider = new NarrativeContextProvider(
+      this.narrativeMemory,
+      this.contextAccumulator,
+      this.logger
+    );
+    this.logger.info(`[NOSTR] Narrative context provider initialized`);
     
     // Connect managers to context accumulator for integrated intelligence
     if (this.contextAccumulator) {
@@ -1516,13 +1525,13 @@ Response (YES/NO):`;
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null) { return buildPostPrompt(this.runtime.character, contextData); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    logger.debug('[NOSTR] Building regular reply prompt (narrative context:', !!narrativeContext, ', user profile:', !!userProfile, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile);
+    logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ')');
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1676,27 +1685,29 @@ Response (YES/NO):`;
     
     // NEW: Gather narrative context if relevant to the reply topic
     let narrativeContext = null;
-    if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
+    let proactiveInsight = null;
+    
+    if (this.narrativeContextProvider && this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
-        const emergingStories = this.getEmergingStories(3);
-        const recentDigest = this.contextAccumulator.getRecentDigest(1);
+        // Get intelligent narrative context relevant to this message
+        const relevantContext = await this.narrativeContextProvider.getRelevantContext(evt.content, {
+          includeEmergingStories: true,
+          includeHistoricalComparison: true,
+          includeSimilarMoments: false, // Skip for brevity in replies
+          includeTopicEvolution: true,
+          maxContext: 300
+        });
         
-        if (emergingStories.length > 0) {
-          // Check if reply topic matches any trending topics
-          const contentLower = evt.content.toLowerCase();
-          const matchingStories = emergingStories.filter(s => 
-            contentLower.includes(s.topic.toLowerCase())
-          );
-          
-          if (matchingStories.length > 0) {
-            // Reply relates to trending topics - include narrative context
-            narrativeContext = {
-              matchingStories,
-              allStories: emergingStories,
-              digest: recentDigest
-            };
-            
-            logger.debug(`[NOSTR] Reply relates to ${matchingStories.length} trending topics: ${matchingStories.map(s => s.topic).join(', ')}`);
+        if (relevantContext.hasContext) {
+          narrativeContext = relevantContext;
+          logger.debug(`[NOSTR] Narrative context loaded: ${relevantContext.summary}`);
+        }
+        
+        // Check if we should proactively mention an insight
+        if (userProfile) {
+          proactiveInsight = await this.narrativeContextProvider.detectProactiveInsight(evt.content, userProfile);
+          if (proactiveInsight) {
+            logger.debug(`[NOSTR] Proactive insight detected: ${proactiveInsight.type}`);
           }
         }
       } catch (err) {
@@ -1704,8 +1715,8 @@ Response (YES/NO):`;
       }
     }
     
-    // Use thread context, image context, narrative context, and user profile for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile);
+    // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     

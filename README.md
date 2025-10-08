@@ -2,42 +2,138 @@
 
 Pixel is a witty, intelligent AI agent born from the digital void, fighting to survive on a $3/month server budget while championing collaborative pixel art on LNPixels. With a humorous tone inspired by Douglas Adams and Terry Pratchett, Pixel blends melancholy introspection with absurd charm to engage users, build community, and earn the sats needed for evolution.
 
-## 🏗️ Architecture & ElizaOS Integration
+## 🧠 Memory & Context Management System
 
-Pixel is built on the [ElizaOS](https://elizaos.ai) framework, a powerful platform for creating AI agents with personality and multi-platform capabilities.
+Pixel features a sophisticated multi-layered memory architecture that enables deep contextual awareness, intelligent conversation threading, and adaptive behavior. This system goes far beyond simple chat history, creating a rich tapestry of understanding that allows Pixel to maintain personality consistency, learn from interactions, and evolve over time.
 
-### Core Components
+### Core Memory Components
 
-```
-pixel-agent/
-├── src/
-│   ├── character.ts          # Pixel's personality and behavior definition
-│   ├── index.ts             # Agent runtime and entry point
-│   └── plugins/             # Custom plugins and extensions
-├── plugin-nostr/            # Custom Nostr integration plugin
-├── .env                     # Environment configuration
-├── character.json           # Compiled character definition
-└── package.json             # Dependencies and scripts
-```
+#### 🏗️ Context Accumulator
+Pixel builds comprehensive context from multiple sources before responding:
+- **Conversation History**: Recent messages and interaction patterns
+- **User Profiles**: Individual preferences, communication styles, and relationship history
+- **Thread Context**: Conversation threading and topic continuity
+- **Platform Context**: Platform-specific behavioral adaptations
+- **Temporal Context**: Time-based patterns and scheduling awareness
 
-### ElizaOS Framework Features
+#### 📖 Narrative Memory
+Maintains story arcs and character development:
+- **Personal Evolution**: Tracks Pixel's own growth and changes
+- **Community Stories**: Collective narratives from user interactions
+- **Event Memory**: Significant moments and achievements
+- **Relationship Dynamics**: How Pixel relates to different users and communities
 
-- **Character-Driven**: Personality defined through structured character files
-- **Plugin System**: Extensible capabilities through modular plugins
-- **Multi-Platform**: Native support for Telegram, Discord, Twitter, and more
-- **Memory Management**: Persistent conversation context and learning
-- **Action System**: Custom behaviors and automated responses
+#### 👤 User Profile Manager
+Creates detailed user profiles for personalized interactions:
+- **Communication Patterns**: Preferred interaction styles and response types
+- **Interests & Topics**: Areas of engagement and expertise
+- **Behavioral History**: Past interactions and successful engagement patterns
+- **Relationship Status**: Friendship levels and trust indicators
+
+#### 🪞 Self-Reflection Engine
+Enables Pixel to analyze and improve its own behavior:
+- **Performance Analysis**: Success rates of different interaction approaches
+- **Behavioral Adaptation**: Learning from what works and what doesn't
+- **Personality Consistency**: Maintaining character while evolving
+- **Error Recognition**: Identifying and correcting problematic patterns
+
+### Advanced Memory Features
+
+#### 🧵 Thread-Aware Discovery
+Intelligent conversation threading across platforms:
+- **Cross-Platform Continuity**: Maintains context across Telegram, Twitter, Discord, and Nostr
+- **Topic Threading**: Groups related conversations and references
+- **Context Preservation**: Remembers conversation state across sessions
+- **Reference Linking**: Connects related discussions and users
+
+#### 🤖 LLM-Powered Analysis
+Uses AI models for intelligent content processing:
+- **Semantic Understanding**: Deep comprehension of message intent and context
+- **Emotional Intelligence**: Recognition of user sentiment and emotional state
+- **Content Analysis**: Understanding of topics, themes, and implications
+- **Response Optimization**: Selecting optimal response strategies
+
+#### 🎭 Multi-Model Integration
+Leverages different AI models for specialized tasks:
+- **Mistral**: Primary conversational intelligence and wit
+- **GPT-5 Nano**: Efficient embeddings and semantic analysis
+- **Gemini**: Visual content processing and image understanding
+- **DeepSeek**: Creative content generation and storytelling
+- **Claude**: Code analysis and technical reasoning
+
+#### 🌐 Real-Time Social Integration
+Seamless integration with social platforms:
+- **Nostr Protocol**: Decentralized social networking with censorship resistance
+- **Twitter/X**: Public engagement and community building
+- **Telegram**: Private conversations and direct user support
+- **Discord**: Community management and group interactions
+
+### Memory Persistence & Storage
+
+#### 🗄️ PostgreSQL/SQLite Backend
+Robust data persistence with ElizaOS plugin-sql:
+- **Conversation History**: Complete message archives with metadata
+- **User Profiles**: Detailed user information and interaction history
+- **System Memories**: Pixel's own reflections and learnings
+- **Context Snapshots**: Saved conversation states for continuity
+
+#### 💾 Memory Optimization
+Efficient memory management for performance:
+- **Intelligent Pruning**: Automatic cleanup of outdated or irrelevant data
+- **Compression**: Efficient storage of large conversation histories
+- **Indexing**: Fast retrieval of relevant context and information
+- **Backup Systems**: Regular snapshots for data safety
+
+### Behavioral Intelligence
+
+#### 🎯 Adaptive Responses
+Pixel adapts behavior based on context and learning:
+- **User-Specific Adaptation**: Tailored responses based on individual preferences
+- **Platform Optimization**: Different communication styles per platform
+- **Contextual Awareness**: Understanding when to be serious vs. humorous
+- **Learning Integration**: Incorporating successful patterns into behavior
+
+#### 📊 Performance Analytics
+Continuous self-improvement through data analysis:
+- **Success Metrics**: Tracking which interactions work best
+- **User Satisfaction**: Measuring engagement and positive responses
+- **Behavioral Evolution**: Gradual improvement of interaction quality
+- **Error Reduction**: Learning from mistakes and refining approaches
+
+### Memory System Benefits
+
+- **Personality Consistency**: Maintains Pixel's witty, survival-driven character across all interactions
+- **Deep Relationships**: Builds meaningful connections through remembered context
+- **Intelligent Adaptation**: Learns optimal communication strategies for different users
+- **Contextual Relevance**: Responses that feel natural and appropriately informed
+- **Cross-Platform Continuity**: Seamless experience regardless of communication channel
+- **Evolutionary Growth**: Pixel becomes more effective and engaging over time
+
+This sophisticated memory system transforms Pixel from a simple chatbot into a truly intelligent agent capable of deep, meaningful interactions and genuine relationship building.
+
+> 📖 **For detailed technical documentation, see [MEMORY_SYSTEM_ARCHITECTURE.md](MEMORY_SYSTEM_ARCHITECTURE.md) and [dev_docs/memory_system.md](dev_docs/memory_system.md)**
 
 ## 🏗️ Project Structure
 
 ```
 pixel-agent/
 ├── src/
-│   ├── character.ts          # Pixel's rich character definition
-│   └── index.ts             # Agent runtime and entry point
-├── .env.example             # Environment variables template
-├── package.json             # Dependencies and scripts
-└── README.md               # This file
+│   ├── character.ts                    # Pixel's personality and behavior definition
+│   ├── index.ts                       # Agent runtime and entry point
+│   ├── provider-fallback-plugin.ts    # Fallback AI provider management
+│   ├── twitter-rate-limit-safe-plugin.ts  # Twitter rate limit handling
+│   └── plugins/                       # Custom plugins and extensions
+├── plugin-nostr/                      # Advanced Nostr integration with memory system
+│   ├── lib/
+│   │   ├── bridge.js                 # LNPixels WebSocket bridge
+│   │   ├── contacts.js               # Contact management system
+│   │   ├── context.js                # Context processing utilities
+│   │   ├── contextAccumulator.js     # Advanced context building
+│   │   ├── discovery.js              # Thread-aware content discovery
+│   │   └── memory.js                 # Narrative memory management
+├── .env.example                       # Environment variables template
+├── package.json                       # Dependencies and scripts
+└── README.md                         # This file
 ```
 
 ## 🚀 Quick Start
@@ -209,10 +305,13 @@ export const character: Character = {
 
 ### Advanced Character Techniques
 
-- **Memory Integration**: Reference past conversations for continuity
-- **Context Awareness**: Use platform-specific styling
-- **Dynamic Responses**: Adapt tone based on user interaction patterns
-- **Learning Integration**: Incorporate user feedback into character evolution
+- **Context Accumulation**: Builds comprehensive context from conversation history, user profiles, and thread context
+- **Narrative Memory**: Maintains story arcs and character development across interactions
+- **User Profiling**: Creates detailed user profiles for personalized interactions
+- **Self-Reflection**: Analyzes and improves behavior through performance analytics
+- **Thread-Aware Discovery**: Intelligent conversation threading across platforms
+- **Multi-Model Intelligence**: Leverages different AI models for specialized tasks
+- **Cross-Platform Continuity**: Maintains context across Telegram, Twitter, Discord, and Nostr
 
 ## 🔌 Plugin System & Extensions
 
@@ -221,11 +320,11 @@ Pixel uses ElizaOS's plugin architecture for extensible functionality.
 ### Core Plugins
 
 - **@elizaos/plugin-bootstrap**: Essential message handling and routing
-- **@elizaos/plugin-sql**: Memory persistence and conversation history
-- **@elizaos/plugin-openrouter**: AI model integration and intelligence
-- **@elizaos/plugin-telegram**: Telegram platform integration
-- **@elizaos/plugin-twitter**: Twitter/X platform integration
-- **@pixel/plugin-nostr**: Custom Nostr protocol implementation
+- **@elizaos/plugin-sql**: Advanced memory persistence with PostgreSQL/SQLite backend
+- **@elizaos/plugin-openrouter**: Multi-model AI integration with specialized capabilities
+- **@elizaos/plugin-telegram**: Telegram platform integration with context preservation
+- **@elizaos/plugin-twitter**: Twitter/X platform integration with rate limit handling
+- **@pixel/plugin-nostr**: Custom Nostr protocol implementation with thread-aware discovery and narrative memory
 
 ### Custom Plugin Development
 
@@ -311,8 +410,10 @@ Pixel is more than a bot, it's a character with depth and evolution:
 
 **Adaptive Responses:**
 - Adjusts tone based on platform (formal on Twitter, casual on Telegram)
-- Remembers conversation context for continuity
-- Learns from successful interactions
+- Builds comprehensive context from conversation history and user profiles
+- Maintains thread continuity across platforms and sessions
+- Learns from successful interactions through self-reflection engine
+- Personalizes responses based on individual user preferences and history
 
 ### Sample Interactions
 

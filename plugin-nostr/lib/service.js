@@ -4415,9 +4415,12 @@ Use this if it elevates the quote.`;
       return;
     }
 
-    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-    if (normalized.length < this.timelineLoreCandidateMinChars) {
-      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (too short: ${normalized.length} chars, ${wordCount} words)`);
+    const stripped = this._stripHtmlForLore(normalized);
+    const analysisContent = stripped || normalized;
+
+    const wordCount = analysisContent.split(/\s+/).filter(Boolean).length;
+    if (analysisContent.length < this.timelineLoreCandidateMinChars) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (too short: ${analysisContent.length} chars, ${wordCount} words)`);
       return;
     }
     if (wordCount < this.timelineLoreCandidateMinWords) {
@@ -4425,7 +4428,7 @@ Use this if it elevates the quote.`;
       return;
     }
 
-    const heuristics = this._evaluateTimelineLoreCandidate(evt, normalized, context);
+    const heuristics = this._evaluateTimelineLoreCandidate(evt, analysisContent, context);
     if (!heuristics || heuristics.reject === true) {
       this.logger?.debug?.(`[NOSTR] Timeline lore heuristics rejected ${evt.id.slice(0, 8)} (score=${heuristics?.score ?? 'n/a'} reason=${heuristics?.reason || 'n/a'})`);
       return;
@@ -4433,7 +4436,7 @@ Use this if it elevates the quote.`;
 
     let verdict = heuristics;
     if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
-      verdict = await this._screenTimelineLoreWithLLM(normalized, heuristics);
+      verdict = await this._screenTimelineLoreWithLLM(analysisContent, heuristics);
       if (!verdict || verdict.accept === false) {
         this.logger?.debug?.(`[NOSTR] Timeline lore LLM rejected ${evt.id.slice(0, 8)} (score=${heuristics.score})`);
         return;
@@ -4453,16 +4456,16 @@ Use this if it elevates the quote.`;
       id: evt.id,
       pubkey: evt.pubkey,
       created_at: evt.created_at || Math.floor(Date.now() / 1000),
-      content: normalized.slice(0, 480),
-      summary: verdict?.summary || heuristics.summary || null,
-      rationale: verdict?.rationale || heuristics.reason || null,
+      content: analysisContent.slice(0, 480),
+  summary: this._coerceLoreString(verdict?.summary || heuristics.summary || null) || null,
+  rationale: this._coerceLoreString(verdict?.rationale || heuristics.reason || null) || null,
       tags: Array.from(mergedTags).slice(0, 8),
-      importance: verdict?.priority || heuristics.priority || 'medium',
+      importance: this._coerceLoreString(verdict?.priority || heuristics.priority || 'medium') || 'medium',
       score: Number.isFinite(verdict?.score) ? verdict.score : heuristics.score,
       bufferedAt: Date.now(),
       metadata: {
         wordCount,
-        charCount: normalized.length,
+        charCount: analysisContent.length,
         topics: context?.topics || [],
         trendingMatches: heuristics.trendingMatches || [],
         authorScore: heuristics.authorScore,
@@ -4779,16 +4782,17 @@ CONTENT:
         .slice(0, 6)
         .map(([tag, count]) => `${tag}(${count})`);
 
-      const postLines = batch.map((item, idx) => {
-        const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
-        const summary = item.summary || item.content.slice(0, 140);
-        const rationale = item.rationale || 'signal';
-        const signalLine = (item.metadata?.signals || []).join('; ') || 'no explicit signals';
-        return `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}
+  const postLines = batch.map((item, idx) => {
+    const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
+    const cleanContent = this._stripHtmlForLore(item.content || '');
+    const summary = this._coerceLoreString(item.summary) || cleanContent.slice(0, 140);
+    const rationale = this._coerceLoreString(item.rationale || 'signal');
+    const signalLine = this._coerceLoreStringArray(item.metadata?.signals || [], 4).join('; ') || 'no explicit signals';
+    return `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}
 SUMMARY: ${summary}
 RATIONALE: ${rationale}
 SIGNALS: ${signalLine}
-CONTENT: ${item.content}`;
+CONTENT: ${cleanContent}`;
       }).join('\n\n');
 
       const prompt = `You are Pixel's home-feed analyst. Distill the following Nostr posts into a concise \"timeline lore\" entry capturing the community's evolving story.
@@ -4825,20 +4829,150 @@ ${postLines.slice(0, 5500)}`;
       );
 
       if (!raw) return null;
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return null;
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (!parsed || typeof parsed !== 'object') return null;
-
-      if (!Array.isArray(parsed.tags) || !parsed.tags.length) {
-        parsed.tags = rankedTags.slice(0, 4).map((entry) => entry.split('(')[0]);
+      const parsed = this._extractJsonObject(raw);
+      if (!parsed) {
+        const sample = raw.slice(0, 200).replace(/\s+/g, ' ');
+        logger.debug(`[NOSTR] Timeline lore summary parse failed: unable to extract JSON (sample="${sample}")`);
+        return null;
       }
 
-      return parsed;
+      const normalized = this._normalizeTimelineLoreDigest(parsed, rankedTags);
+      if (!normalized) {
+        const sample = JSON.stringify(parsed).slice(0, 200);
+        logger.debug(`[NOSTR] Timeline lore summary normalization failed (parsed=${sample})`);
+        return null;
+      }
+
+      return normalized;
     } catch (err) {
       logger.debug('[NOSTR] Timeline lore summary generation failed:', err?.message || err);
       return null;
     }
+  }
+
+  _stripHtmlForLore(text) {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text.replace(/<img[^>]*alt=["']?([^"'>]*)["']?[^>]*>/gi, (_, alt) => {
+      const label = typeof alt === 'string' && alt.trim() ? alt.trim() : 'image';
+      return ` [${label}] `;
+    });
+    cleaned = cleaned.replace(/<img[^>]*>/gi, ' [image] ');
+    cleaned = cleaned.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi, (_match, href, inner) => {
+      const textContent = inner ? inner.replace(/<[^>]+>/g, ' ').trim() : href;
+      return `${textContent} (${href})`;
+    });
+    cleaned = cleaned.replace(/<br\s*\/?>/gi, ' ');
+    cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+    return cleaned.replace(/\s+/g, ' ').trim();
+  }
+
+  _extractJsonObject(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const attempt = (input) => {
+      try {
+        return JSON.parse(input);
+      } catch {
+        return null;
+      }
+    };
+
+    const trimmed = raw.trim();
+    const direct = attempt(trimmed);
+    if (direct && typeof direct === 'object') return direct;
+
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch) {
+      const fenced = attempt(fenceMatch[1].trim());
+      if (fenced && typeof fenced === 'object') return fenced;
+    }
+
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          const candidate = trimmed.slice(start, i + 1);
+          const parsed = attempt(candidate);
+          if (parsed && typeof parsed === 'object') {
+            return parsed;
+          }
+          start = -1;
+        }
+        if (depth < 0) break;
+      }
+    }
+
+    return null;
+  }
+
+  _normalizeTimelineLoreDigest(parsed, rankedTags = []) {
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const headlineRaw = this._coerceLoreString(parsed.headline);
+    const narrativeRaw = this._coerceLoreString(parsed.narrative);
+    const priorityRaw = this._coerceLoreString(parsed.priority).toLowerCase();
+    const toneRaw = this._coerceLoreString(parsed.tone);
+
+    const digest = {
+      headline: this._truncateWords(headlineRaw || '', 18).slice(0, 140) || 'Community pulse update',
+      narrative: (narrativeRaw || 'Community activity logged; monitor unfolding threads.').slice(0, 520),
+      insights: this._coerceLoreStringArray(parsed.insights, 4).map((item) => item.slice(0, 180)),
+      watchlist: this._coerceLoreStringArray(parsed.watchlist, 4).map((item) => item.slice(0, 180)),
+      tags: this._coerceLoreStringArray(parsed.tags, 5).map((item) => item.slice(0, 40)),
+      priority: ['high', 'medium', 'low'].includes(priorityRaw) ? priorityRaw : 'medium',
+      tone: toneRaw || 'balanced'
+    };
+
+    if (!digest.tags.length && rankedTags.length) {
+      digest.tags = rankedTags.slice(0, 5).map((entry) => entry.split('(')[0]);
+    }
+
+    if (!digest.insights.length && rankedTags.length) {
+      digest.insights = rankedTags.slice(0, Math.min(3, rankedTags.length)).map((entry) => `Trend: ${entry}`);
+    }
+
+    if (!digest.watchlist.length) {
+      digest.watchlist = digest.tags.slice(0, 3);
+    }
+
+    return digest;
+  }
+
+  _coerceLoreString(value) {
+    if (!value && value !== 0) return '';
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) {
+      return value.map((item) => this._coerceLoreString(item)).filter(Boolean).join(', ').trim();
+    }
+    if (typeof value === 'object') {
+      return Object.values(value || {}).map((item) => this._coerceLoreString(item)).filter(Boolean).join(' ').trim();
+    }
+    return String(value).trim();
+  }
+
+  _coerceLoreStringArray(value, limit = 4) {
+    const arr = Array.isArray(value) ? value : value ? [value] : [];
+    const result = [];
+    for (const item of arr) {
+      const str = this._coerceLoreString(item);
+      if (str) {
+        result.push(str);
+        if (result.length >= limit) break;
+      }
+    }
+    return result;
+  }
+
+  _truncateWords(str, maxWords) {
+    if (!str || typeof str !== 'string') return '';
+    const words = str.trim().split(/\s+/);
+    if (words.length <= maxWords) return str.trim();
+    return words.slice(0, maxWords).join(' ');
   }
 
   _updateUserQualityScore(pubkey, evt) {

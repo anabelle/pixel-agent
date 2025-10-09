@@ -183,7 +183,7 @@ Rules:
 - For short greetings or brief statements, choose the closest meaningful topic (not generic terms)
 - If the post includes hashtags, named entities, or obvious subjects, use those as topics instead of 'none'
 - Never answer with 'none' when any real words, hashtags, or references are present—pick the best fitting topic
-- Respond with only the topics separated by commas on a single line
+- Respond with only the topics, one per line OR separated by commas (either format is fine)
 - Maximum 3 topics
 - The post content is provided inside <POST_TO_ANALYZE> tags at the end.
 
@@ -197,12 +197,14 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
        });
 
         if (response?.text) {
+          // Trim outer whitespace/newlines first, then lowercase
           const responseTrimmed = response.text.trim().toLowerCase();
 
           // Handle "none" style responses for posts with no clear topics
           if (responseTrimmed !== 'none') {
+            // Split on commas OR newlines to handle different model output formats
             const llmTopics = responseTrimmed
-              .split(',')
+              .split(/[,\n]+/)
               .map((t) => t.trim())
               .filter((t) => t.length > 0 && t.length < 500)
               .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')

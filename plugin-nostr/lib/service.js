@@ -952,6 +952,20 @@ Response (YES/NO):`;
     
     // Start awareness dry-run loop: every ~3 minutes, log prompt and response (no posting)
     try { svc.startAwarenessDryRun(); } catch {}
+
+    // Kick off an initial self-reflection run shortly after startup so prompts have guidance immediately
+    try {
+      if (svc.selfReflectionEngine && svc.selfReflectionEngine.enabled) {
+        setTimeout(async () => {
+          try {
+            await svc.runSelfReflectionNow({});
+            logger?.info?.('[NOSTR] Startup self-reflection completed');
+          } catch (e) {
+            logger?.debug?.('[NOSTR] Startup self-reflection failed (continuing):', e?.message || e);
+          }
+        }, 5000); // small delay to let systems settle
+      }
+    } catch {}
     return svc;
   }
 

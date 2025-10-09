@@ -1898,6 +1898,28 @@ Response (YES/NO):`;
             timelineLore,
             toneTrend
           };
+
+          // Add narrative arcs (daily/weekly/monthly) and watchlist state to enrich scheduled posts
+          try {
+            if (this.narrativeMemory?.getHistoricalContext) {
+              const last7d = await this.narrativeMemory.getHistoricalContext('7d');
+              const last30d = await this.narrativeMemory.getHistoricalContext('30d');
+              const latestDaily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
+              const latestWeekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
+              const latestMonthly = Array.isArray(last30d?.monthly) && last30d.monthly.length ? last30d.monthly[last30d.monthly.length - 1] : null;
+              if (latestDaily || latestWeekly || latestMonthly) {
+                contextData.dailyNarrative = latestDaily;
+                contextData.weeklyNarrative = latestWeekly;
+                contextData.monthlyNarrative = latestMonthly;
+              }
+            }
+          } catch {}
+          try {
+            if (this.narrativeMemory?.getWatchlistState) {
+              const ws = this.narrativeMemory.getWatchlistState();
+              if (ws) contextData.watchlistState = ws;
+            }
+          } catch {}
           
           logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}, Tone trend: ${toneTrend ? toneTrend.shift || 'stable' : 'none'}`);
         }
@@ -4894,6 +4916,70 @@ Use this if it elevates the quote.`;
       }
     }
 
+    // Concise awareness snapshot (timeline lore, tone trend, digest, narratives, watchlist)
+    let awarenessSection = '';
+    try {
+      let lines = [];
+      // Timeline lore snapshot
+      try {
+        if (this.contextAccumulator?.getTimelineLore) {
+          const loreEntries = this.contextAccumulator.getTimelineLore(2);
+          const loreLines = (Array.isArray(loreEntries) ? loreEntries : []).slice(-2).map((entry) => {
+            const headline = (entry?.headline || entry?.narrative || '').toString().trim();
+            const tone = entry?.tone ? ` • tone: ${entry.tone}` : '';
+            const watch = Array.isArray(entry?.watchlist) && entry.watchlist.length ? ` • watch: ${entry.watchlist.slice(0, 2).join(', ')}` : '';
+            return headline ? `- ${headline.slice(0, 140)}${tone}${watch}` : null;
+          }).filter(Boolean);
+          if (loreLines.length) {
+            lines.push('TIMELINE LORE:', ...loreLines);
+          }
+        }
+      } catch {}
+      // Tone trend
+      try {
+        if (this.narrativeMemory?.trackToneTrend) {
+          const trend = await this.narrativeMemory.trackToneTrend();
+          if (trend?.detected) lines.push(`MOOD SHIFT: ${trend.shift} over ${trend.timespan}`);
+          else if (trend?.stable) lines.push(`MOOD STABLE: ${trend.tone}`);
+        }
+      } catch {}
+      // Recent digest
+      try {
+        const digest = this.contextAccumulator?.getRecentDigest ? this.contextAccumulator.getRecentDigest(1) : null;
+        if (digest?.metrics?.events) {
+          const tts = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, 3).map(t => t.topic).join(', ') : '';
+          lines.push(`RECENT HOUR: ${digest.metrics.events} posts by ${digest.metrics.activeUsers || '?'} users${tts ? ` • ${tts}` : ''}`);
+        }
+      } catch {}
+      // Daily/weekly narratives
+      try {
+        if (this.narrativeMemory?.getHistoricalContext) {
+          const last7d = await this.narrativeMemory.getHistoricalContext('7d');
+          const daily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
+          const weekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
+          if (daily?.summary) lines.push(`DAILY ARC: ${String(daily.summary).slice(0, 140)}`);
+          if (weekly?.summary) lines.push(`WEEKLY ARC: ${String(weekly.summary).slice(0, 140)}`);
+        }
+      } catch {}
+      // Watchlist state
+      try {
+        if (this.narrativeMemory?.getWatchlistState) {
+          const ws = this.narrativeMemory.getWatchlistState();
+          const items = Array.isArray(ws?.items) ? ws.items.slice(-3) : [];
+          if (items.length) lines.push(`WATCHLIST: ${items.join(', ')}`);
+        }
+      } catch {}
+
+      if (lines.length) {
+        awarenessSection = `
+
+COMMUNITY SNAPSHOT (concise):
+${lines.join('\n')}
+
+USE: If it elevates the quote, connect to the current mood or arc naturally.`;
+      }
+    } catch {}
+
     const whitelist = 'Allowed references only: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ | Handle: @PixelSurvivor | BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za | LN: sparepicolo55@walletofsatoshi.com.';
 
     const objectiveLines = [
@@ -4912,6 +4998,7 @@ Use this if it elevates the quote.`;
       `Original post (quote target):\n"${this._sanitizeWhitelist(String(evt.content || '')).replace(/\s+/g, ' ').trim()}"`,
       imagePrompt,
       authorPostsSection,
+      awarenessSection,
       communityContextSection,
       'Output format: Provide ONLY the quote-repost text (no prefacing, no need to include original text will be auto rendered below). Stay within 1-2 sentences.'
     ].filter(Boolean).join('\n\n');

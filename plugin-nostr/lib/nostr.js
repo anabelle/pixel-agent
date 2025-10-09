@@ -203,13 +203,24 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
           // Handle "none" style responses for posts with no clear topics
           if (responseTrimmed !== 'none') {
             // Split on commas OR newlines to handle different model output formats
-            const llmTopics = responseTrimmed
+            const rawTopics = responseTrimmed
               .split(/[,\n]+/)
               .map((t) => t.trim())
-              .filter((t) => t.length > 0 && t.length < 500)
+              .filter((t) => t.length > 0 && t.length < 500);
+            
+            const llmTopics = rawTopics
               .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')
-              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t.toLowerCase()))
-              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t.toLowerCase()));
+              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t))
+              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t));
+            
+            // Debug: log if topics were filtered out
+            if (rawTopics.length > 0 && llmTopics.length === 0 && debugLog) {
+              debugLog(`[NOSTR] All LLM topics filtered for ${event.id?.slice(0, 8)}: [${rawTopics.join(', ')}]`);
+            } else if (rawTopics.length > llmTopics.length && debugLog) {
+              const filtered = rawTopics.filter(t => !llmTopics.includes(t));
+              debugLog(`[NOSTR] Filtered ${filtered.length} LLM topics for ${event.id?.slice(0, 8)}: [${filtered.join(', ')}]`);
+            }
+            
             topics.push(...llmTopics);
           }
         }

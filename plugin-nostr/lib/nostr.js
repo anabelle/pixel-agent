@@ -31,7 +31,8 @@ const STOPWORDS = new Set([
   'like', 'make', 'me', 'my', 'of', 'on', 'or', 'our', 'out', 'put', 'say', 'see', 'she', 'so', 'some',
   'than', 'that', 'the', 'their', 'them', 'then', 'there', 'they', 'this', 'those', 'to', 'up', 'was',
   'we', 'were', 'what', 'when', 'where', 'which', 'who', 'why', 'will', 'with', 'would', 'you', 'your',
-  'yours', 'thanks', 'thank', 'hey', 'hi', 'hmm', 'ok', 'okay', 'got', 'mean', 'means'
+  'yours', 'thanks', 'thank', 'hey', 'hi', 'hmm', 'ok', 'okay', 'got', 'mean', 'means', 'know', 'right',
+  'especially', 'because', 'ever', 'just', 'really', 'very', 'much', 'more'
 ]);
 
 function _cleanAndTokenizeText(rawText) {
@@ -46,29 +47,65 @@ function _cleanAndTokenizeText(rawText) {
   return tokens.filter((token) => token.length > 2 && !STOPWORDS.has(token));
 }
 
+const _candidateScores = new Map();
+
+function _isMeaningfulToken(token) {
+  if (!token) return false;
+  if (STOPWORDS.has(token)) return false;
+  if (FORBIDDEN_TOPIC_WORDS.has(token)) return false;
+  return /[a-z0-9]/i.test(token);
+}
+
+function _scoreCandidate(candidate, weight) {
+  if (!candidate) return;
+  const current = _candidateScores.get(candidate) || 0;
+  _candidateScores.set(candidate, current + weight);
+}
+
+function _resetCandidateScores() {
+  _candidateScores.clear();
+}
+
 function _extractFallbackTopics(content, maxTopics = 3) {
   const singles = _cleanAndTokenizeText(content);
   if (!singles.length) return [];
 
-  const phrases = [];
-  for (let i = 0; i < singles.length - 1; i++) {
-    const first = singles[i];
-    const second = singles[i + 1];
-    if (first && second && first !== second) {
-      phrases.push(`${first} ${second}`);
+  _resetCandidateScores();
+
+  for (const token of singles) {
+    if (_isMeaningfulToken(token)) {
+      _scoreCandidate(token, 1);
     }
   }
 
-  const combined = [...phrases, ...singles];
-  const unique = [];
-  for (const candidate of combined) {
-    if (!candidate) continue;
-    if (FORBIDDEN_TOPIC_WORDS.has(candidate)) continue;
-    if (unique.includes(candidate)) continue;
-    unique.push(candidate);
-    if (unique.length >= maxTopics) break;
+  for (let i = 0; i < singles.length - 1; i++) {
+    const first = singles[i];
+    const second = singles[i + 1];
+    if (!first || !second || first === second) continue;
+    if (!_isMeaningfulToken(first) && !_isMeaningfulToken(second)) continue;
+    const candidate = `${first} ${second}`;
+    if (candidate.length > 2 && !FORBIDDEN_TOPIC_WORDS.has(candidate)) {
+      _scoreCandidate(candidate, 2);
+    }
   }
-  return unique;
+
+  const sorted = Array.from(_candidateScores.entries())
+    .filter(([candidate]) => {
+      if (!candidate) return false;
+      if (candidate.includes('http')) return false;
+      const parts = candidate.split(' ');
+      return parts.some((part) => _isMeaningfulToken(part));
+    })
+    .sort((a, b) => b[1] - a[1]);
+
+  const results = [];
+  for (const [candidate] of sorted) {
+    if (results.length >= maxTopics) break;
+    if (results.includes(candidate)) continue;
+    results.push(candidate);
+  }
+
+  return results;
 }
 
 async function extractTopicsFromEvent(event, runtime) {

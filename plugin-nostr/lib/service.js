@@ -4393,7 +4393,18 @@ Use this if it elevates the quote.`;
   }
 
   async _considerTimelineLoreCandidate(evt, context = {}) {
-    if (!this.homeFeedEnabled || !this.contextAccumulator || !this.contextAccumulator.enabled) return;
+    if (!this.homeFeedEnabled) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: home feed disabled');
+      return;
+    }
+    if (!this.contextAccumulator) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator unavailable');
+      return;
+    }
+    if (!this.contextAccumulator.enabled) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator disabled');
+      return;
+    }
     if (!evt || !evt.content || !evt.pubkey || !evt.id) return;
     if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
     if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;

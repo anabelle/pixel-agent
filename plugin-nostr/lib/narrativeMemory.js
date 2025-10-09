@@ -1027,12 +1027,27 @@ OUTPUT JSON:
   addWatchlistItems(watchlistItems, source = 'digest', digestId = null) {
     if (!Array.isArray(watchlistItems) || !watchlistItems.length) return;
     
+    // Import ignored terms filter
+    let TIMELINE_LORE_IGNORED_TERMS;
+    try {
+      const nostrHelpers = require('./nostr');
+      TIMELINE_LORE_IGNORED_TERMS = nostrHelpers.TIMELINE_LORE_IGNORED_TERMS || new Set();
+    } catch {
+      TIMELINE_LORE_IGNORED_TERMS = new Set();
+    }
+    
     const now = Date.now();
     const added = [];
     
     for (const item of watchlistItems) {
       const normalized = String(item || '').trim().toLowerCase();
       if (!normalized || normalized.length < 3) continue;
+      
+      // Skip overly generic terms
+      if (TIMELINE_LORE_IGNORED_TERMS.has(normalized)) {
+        this.logger?.debug?.(`[WATCHLIST] Skipping generic term: ${normalized}`);
+        continue;
+      }
       
       // Deduplicate - don't re-add if already tracking
       if (this.activeWatchlist.has(normalized)) {

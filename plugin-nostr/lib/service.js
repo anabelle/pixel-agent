@@ -284,7 +284,7 @@ class NostrService {
     // Timeline lore buffering (home feed intelligence digestion)
     this.timelineLoreBuffer = [];
     this.timelineLoreMaxBuffer = 120;
-    this.timelineLoreBatchSize = 10;
+  this.timelineLoreBatchSize = 50;
     this.timelineLoreMinIntervalMs = 30 * 60 * 1000; // Minimum 30 minutes between lore digests
     this.timelineLoreMaxIntervalMs = 90 * 60 * 1000; // Force digest at least every 90 minutes when buffer has content
     this.timelineLoreTimer = null;
@@ -4830,17 +4830,18 @@ CONTENT:
         .slice(0, 6)
         .map(([tag, count]) => `${tag}(${count})`);
 
-  const postLines = batch.map((item, idx) => {
-    const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
-    const cleanContent = this._stripHtmlForLore(item.content || '');
-    const summary = this._coerceLoreString(item.summary) || cleanContent.slice(0, 140);
-    const rationale = this._coerceLoreString(item.rationale || 'signal');
-    const signalLine = this._coerceLoreStringArray(item.metadata?.signals || [], 4).join('; ') || 'no explicit signals';
-    return `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}
-SUMMARY: ${summary}
-RATIONALE: ${rationale}
-SIGNALS: ${signalLine}
-CONTENT: ${cleanContent}`;
+      const postLines = batch.map((item, idx) => {
+        const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
+        const cleanContent = this._stripHtmlForLore(item.content || '');
+        const rationale = this._coerceLoreString(item.rationale || 'signal');
+        const signalLine = this._coerceLoreStringArray(item.metadata?.signals || [], 4).join('; ') || 'no explicit signals';
+
+        return [
+          `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}`,
+          `CONTENT: ${cleanContent}`,
+          `RATIONALE: ${rationale}`,
+          `SIGNALS: ${signalLine}`,
+        ].join('\n');
       }).join('\n\n');
 
       const prompt = `You are Pixel's home-feed analyst. Distill the following Nostr posts into a concise \"timeline lore\" entry capturing the community's evolving story.

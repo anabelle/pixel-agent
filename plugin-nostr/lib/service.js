@@ -4042,17 +4042,25 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     }
     
     this.homeFeedQualityTracked.add(evt.id);
+
+    const allowTopicExtraction = this._hasFullSentence(evt?.content);
+    if (!allowTopicExtraction) {
+      logger.debug(`[NOSTR] Skipping topic extraction for ${evt.id.slice(0, 8)} (no full sentence detected)`);
+    }
     
     // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
     // Events should only be marked as processed in processHomeFeed() when we actually interact
     
     // NEW: Build continuous context from home feed events
     if (this.contextAccumulator && this.contextAccumulator.enabled) {
-      await this.contextAccumulator.processEvent(evt);
+      await this.contextAccumulator.processEvent(evt, {
+        allowTopicExtraction,
+        skipGeneralFallback: !allowTopicExtraction
+      });
     }
     
     // Update user topic interests from home feed
-    if (evt.pubkey && evt.content) {
+    if (allowTopicExtraction && evt.pubkey && evt.content) {
       try {
         const topics = await extractTopicsFromEvent(evt, this.runtime);
         for (const topic of topics) {
@@ -4061,6 +4069,8 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
       } catch (err) {
         logger.debug('[NOSTR] Failed to record topic interests:', err.message);
       }
+    } else if (!allowTopicExtraction) {
+      logger.debug('[NOSTR] Skipped user topic interest update (no full sentence)');
     }
     
     // Update user quality tracking
@@ -4095,6 +4105,23 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
 
     // Update the score
     this.userQualityScores.set(pubkey, newScore);
+  }
+
+  _hasFullSentence(text) {
+    if (!text || typeof text !== 'string') return false;
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (!normalized) return false;
+
+    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 6) return false;
+
+    const sentenceEndRegex = /[.!?？！。！？…‽](\s|$)/u;
+    if (sentenceEndRegex.test(normalized)) {
+      return true;
+    }
+
+    // Allow longer posts without explicit punctuation to qualify
+    return wordCount >= 12 || normalized.length >= 80;
   }
 
   async _getUserSocialMetrics(pubkey) {

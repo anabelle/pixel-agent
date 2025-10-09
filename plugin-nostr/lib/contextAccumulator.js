@@ -134,7 +134,7 @@ class ContextAccumulator {
     }
   }
 
-  async processEvent(evt) {
+  async processEvent(evt, options = {}) {
     if (!this.enabled || !evt || !evt.id || !evt.content) return;
 
     try {
@@ -152,7 +152,7 @@ class ContextAccumulator {
       digest.users.add(evt.pubkey);
       
       // 2. Extract structured data
-      const extracted = await this._extractStructuredData(evt);
+  const extracted = await this._extractStructuredData(evt, options);
       
       // 3. Track topics
       for (const topic of extracted.topics) {
@@ -208,8 +208,10 @@ class ContextAccumulator {
     }
   }
 
-  async _extractStructuredData(evt) {
+  async _extractStructuredData(evt, options = {}) {
     const content = evt.content || '';
+    const allowTopicExtraction = options.allowTopicExtraction !== false;
+    const skipGeneralFallback = options.skipGeneralFallback === true;
     
     // Extract links
     const linkRegex = /(https?:\/\/[^\s]+)/g;
@@ -222,27 +224,31 @@ class ContextAccumulator {
     let topics = [];
     let topicSource = 'none';
 
-    if (this.llmTopicExtractionEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
-        content.length >= this.llmTopicMinLength && content.length <= this.llmTopicMaxLength) {
-      // Use LLM for intelligent topic extraction
-      topics = await this._extractTopicsWithLLM(content);
-      if (topics.length > 0) {
-        topicSource = 'llm';
-      }
-    } else if (this.llmTopicExtractionEnabled) {
-      if (!this.runtime || typeof this.runtime.generateText !== 'function') {
-        topicSource = 'llm-unavailable';
-      } else if (content.length < this.llmTopicMinLength) {
-        topicSource = 'llm-too-short';
-      } else if (content.length > this.llmTopicMaxLength) {
-        topicSource = 'llm-too-long';
+    if (allowTopicExtraction) {
+      if (this.llmTopicExtractionEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
+          content.length >= this.llmTopicMinLength && content.length <= this.llmTopicMaxLength) {
+        // Use LLM for intelligent topic extraction
+        topics = await this._extractTopicsWithLLM(content);
+        if (topics.length > 0) {
+          topicSource = 'llm';
+        }
+      } else if (this.llmTopicExtractionEnabled) {
+        if (!this.runtime || typeof this.runtime.generateText !== 'function') {
+          topicSource = 'llm-unavailable';
+        } else if (content.length < this.llmTopicMinLength) {
+          topicSource = 'llm-too-short';
+        } else if (content.length > this.llmTopicMaxLength) {
+          topicSource = 'llm-too-long';
+        }
+      } else {
+        topicSource = 'llm-disabled';
       }
     } else {
-      topicSource = 'llm-disabled';
+      topicSource = 'topic-extraction-disabled';
     }
     
     // If LLM didn't work or returned nothing, use keyword-based extraction
-    if (topics.length === 0) {
+    if (allowTopicExtraction && topics.length === 0) {
       const keywordTopics = await extractTopicsFromEvent(evt, this.runtime);
       if (keywordTopics.length > 0) {
         topics = keywordTopics;
@@ -252,13 +258,16 @@ class ContextAccumulator {
     
     // If still no topics, use 'general' as fallback
     if (topics.length === 0) {
-      topics = ['general'];
-      topicSource = topicSource === 'keyword' ? 'keyword-fallback-general' : 'fallback-general';
+      if (!skipGeneralFallback) {
+        topics = ['general'];
+        topicSource = topicSource === 'keyword' ? 'keyword-fallback-general' : 'fallback-general';
+      }
     }
 
     if (this.logger?.debug) {
       const idSnippet = typeof evt.id === 'string' ? evt.id.slice(0, 8) : 'unknown';
-      this.logger.debug(`[CONTEXT] Topics(${topicSource}) evt=${idSnippet} -> ${topics.join(', ')}`);
+      const topicSummary = topics.length > 0 ? topics.join(', ') : '(none)';
+      this.logger.debug(`[CONTEXT] Topics(${topicSource}) evt=${idSnippet} -> ${topicSummary}`);
     }
     
     // Sentiment analysis: Try LLM first (if enabled and content is substantial), fallback to keyword-based

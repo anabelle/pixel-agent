@@ -1590,7 +1590,25 @@ Response (YES/NO):`;
           continue;
         }
 
-        const text = await this.generateReplyTextLLM(evt, roomId, threadContext, null);
+        // Process images in discovery post content (if enabled)
+        let imageContext = { imageDescriptions: [], imageUrls: [] };
+        if (this.imageProcessingEnabled) {
+          try {
+            logger.info(`[NOSTR] Processing images in discovery post: "${evt.content?.slice(0, 200)}..."`);
+            const { processImageContent } = require('./image-vision');
+            const fullImageContext = await processImageContent(evt.content || '', runtime);
+            imageContext = {
+              imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+              imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+            };
+            logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from discovery post`);
+          } catch (error) {
+            logger.error(`[NOSTR] Error in discovery image processing: ${error.message || error}`);
+            imageContext = { imageDescriptions: [], imageUrls: [] };
+          }
+        }
+
+        const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
         
         // Check if LLM generation failed (returned null)
         if (!text || !text.trim()) {
@@ -2734,10 +2752,12 @@ Response (YES/NO):`;
               // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
-              // Check if user is muted before scheduled reply
-              if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
-               this.lastReplyByUser.set(pubkey, now2);
-               const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, null);
+               // Check if user is muted before scheduled reply
+               if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
+                this.lastReplyByUser.set(pubkey, now2);
+                // Retrieve stored image context for scheduled reply
+                const storedImageContext = this._getStoredImageContext(parentEvt.id);
+                const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, storedImageContext);
                
               // Check if LLM generation failed (returned null)
               if (!replyText || !replyText.trim()) {
@@ -2792,12 +2812,17 @@ Response (YES/NO):`;
           logger.error(`[NOSTR] Error in image processing: ${error.message || error}`);
           // Continue with empty image context
           imageContext = { imageDescriptions: [], imageUrls: [] };
-        }
-      } else {
-        logger.debug('[NOSTR] Image processing disabled by configuration');
-      }
+         }
+       } else {
+         logger.debug('[NOSTR] Image processing disabled by configuration');
+       }
 
-      // Fetch full thread context for better conversation understanding
+       // Store image context for potential scheduled replies
+       if (imageContext.imageDescriptions.length > 0) {
+         this._storeImageContext(evt.id, imageContext);
+       }
+
+       // Fetch full thread context for better conversation understanding
       let threadContext = null;
       try {
         threadContext = await this._getThreadContext(evt);
@@ -3305,9 +3330,27 @@ Response (YES/NO):`;
         return;
       }
 
-   // Use decrypted content for the DM prompt
-   const dmEvt = { ...evt, content: decryptedContent };
-   const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
+      // Process images in DM content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in DM content: "${decryptedContent.slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from DM (max: ${this.maxImagesPerMessage})`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in DM image processing: ${error.message || error}`);
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      }
+
+      // Use decrypted content for the DM prompt
+      const dmEvt = { ...evt, content: decryptedContent };
+      const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
    
       // Check if LLM generation failed (returned null)
       if (!replyText || !replyText.trim()) {
@@ -3519,8 +3562,26 @@ Response (YES/NO):`;
         return;
       }
 
+      // Process images in sealed DM content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in sealed DM content: "${decryptedContent.slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from sealed DM (max: ${this.maxImagesPerMessage})`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in sealed DM image processing: ${error.message || error}`);
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      }
+
        const dmEvt = { ...evt, content: decryptedContent };
-       const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, null);
+       const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
        
        // Check if LLM generation failed (returned null)
        if (!replyText || !replyText.trim()) {
@@ -3574,6 +3635,52 @@ Response (YES/NO):`;
     logger.info('[NOSTR] Service stopped');
   }
 
+  // Store image context keyed by event ID for scheduled replies
+  _storeImageContext(eventId, imageContext) {
+    if (!this.imageContextCache) {
+      this.imageContextCache = new Map();
+    }
+    this.imageContextCache.set(eventId, {
+      context: imageContext,
+      timestamp: Date.now()
+    });
+    logger.debug(`[NOSTR] Stored image context for event ${eventId.slice(0, 8)}: ${imageContext.imageDescriptions.length} descriptions`);
+  }
+
+  // Retrieve stored image context
+  _getStoredImageContext(eventId) {
+    if (!this.imageContextCache) return null;
+    const stored = this.imageContextCache.get(eventId);
+    if (!stored) return null;
+
+    // Expire old contexts (e.g., after 1 hour)
+    const maxAge = 60 * 60 * 1000; // 1 hour
+    if (Date.now() - stored.timestamp > maxAge) {
+      this.imageContextCache.delete(eventId);
+      logger.debug(`[NOSTR] Expired old image context for event ${eventId.slice(0, 8)}`);
+      return null;
+    }
+
+    logger.debug(`[NOSTR] Retrieved stored image context for event ${eventId.slice(0, 8)}: ${stored.context.imageDescriptions.length} descriptions`);
+    return stored.context;
+  }
+
+  // Cleanup old image contexts periodically
+  _cleanupImageContexts() {
+    if (!this.imageContextCache) return;
+    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    let cleaned = 0;
+    for (const [eventId, stored] of this.imageContextCache.entries()) {
+      if (stored.timestamp < cutoff) {
+        this.imageContextCache.delete(eventId);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.debug(`[NOSTR] Cleaned up ${cleaned} expired image contexts`);
+    }
+  }
+
   _startConnectionMonitoring() {
     if (!this.connectionMonitorEnabled) {
       return;
@@ -3589,9 +3696,12 @@ Response (YES/NO):`;
   }
 
   _checkConnectionHealth() {
+    // Periodic cleanup of expired image contexts
+    this._cleanupImageContexts();
+
     const now = Date.now();
     const timeSinceLastEvent = now - this.lastEventReceived;
-    
+
     if (timeSinceLastEvent > this.maxTimeSinceLastEventMs) {
       logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
       this._attemptReconnection();

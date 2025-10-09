@@ -1722,13 +1722,13 @@ Response (YES/NO):`;
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null, loreContinuity = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
-    logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection, timelineLoreSection);
+    logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ', loreContinuity:', !!loreContinuity, ')');
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection, timelineLoreSection, loreContinuity);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1746,12 +1746,21 @@ Response (YES/NO):`;
           minMentions: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_MIN_MENTIONS') ?? process?.env?.NOSTR_CONTEXT_TOPICS_MIN_MENTIONS ?? 2)
         });
         let timelineLore = null;
+        let toneTrend = null;
         try {
           const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 2);
           const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 2;
           const loreEntries = this.contextAccumulator.getTimelineLore(limit);
           if (Array.isArray(loreEntries) && loreEntries.length) {
             timelineLore = loreEntries.slice(-limit);
+          }
+          
+          // Check for tone trends if narrative memory available
+          if (this.narrativeMemory && typeof this.narrativeMemory.trackToneTrend === 'function') {
+            toneTrend = await this.narrativeMemory.trackToneTrend();
+            if (toneTrend?.detected) {
+              logger.debug(`[NOSTR] Tone trend detected for post: ${toneTrend.shift}`);
+            }
           }
         } catch (err) {
           logger.debug('[NOSTR] Failed to gather timeline lore for post:', err?.message || err);
@@ -1769,10 +1778,11 @@ Response (YES/NO):`;
             currentActivity,
             recentDigest: this.contextAccumulator.getRecentDigest(1),
             topTopics,
-            timelineLore
+            timelineLore,
+            toneTrend
           };
           
-          logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}`);
+          logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}, Tone trend: ${toneTrend ? toneTrend.shift || 'stable' : 'none'}`);
         }
       } catch (err) {
         logger.debug('[NOSTR] Failed to gather context for post:', err.message);
@@ -2143,6 +2153,7 @@ Response (YES/NO):`;
 
     // Always attempt to surface recent timeline lore digests for richer awareness
     let timelineLoreSection = null;
+    let loreContinuity = null;
     try {
       if (this.contextAccumulator && typeof this.contextAccumulator.getTimelineLore === 'function') {
         const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 2);
@@ -2169,6 +2180,19 @@ Response (YES/NO):`;
 
           if (formatted.length) {
             timelineLoreSection = formatted.join('\n');
+          }
+          
+          // NEW: Analyze lore continuity for evolving storylines
+          if (this.narrativeMemory && typeof this.narrativeMemory.analyzeLoreContinuity === 'function') {
+            try {
+              const continuityLookback = Number(this.runtime?.getSetting?.('CTX_LORE_CONTINUITY_LOOKBACK') ?? process?.env?.CTX_LORE_CONTINUITY_LOOKBACK ?? 3);
+              loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(continuityLookback);
+              if (loreContinuity?.hasEvolution) {
+                logger.debug(`[NOSTR] Lore continuity detected: ${loreContinuity.summary}`);
+              }
+            } catch (err) {
+              logger.debug('[NOSTR] Failed to analyze lore continuity:', err?.message || err);
+            }
           }
         }
       }
@@ -2206,7 +2230,7 @@ Response (YES/NO):`;
     }
 
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-  const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection, timelineLoreSection);
+  const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection, timelineLoreSection, loreContinuity);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
@@ -2233,6 +2257,7 @@ Response (YES/NO):`;
             userHistory: !!userHistorySection,
             globalTimeline: !!globalTimelineSection,
             timelineLore: !!timelineLoreSection,
+            loreContinuity: !!loreContinuity,
           },
           profile: userProfile ? {
             topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
@@ -4684,11 +4709,25 @@ CONTENT:
     const now = Date.now();
     const sinceLast = now - this.timelineLoreLastRun;
     const bufferSize = this.timelineLoreBuffer.length;
-    const enoughBuffer = bufferSize >= this.timelineLoreBatchSize;
-    const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs;
+    
+    // Calculate signal density for adaptive triggering
+    const avgScore = bufferSize > 0 
+      ? this.timelineLoreBuffer.reduce((sum, c) => sum + (c.score || 0), 0) / bufferSize 
+      : 0;
+    const highSignal = avgScore >= 2.0;
+    
+    // Adaptive triggers
+    const earlyHighSignal = bufferSize >= 30 && highSignal; // High-quality batch ready early
+    const stalePrevention = sinceLast >= (2 * 60 * 60 * 1000) && bufferSize >= 15; // Don't stall >2h with 15+ items
+    const normalTrigger = bufferSize >= this.timelineLoreBatchSize; // Hit batch ceiling
+    const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs && bufferSize >= Math.max(3, Math.floor(this.timelineLoreBatchSize / 2));
 
-    if (force || enoughBuffer || (intervalReached && bufferSize >= Math.max(3, Math.floor(this.timelineLoreBatchSize / 2)))) {
-      this.logger?.debug?.(`[NOSTR] Timeline lore digest triggered (force=${force} buffer=${bufferSize} intervalReached=${intervalReached})`);
+    if (force || earlyHighSignal || stalePrevention || normalTrigger || intervalReached) {
+      this.logger?.debug?.(
+        `[NOSTR] Timeline lore digest triggered (force=${force} buffer=${bufferSize} ` +
+        `avgScore=${avgScore.toFixed(2)} earlySignal=${earlyHighSignal} stale=${stalePrevention} ` +
+        `normal=${normalTrigger} interval=${intervalReached})`
+      );
       this._processTimelineLoreBuffer(true).catch((err) => logger.debug('[NOSTR] Timeline lore digest error:', err?.message || err));
       return;
     }

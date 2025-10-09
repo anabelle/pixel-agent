@@ -234,7 +234,16 @@ class ContextAccumulator {
 
   getTimelineLore(limit = 5) {
     if (!Number.isFinite(limit) || limit <= 0) limit = 5;
-    return this.timelineLoreEntries.slice(-limit);
+    
+    // Sort by priority (high > medium > low) then recency
+    const priorityMap = { high: 3, medium: 2, low: 1 };
+    const sorted = [...this.timelineLoreEntries].sort((a, b) => {
+      const priorityDiff = (priorityMap[b.priority] || 1) - (priorityMap[a.priority] || 1);
+      if (priorityDiff !== 0) return priorityDiff;
+      return (b.timestamp || 0) - (a.timestamp || 0);
+    });
+    
+    return sorted.slice(0, limit);
   }
 
   async _extractStructuredData(evt, options = {}) {

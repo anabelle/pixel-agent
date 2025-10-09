@@ -76,6 +76,16 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
         contextSection += `${contextSection ? '\n\n' : '\n\n'}${loreBlock}\n\nREMEMBER: Treat lore as situational awareness—reference it only when it naturally strengthens your post.`;
       }
     }
+    
+    // Include tone trend if detected
+    if (contextData.toneTrend) {
+      const trend = contextData.toneTrend;
+      if (trend.detected) {
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}MOOD SHIFT DETECTED: Community tone shifting ${trend.shift} over ${trend.timespan}.\n\nSUGGESTION: Acknowledge or reflect this emotional arc naturally if relevant to your post.`;
+      } else if (trend.stable) {
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}MOOD STABLE: Community maintaining "${trend.tone}" tone consistently (${trend.duration} recent digests).`;
+      }
+    }
   }
 
   let reflectionSection = '';
@@ -131,7 +141,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null, loreContinuity = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -284,6 +294,35 @@ TIMELINE LORE:
 ${timelineLoreSection}
 
 USE: Treat these as the community's evolving plot points. Reference them only when it elevates your reply.`;
+  }
+  
+  // NEW: Add lore continuity evolution if detected
+  if (loreContinuity && loreContinuity.hasEvolution) {
+    const evolutionParts = [];
+    
+    if (loreContinuity.recurringThemes.length) {
+      evolutionParts.push(`Recurring themes: ${loreContinuity.recurringThemes.slice(0, 3).join(', ')}`);
+    }
+    
+    if (loreContinuity.priorityTrend === 'escalating') {
+      evolutionParts.push(`⚠️ Priority escalating (importance rising)`);
+    }
+    
+    if (loreContinuity.watchlistFollowUp.length) {
+      evolutionParts.push(`Predicted storylines materialized: ${loreContinuity.watchlistFollowUp.slice(0, 2).join(', ')}`);
+    }
+    
+    if (loreContinuity.toneProgression) {
+      evolutionParts.push(`Mood shift: ${loreContinuity.toneProgression.from} → ${loreContinuity.toneProgression.to}`);
+    }
+    
+    if (loreContinuity.emergingThreads.length) {
+      evolutionParts.push(`New: ${loreContinuity.emergingThreads.slice(0, 2).join(', ')}`);
+    }
+    
+    if (evolutionParts.length) {
+      timelineLoreContextSection += `\n\nLORE EVOLUTION:\n${evolutionParts.join('\n')}\n\nAWARENESS: Multi-day narrative arcs are unfolding. You can reference these threads naturally when relevant.`;
+    }
   }
 
   // NEW: Apply self-reflection adjustments

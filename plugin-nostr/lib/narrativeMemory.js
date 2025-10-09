@@ -148,7 +148,16 @@ class NarrativeMemory {
     if (!Number.isFinite(limit) || limit <= 0) {
       limit = 5;
     }
-    return this.timelineLore.slice(-limit);
+    
+    // Sort by priority (high > medium > low) then recency
+    const priorityMap = { high: 3, medium: 2, low: 1 };
+    const sorted = [...this.timelineLore].sort((a, b) => {
+      const priorityDiff = (priorityMap[b.priority] || 1) - (priorityMap[a.priority] || 1);
+      if (priorityDiff !== 0) return priorityDiff;
+      return (b.timestamp || 0) - (a.timestamp || 0);
+    });
+    
+    return sorted.slice(0, limit);
   }
 
   async getHistoricalContext(timeframe = '24h') {
@@ -829,6 +838,177 @@ OUTPUT JSON:
         ? new Date(this.dailyNarratives[this.dailyNarratives.length - 1].timestamp).toISOString().split('T')[0]
         : null
     };
+  }
+
+  /**
+   * Analyze continuity across recent timeline lore digests to detect evolving storylines
+   * Returns insights about recurring themes, priority shifts, watchlist follow-through, and tone progression
+   */
+  async analyzeLoreContinuity(lookbackCount = 3) {
+    const recent = this.timelineLore.slice(-lookbackCount);
+    if (recent.length < 2) return null;
+
+    // 1. Detect recurring themes across digests
+    const tagFrequency = new Map();
+    recent.forEach(lore => {
+      (lore.tags || []).forEach(tag => {
+        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1);
+      });
+    });
+    const recurringThemes = Array.from(tagFrequency.entries())
+      .filter(([_, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag);
+
+    // 2. Track priority escalation/de-escalation
+    const priorityMap = { low: 1, medium: 2, high: 3 };
+    const priorityTrend = recent.map(l => priorityMap[l.priority] || 1);
+    const priorityChange = priorityTrend.slice(-1)[0] - priorityTrend[0];
+    const priorityDirection = priorityChange > 0 ? 'escalating' : 
+                             priorityChange < 0 ? 'de-escalating' : 'stable';
+
+    // 3. Check watchlist follow-through (did predicted items appear in latest digest?)
+    const watchlistItems = recent.slice(0, -1).flatMap(l => l.watchlist || []);
+    const latestTags = new Set(recent.slice(-1)[0]?.tags || []);
+    const latestInsights = recent.slice(-1)[0]?.insights || [];
+    const followedUp = watchlistItems.filter(item => {
+      const itemLower = item.toLowerCase();
+      return Array.from(latestTags).some(tag => 
+        tag.toLowerCase().includes(itemLower) || itemLower.includes(tag.toLowerCase())
+      ) || latestInsights.some(insight => 
+        insight.toLowerCase().includes(itemLower)
+      );
+    });
+
+    // 4. Analyze tone progression
+    const tones = recent.map(l => l.tone).filter(Boolean);
+    const toneShift = tones.length >= 2 && tones[0] !== tones.slice(-1)[0];
+
+    // 5. Identify emerging vs cooling storylines
+    const earlierTags = new Set(recent.slice(0, -1).flatMap(l => l.tags || []));
+    const latestTagsArray = recent.slice(-1)[0]?.tags || [];
+    const emergingNew = latestTagsArray.filter(t => !earlierTags.has(t));
+    const cooling = Array.from(earlierTags).filter(t => !latestTags.has(t));
+
+    // 6. Build human-readable summary
+    const summary = this._buildContinuitySummary({
+      recurringThemes,
+      priorityDirection,
+      priorityChange,
+      followedUp,
+      toneShift,
+      tones,
+      emergingNew,
+      cooling
+    });
+
+    return {
+      hasEvolution: recurringThemes.length > 0 || Math.abs(priorityChange) > 0 || 
+                    followedUp.length > 0 || emergingNew.length > 0,
+      recurringThemes: recurringThemes.slice(0, 5),
+      priorityTrend: priorityDirection,
+      priorityChange,
+      watchlistFollowUp: followedUp,
+      toneProgression: toneShift && tones.length >= 2 ? { 
+        from: tones[0], 
+        to: tones.slice(-1)[0] 
+      } : null,
+      emergingThreads: emergingNew.slice(0, 5),
+      coolingThreads: cooling.slice(0, 5),
+      summary,
+      digestCount: recent.length,
+      timespan: recent.length >= 2 ? {
+        start: new Date(recent[0].timestamp).toISOString(),
+        end: new Date(recent.slice(-1)[0].timestamp).toISOString()
+      } : null
+    };
+  }
+
+  _buildContinuitySummary(data) {
+    const parts = [];
+    
+    if (data.recurringThemes.length) {
+      parts.push(`Recurring: ${data.recurringThemes.slice(0, 3).join(', ')}`);
+    }
+    
+    if (data.priorityDirection === 'escalating') {
+      parts.push(`Priority escalating (+${data.priorityChange})`);
+    } else if (data.priorityDirection === 'de-escalating') {
+      parts.push(`Priority cooling (${data.priorityChange})`);
+    }
+    
+    if (data.followedUp.length) {
+      parts.push(`Watchlist hits: ${data.followedUp.slice(0, 2).join(', ')}`);
+    }
+    
+    if (data.toneShift && data.tones.length >= 2) {
+      parts.push(`Mood: ${data.tones[0]} → ${data.tones.slice(-1)[0]}`);
+    }
+    
+    if (data.emergingNew.length) {
+      parts.push(`New: ${data.emergingNew.slice(0, 3).join(', ')}`);
+    }
+    
+    if (data.cooling.length && !data.emergingNew.length) {
+      parts.push(`Fading: ${data.cooling.slice(0, 2).join(', ')}`);
+    }
+    
+    return parts.length ? parts.join(' | ') : 'No clear evolution detected';
+  }
+
+  /**
+   * Track tone/mood trends across recent lore to detect community sentiment shifts
+   */
+  async trackToneTrend() {
+    const recentLore = this.timelineLore.slice(-10);
+    const toneWindow = recentLore
+      .filter(l => l.tone && typeof l.tone === 'string')
+      .map(l => ({ timestamp: l.timestamp, tone: l.tone }));
+    
+    if (toneWindow.length < 3) return null;
+    
+    // Detect significant shifts between earlier and recent periods
+    const midpoint = Math.floor(toneWindow.length / 2);
+    const earlier = toneWindow.slice(0, midpoint);
+    const recent = toneWindow.slice(midpoint);
+    
+    const recentTones = new Set(recent.map(t => t.tone));
+    const earlierTones = new Set(earlier.map(t => t.tone));
+    
+    // Check if recent tones are completely different from earlier
+    const shifted = ![...recentTones].some(t => earlierTones.has(t));
+    
+    if (shifted && recent.length >= 2) {
+      const timeSpanHours = Math.round(
+        (recent.slice(-1)[0].timestamp - earlier[0].timestamp) / (60 * 60 * 1000)
+      );
+      
+      return {
+        detected: true,
+        shift: `${earlier.slice(-1)[0]?.tone || 'unknown'} → ${recent.slice(-1)[0]?.tone}`,
+        significance: 'notable',
+        timespan: `${timeSpanHours}h`,
+        earlierTones: Array.from(earlierTones),
+        recentTones: Array.from(recentTones)
+      };
+    }
+    
+    // Check for consistent tone (no shift but worth noting)
+    if (toneWindow.length >= 5) {
+      const dominantTone = toneWindow.slice(-3).map(t => t.tone)[0];
+      const allSame = toneWindow.slice(-3).every(t => t.tone === dominantTone);
+      
+      if (allSame) {
+        return {
+          detected: false,
+          stable: true,
+          tone: dominantTone,
+          duration: toneWindow.length
+        };
+      }
+    }
+    
+    return null;
   }
 }
 

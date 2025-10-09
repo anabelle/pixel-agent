@@ -2383,11 +2383,146 @@ Response (YES/NO):`;
     const intervalMs = 3 * 60 * 1000; // 3 minutes
     this.awarenessDryRunTimer = setInterval(async () => {
       try {
-        const { prompt, text } = await this.generateAwarenessPostTextLLM();
-        const samplePrompt = String(prompt || '').replace(/\s+/g, ' ').slice(0, 320);
-        const sampleText = String(text || '').replace(/\s+/g, ' ').slice(0, 220);
-        this.logger.info(`[AWARENESS-DRYRUN] Prompt (len=${(prompt||'').length}): "${samplePrompt}${prompt && prompt.length > samplePrompt.length ? '…' : ''}"`);
-        this.logger.info(`[AWARENESS-DRYRUN] Output: "${sampleText}${text && text.length > sampleText.length ? '…' : ''}"`);
+        // Build prompt and debug dump only; skip LLM call/output generation
+        let contextData = null;
+        let loreContinuity = null;
+        let reflectionInsights = null;
+        try {
+          if (this.contextAccumulator && this.contextAccumulator.enabled) {
+            const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
+            const currentActivity = this.getCurrentActivity();
+            const topTopics = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 6, limit: 5, minMentions: 2 }) || [];
+            let topTopicsLong = [];
+            try { topTopicsLong = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 24, limit: 200, minMentions: 1 }) || []; } catch {}
+            let toneTrend = null;
+            let timelineLore = null;
+            let recentDigest = null;
+            try { if (this.narrativeMemory?.trackToneTrend) toneTrend = await this.narrativeMemory.trackToneTrend(); } catch {}
+            try { const loreLimit = 20; timelineLore = this.contextAccumulator.getTimelineLore(loreLimit); } catch {}
+            try { recentDigest = this.contextAccumulator.getRecentDigest(1); } catch {}
+            contextData = { emergingStories, currentActivity, topTopics, topTopicsLong, toneTrend, timelineLore, recentDigest };
+          }
+          if (this.narrativeMemory?.analyzeLoreContinuity) {
+            try { loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(3); } catch {}
+          }
+          if (this.narrativeMemory?.getHistoricalContext) {
+            try {
+              const last7d = await this.narrativeMemory.getHistoricalContext('7d');
+              const last30d = await this.narrativeMemory.getHistoricalContext('30d');
+              const latestDaily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
+              const latestWeekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
+              const latestMonthly = Array.isArray(last30d?.monthly) && last30d.monthly.length ? last30d.monthly[last30d.monthly.length - 1] : null;
+              if (latestDaily || latestWeekly || latestMonthly) {
+                contextData = { ...(contextData || {}), dailyNarrative: latestDaily, weeklyNarrative: latestWeekly, monthlyNarrative: latestMonthly };
+              }
+            } catch {}
+          }
+        } catch {}
+        if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
+          try { reflectionInsights = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168 }); } catch {}
+        }
+
+        const prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, null, loreContinuity);
+
+        // Recreate debug dump (same as generateAwarenessPostTextLLM) but do not call model
+        let recentAgentPosts = [];
+        let recentHomeFeed = [];
+        let permanentMemories = null;
+        try {
+          if (this.runtime?.getMemories) {
+            const rows = await this.runtime.getMemories({ tableName: 'messages', count: 200, unique: false });
+            if (Array.isArray(rows) && rows.length) {
+              const mapped = rows
+                .filter(m => m?.content?.source === 'nostr' && typeof m?.content?.text === 'string')
+                .map(m => {
+                  const c = m.content || {};
+                  let type = 'post';
+                  if (c.type === 'lnpixels_post') type = 'pixel';
+                  else if (c.inReplyTo) type = 'reply';
+                  else if (c.type) type = c.type;
+                  return { id: m.id, createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null, type, text: String(c.text).slice(0, 200) };
+                });
+              recentAgentPosts = mapped.slice(-8);
+              // Compact permanent summaries are built by generateAwarenessPostTextLLM; reuse same helper logic here
+              try {
+                const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
+                const byType = new Map();
+                for (const m of rows) { const t = m?.content?.type || null; if (!t) continue; if (!byType.has(t)) byType.set(t, []); byType.get(t).push(m); }
+                const safeIso = (ts) => ts ? new Date(ts).toISOString() : null;
+                const topTopicsCompact = (arr, k = 3) => Array.isArray(arr) ? arr.slice(0, k).map(t => t?.topic || String(t)).filter(Boolean) : [];
+                const result = {};
+                if (byType.has('hourly_digest')) {
+                  const items = pickLatest(byType.get('hourly_digest'), 2).map(m => { const d = m.content?.data || {}; const metrics = d.metrics || {}; return { createdAtIso: safeIso(m.createdAt), hourLabel: d.hourLabel || null, events: metrics.events || null, users: metrics.activeUsers || null, topTopics: topTopicsCompact(metrics.topTopics) }; });
+                  if (items.length) result.hourlyDigest = items;
+                }
+                if (byType.has('daily_report')) {
+                  const items = pickLatest(byType.get('daily_report'), 2).map(m => { const d = m.content?.data || {}; const summary = d.summary || {}; return { createdAtIso: safeIso(m.createdAt), date: d.date || null, events: summary.totalEvents || null, activeUsers: summary.activeUsers || null, topTopics: topTopicsCompact(summary.topTopics, 5) }; });
+                  if (items.length) result.dailyReport = items;
+                }
+                const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
+                const narratives = [];
+                for (const nt of narrativeTypes) {
+                  if (!byType.has(nt)) continue;
+                  const items = pickLatest(byType.get(nt), 2).map(m => { const d = m.content?.data || {}; if (nt === 'narrative_timeline') { return { type: 'timeline', createdAtIso: safeIso(m.createdAt), priority: d.priority || null, tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [], summary: (d.summary || null) }; } return { type: nt.replace('narrative_',''), createdAtIso: safeIso(m.createdAt), events: d.events || null, users: d.users || null, topTopics: topTopicsCompact(d.topTopics, 4), hasNarrative: !!d.narrative, }; });
+                  narratives.push(...items);
+                }
+                if (narratives.length) result.narratives = narratives.slice(-6);
+                try { if (this.selfReflectionEngine?.getReflectionHistory) { const hist = await this.selfReflectionEngine.getReflectionHistory({ limit: 3, maxAgeHours: 720 }); if (Array.isArray(hist) && hist.length) { result.selfReflectionHistory = hist; } } } catch {}
+                if (byType.has('lnpixels_post')) {
+                  const items = pickLatest(byType.get('lnpixels_post'), 3).map(m => { const d = m.content?.data || {}; const e = d.triggerEvent || {}; return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, color: e.color, sats: e.sats, text: typeof d.generatedText === 'string' ? d.generatedText.slice(0, 160) : null }; });
+                  if (items.length) result.lnpixelsPosts = items;
+                }
+                if (byType.has('lnpixels_event')) {
+                  const items = pickLatest(byType.get('lnpixels_event'), 3).map(m => { const d = m.content?.data || {}; const e = d.triggerEvent || {}; return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, sats: e.sats, throttled: !!d.throttled }; });
+                  if (items.length) result.lnpixelsEvents = items;
+                }
+                if (byType.has('mention')) {
+                  const items = pickLatest(byType.get('mention'), 2).map(m => ({ createdAtIso: safeIso(m.createdAt), text: String(m?.content?.text || '').slice(0, 160) }));
+                  if (items.length) result.mentions = items;
+                }
+                if (byType.has('social_interaction')) {
+                  const items = pickLatest(byType.get('social_interaction'), 2).map(m => { const d = m.content?.data || {}; let summary = null; if (typeof d?.summary === 'string') summary = d.summary.slice(0, 140); else if (typeof d?.body === 'string') summary = d.body.slice(0, 140); else if (typeof m?.content?.text === 'string') summary = m.content.text.slice(0, 140); else if (typeof d?.event?.content === 'string') summary = d.event.content.slice(0, 140); return { createdAtIso: safeIso(m.createdAt), kind: d?.kind || null, summary }; });
+                  if (items.length) result.social = items;
+                }
+                try { if (this.narrativeMemory?.getWatchlistState) { const ws = this.narrativeMemory.getWatchlistState(); if (ws) { result.watchlistState = { items: Array.isArray(ws.items) ? ws.items.slice(-5) : [], lastUpdatedIso: ws.lastUpdated ? new Date(ws.lastUpdated).toISOString() : null, total: Array.isArray(ws.items) ? ws.items.length : null }; } } } catch {}
+                permanentMemories = result;
+              } catch {}
+            }
+          }
+        } catch {}
+
+        // recent home feed samples
+        try {
+          if (Array.isArray(this.homeFeedRecent) && this.homeFeedRecent.length) {
+            recentHomeFeed = this.homeFeedRecent.slice(-12).map(s => ({ id: s.id, pubkey: s.pubkey ? String(s.pubkey).slice(0, 8) : null, createdAtIso: s.createdAt ? new Date(s.createdAt * 1000).toISOString() : null, allowTopicExtraction: !!s.allowTopicExtraction, timelineLore: s.timelineLore || null, text: typeof s.content === 'string' ? s.content.slice(0, 160) : '' }));
+          }
+        } catch {}
+
+        const topicsList = Array.isArray(contextData?.topTopicsLong) ? contextData.topTopicsLong : [];
+        const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+        const debugDump = {
+          currentActivity: contextData?.currentActivity || null,
+          emergingStories: contextData?.emergingStories || [],
+          timelineLoreFull: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore : [],
+          narratives: {
+            daily: contextData?.dailyNarrative || null,
+            weekly: contextData?.weeklyNarrative || null,
+            monthly: contextData?.monthlyNarrative || null,
+          },
+          recentDigest: contextData?.recentDigest || null,
+          selfReflection: reflectionInsights || null,
+          recentAgentPosts,
+          recentHomeFeed,
+          userProfiles: { focus: [], topEngaged: [] }, // skip heavy profile fetch in dry run
+          permanent: permanentMemories,
+          topics: topicsSummary,
+        };
+        const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+        const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
+        const fullPrompt = `${prompt}${debugHeader}${debugBody}`;
+
+        const samplePrompt = String(fullPrompt || '').replace(/\s+/g, ' ').slice(0, 320);
+        this.logger.info(`[AWARENESS-DRYRUN] Prompt (len=${(fullPrompt||'').length}): "${samplePrompt}${fullPrompt && fullPrompt.length > samplePrompt.length ? '…' : ''}"`);
       } catch (err) {
         this.logger.warn('[AWARENESS-DRYRUN] Failed:', err?.message || err);
       }

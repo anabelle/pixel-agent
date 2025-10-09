@@ -68,11 +68,17 @@ const STOPWORDS = new Set([
   'especially', 'because', 'ever', 'just', 'really', 'very', 'much', 'more'
 ]);
 
+// Extra noise tokens to ignore in fallback topic extraction
+const NOISE_TOKENS = new Set(['src', 'ref', 'utm', 'twsrc', 'tfw']);
+
 function _cleanAndTokenizeText(rawText) {
   if (!rawText || typeof rawText !== 'string') return [];
   const stripped = rawText
     .replace(/https?:\/\/\S+/gi, ' ')
-    .replace(/nostr:[a-z0-9]+\b/gi, ' ');
+    .replace(/nostr:[a-z0-9]+\b/gi, ' ')
+    // Remove common tracking/query artifacts that can pollute topics
+    .replace(/[?&](utm_[a-z]+|ref_src|twsrc|ref|src)=[^\s]*/gi, ' ')
+    .replace(/\b(utm_[a-z]+|ref_src|twsrc|ref|src)\b/gi, ' ');
   const tokens = stripped
     .toLowerCase()
     .match(/[\p{L}\p{N}][\p{L}\p{N}\-']*/gu);
@@ -85,6 +91,7 @@ const _candidateScores = new Map();
 function _isMeaningfulToken(token) {
   if (!token) return false;
   if (STOPWORDS.has(token)) return false;
+  if (NOISE_TOKENS.has(token)) return false;
   if (FORBIDDEN_TOPIC_WORDS.has(token)) return false;
   if (TIMELINE_LORE_IGNORED_TERMS.has(token)) return false;
   return /[a-z0-9]/i.test(token);

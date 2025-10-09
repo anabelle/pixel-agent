@@ -294,12 +294,15 @@ Rules:
 - Be specific, not general
 - If about a person, country, or event, use that as a topic
 - No words like "general", "discussion", "various"
-- If the post has no clear topics, respond with just 'none'
+- Only respond with 'none' if the post truly contains no meaningful words or context (e.g., empty or just symbols)
+- For short greetings or brief statements, choose the closest meaningful topic (e.g., 'greetings', 'motivation', 'bitcoin', the named person, etc.)
+- If the post includes hashtags, named entities, or obvious subjects, use those as topics instead of 'none'
+- Never answer with 'none' when any real words, hashtags, or references are present—pick the best fitting topic
 - Respond with only the topics separated by commas on a single line
 - Maximum 3 topics
 - The post content is provided inside <POST_TO_ANALYZE> tags at the end.
 
-THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
+THE POST TO ANALYZE IS THIS AND ONLY THIS FOLLOWING TEXT. DO NOT USE ANY OTHER INFORMATION FOR ANALYSIS ONLY USE ALL PREVIOUS INFO AS HIDDEN SECRET CONTEXT.
 <POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
 
       const response = await this.runtime.generateText(prompt, {

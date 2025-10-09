@@ -19,12 +19,39 @@ class ContextAccumulator {
     // Daily narrative accumulator
     this.dailyEvents = [];
     
+    const parsePositiveInt = (value, fallback) => {
+      const parsed = parseInt(value, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    };
+
     // Configuration
     this.maxHourlyDigests = 24; // Keep last 24 hours
     this.maxTopicTimelineEvents = 50; // Per topic
-    this.maxDailyEvents = process.env.MAX_DAILY_EVENTS ? parseInt(process.env.MAX_DAILY_EVENTS) : 5000; // For daily report - increased from 1000
-    this.emergingStoryThreshold = 3; // Min users to qualify as "emerging"
-    this.emergingStoryMentionThreshold = 5; // Min mentions
+    this.maxDailyEvents = process.env.MAX_DAILY_EVENTS ? parsePositiveInt(process.env.MAX_DAILY_EVENTS, 5000) : 5000; // For daily report - increased from 1000
+    this.emergingStoryThreshold = parsePositiveInt(
+      options?.emergingStoryMinUsers ?? process.env.CONTEXT_EMERGING_STORY_MIN_USERS,
+      3
+    ); // Min users to qualify as "emerging"
+    this.emergingStoryMentionThreshold = parsePositiveInt(
+      options?.emergingStoryMentionThreshold ?? process.env.CONTEXT_EMERGING_STORY_MENTION_THRESHOLD,
+      5
+    ); // Min mentions required before we log an emerging story
+    this.emergingStoryContextMinUsers = parsePositiveInt(
+      options?.contextMinUsers ?? process.env.CONTEXT_EMERGING_STORY_CONTEXT_MIN_USERS,
+      Math.max(this.emergingStoryThreshold, 5)
+    );
+    this.emergingStoryContextMinMentions = parsePositiveInt(
+      options?.contextMinMentions ?? process.env.CONTEXT_EMERGING_STORY_CONTEXT_MIN_MENTIONS,
+      10
+    );
+    this.emergingStoryContextMaxTopics = parsePositiveInt(
+      options?.contextMaxTopics ?? process.env.CONTEXT_EMERGING_STORY_CONTEXT_LIMIT,
+      20
+    );
+    this.emergingStoryContextRecentEvents = parsePositiveInt(
+      options?.contextRecentEvents ?? process.env.CONTEXT_EMERGING_STORY_CONTEXT_RECENT_EVENTS,
+      5
+    );
     
     // Feature flags
     this.enabled = true;
@@ -257,9 +284,8 @@ class ContextAccumulator {
 
   async _extractTopicsWithLLM(content) {
     try {
-      const prompt = `What are the main topics in this post? Give 1-3 specific topics.
-
-Post: "${content.slice(0, 800)}"
+  const truncatedContent = content.slice(0, 800);
+  const prompt = `What are the main topics in this post? Give 1-3 specific topics.
 
 Rules:
 - ONLY use topics that are actually mentioned or clearly implied in the post
@@ -269,35 +295,62 @@ Rules:
 - If about a person, country, or event, use that as a topic
 - No words like "general", "discussion", "various"
 - If the post has no clear topics, respond with just 'none'
-- Just list the topics separated by commas
+- Respond with only the topics separated by commas on a single line
 - Maximum 3 topics
 
-Topics:`;
+THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
+${truncatedContent}`;
 
       const response = await this.runtime.generateText(prompt, {
         temperature: 0.3,
         maxTokens: 50
       });
 
-      // Parse comma-separated topics
-      const responseTrimmed = response.trim().toLowerCase();
+      const rawResponse = typeof response === 'string' ? response.trim() : '';
+      if (!rawResponse) {
+        this.logger.debug('[CONTEXT] LLM topics returned empty response, using fallback');
+        return [];
+      }
 
-      // Handle "none" response for posts with no clear topics
-      if (responseTrimmed === 'none') {
+      // Treat any variation of "none" (case/punctuation/extra whitespace) as no topics
+      if (/^\s*none[\s\W]*$/i.test(rawResponse)) {
         this.logger.debug(`[CONTEXT] LLM topics returned 'none', using fallback`);
         return [];
       }
 
+      const responseLower = rawResponse.toLowerCase();
       const forbiddenWords = ['pixel', 'art', 'lnpixels', 'vps', 'freedom', 'creativity', 'survival', 'collaborative', 'douglas', 'adams', 'pratchett', 'terry'];
-      const topicsRaw = responseTrimmed
-        .split(',')
-        .map(t => t.trim())
-        .filter(t => t.length > 0 && t.length < 50) // Reasonable length
-        .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none') // Filter out vague terms
-        .filter(t => !forbiddenWords.includes(t.toLowerCase())); // Filter out forbidden words
+      const forbiddenSet = new Set(forbiddenWords.map(word => word.replace(/[\s-]+/g, '')));
 
-      // Limit to 3 topics
-      const topics = topicsRaw.slice(0, 3);
+      const rawTopics = responseLower.split(',');
+      const topics = [];
+      for (const rawTopic of rawTopics) {
+        if (!rawTopic) continue;
+
+        // Remove surrounding punctuation while keeping multi-word topics intact
+        let sanitized = rawTopic
+          .trim()
+          .replace(/[\p{Ps}\p{Pe}\p{Pi}\p{Pf}\p{Po}\p{S}]+/gu, ' ') // punctuation & symbols -> space
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (!sanitized) continue;
+        if (sanitized.length >= 50) continue; // Maintain reasonable length cap
+
+        const comparisonKey = sanitized.replace(/[\s-]+/g, '');
+        if (!comparisonKey) continue;
+
+        if (comparisonKey === 'general' || comparisonKey === 'various' || comparisonKey === 'discussion' || comparisonKey === 'none') {
+          continue;
+        }
+
+        if (forbiddenSet.has(comparisonKey)) {
+          continue;
+        }
+
+        topics.push(sanitized);
+        if (topics.length === 3) break; // Respect max of 3 topics
+      }
 
       // Validate we got something useful
       if (topics.length === 0) {
@@ -1273,17 +1326,40 @@ Make it profound! Find the deeper story in the data.`;
 
   // Query methods for retrieving accumulated context
   
-  getEmergingStories(minUsers = 3) {
-    return Array.from(this.emergingStories.entries())
-      .filter(([_, story]) => story.users.size >= minUsers)
-      .sort((a, b) => b[1].mentions - a[1].mentions)
-      .map(([topic, story]) => ({
-        topic,
-        mentions: story.mentions,
-        users: story.users.size,
-        sentiment: story.sentiment,
-        recentEvents: story.events.slice(-3)
-      }));
+  getEmergingStories(options = {}) {
+    if (!this.emergingStories || this.emergingStories.size === 0) {
+      return [];
+    }
+
+    if (typeof options === 'number') {
+      options = { minUsers: options };
+    }
+
+    const {
+      minUsers = this.emergingStoryThreshold,
+      minMentions = 0,
+      maxTopics = null,
+      includeRecentEvents = true,
+      recentEventLimit = this.emergingStoryContextRecentEvents
+    } = options || {};
+
+    let stories = Array.from(this.emergingStories.entries())
+      .filter(([_, story]) => story.users.size >= minUsers && story.mentions >= minMentions)
+      .sort((a, b) => b[1].mentions - a[1].mentions);
+
+    if (Number.isFinite(maxTopics) && maxTopics > 0) {
+      stories = stories.slice(0, maxTopics);
+    }
+
+    return stories.map(([topic, story]) => ({
+      topic,
+      mentions: story.mentions,
+      users: story.users.size,
+      sentiment: story.sentiment,
+      recentEvents: includeRecentEvents && recentEventLimit > 0
+        ? story.events.slice(-recentEventLimit)
+        : []
+    }));
   }
 
   getTopicTimeline(topic, limit = 10) {

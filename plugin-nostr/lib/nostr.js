@@ -26,9 +26,8 @@ async function extractTopicsFromEvent(event, runtime) {
    // Use LLM to extract additional topics
    if (runtime?.useModel) {
      try {
+          const truncatedContent = event.content.slice(0, 800);
           const prompt = `What are the main topics in this post? Give 1-3 specific topics.
-
-Post: "${event.content.slice(0, 800)}"
 
 Rules:
 - ONLY use topics that are actually mentioned or clearly implied in the post
@@ -38,10 +37,11 @@ Rules:
 - If about a person, country, or event, use that as a topic
 - No words like "general", "discussion", "various"
 - If the post has no clear topics, respond with just 'none'
-- Just list the topics separated by commas
+- Respond with only the topics separated by commas on a single line
 - Maximum 3 topics
 
-Topics:`;
+THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
+${truncatedContent}`;
 
        const response = await runtime.useModel('TEXT_SMALL', {
          prompt,

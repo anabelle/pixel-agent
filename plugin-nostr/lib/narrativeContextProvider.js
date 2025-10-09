@@ -37,7 +37,12 @@ class NarrativeContextProvider {
       
       // 2. Get emerging stories that match message topics
       if (includeEmergingStories && messageTopics.length > 0) {
-        const allStories = this.contextAccumulator?.getEmergingStories(5) || [];
+        const allStories = this.contextAccumulator?.getEmergingStories({
+          minUsers: Math.max(5, this.contextAccumulator?.emergingStoryContextMinUsers || 0),
+          minMentions: this.contextAccumulator?.emergingStoryContextMinMentions || 0,
+          maxTopics: this.contextAccumulator?.emergingStoryContextMaxTopics || 20,
+          recentEventLimit: this.contextAccumulator?.emergingStoryContextRecentEvents || 5
+        }) || [];
         context.emergingStories = allStories.filter(story => 
           messageTopics.some(topic => 
             story.topic.toLowerCase().includes(topic.toLowerCase()) ||

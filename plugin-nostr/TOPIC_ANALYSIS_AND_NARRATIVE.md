@@ -56,6 +56,7 @@ LLM_HOURLY_POOL_SIZE=200             # Number of most-recent events considered h
 - To make summaries more dynamic: lower LLM_HOURLY_POOL_SIZE (more responsive) or raise it (more stable).
 - To reduce cost: lower LLM_NARRATIVE_MAX_CONTENT and/or LLM_NARRATIVE_SAMPLE_SIZE.
 - To improve topic quality: ensure character style/examples bias toward specific, non-generic topics.
+- To curb noisy trend injection: raise CONTEXT_EMERGING_STORY_CONTEXT_MIN_MENTIONS (default 10) or CONTEXT_EMERGING_STORY_CONTEXT_MIN_USERS (default 5). Lower them if you want the agent to react to fresher, low-volume topics.
 
 ## Future Options (Optional Enhancements)
 

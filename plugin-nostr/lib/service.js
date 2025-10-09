@@ -25,7 +25,7 @@ const {
 const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
 const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandidates } = require('./discovery');
-const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildDailyDigestPostPrompt, buildPixelBoughtPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
+const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildDailyDigestPostPrompt, buildPixelBoughtPrompt, buildAwarenessPostPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getUserHistory } = require('./providers/userHistoryProvider');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
 const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
@@ -292,6 +292,9 @@ class NostrService {
     this.timelineLoreProcessing = false;
     this.timelineLoreCandidateMinWords = 12;
     this.timelineLoreCandidateMinChars = 80;
+
+  // Awareness dry-run scheduler (no posting)
+  this.awarenessDryRunTimer = null;
 
     // Unfollow configuration
     this.unfollowEnabled = true; // Disabled by default to prevent mass unfollows
@@ -938,6 +941,9 @@ Response (YES/NO):`;
     } catch {}
 
     logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled} homeFeed=${svc.homeFeedEnabled}`);
+    
+    // Start awareness dry-run loop: every ~3 minutes, log prompt and response (no posting)
+    try { svc.startAwarenessDryRun(); } catch {}
     return svc;
   }
 
@@ -1768,6 +1774,7 @@ Response (YES/NO):`;
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
+  _buildAwarenessPrompt(contextData = null, reflection = null, topic = null, loreContinuity = null) { return buildAwarenessPostPrompt(this.runtime.character, contextData, reflection, topic, loreContinuity); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
   _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null, loreContinuity = null) {
     if (evt?.kind === 4) {
@@ -1890,6 +1897,85 @@ Response (YES/NO):`;
       }
     } catch {}
     return text || null;
+  }
+
+  async generateAwarenessPostTextLLM() {
+    // Gather context similar to generatePostTextLLM but tuned for awareness
+    let contextData = null;
+    let loreContinuity = null;
+    try {
+      if (this.contextAccumulator && this.contextAccumulator.enabled) {
+        const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
+        const currentActivity = this.getCurrentActivity();
+        const topTopics = this.contextAccumulator.getTopTopicsAcrossHours({
+          hours: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_LOOKBACK_HOURS') ?? process?.env?.NOSTR_CONTEXT_TOPICS_LOOKBACK_HOURS ?? 6),
+          limit: 5,
+          minMentions: 2
+        }) || [];
+        let toneTrend = null;
+        if (this.narrativeMemory?.trackToneTrend) {
+          try { toneTrend = await this.narrativeMemory.trackToneTrend(); } catch {}
+        }
+        contextData = { emergingStories, currentActivity, topTopics, toneTrend };
+      }
+      if (this.narrativeMemory?.analyzeLoreContinuity) {
+        try { loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(3); } catch {}
+      }
+    } catch {}
+
+    let reflectionInsights = null;
+    if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
+      try { reflectionInsights = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168 }); } catch {}
+    }
+
+    // Pick at most one topic name from context, if any
+    let topic = null;
+    try {
+      const topTopics = contextData?.topTopics || [];
+      if (topTopics.length) {
+        const t = topTopics[0];
+        topic = typeof t === 'string' ? t : (t?.topic || null);
+      }
+    } catch {}
+
+    const prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, topic, loreContinuity);
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 200, temperature: 0.75 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => null
+    );
+    // For pure awareness: strip ALL links/handles regardless of whitelist
+    let out = String(text || '');
+    if (out) {
+      out = out.replace(/https?:\/\/\S+/gi, '');
+      out = out.replace(/\B@[a-z0-9_\.\-]+/gi, '');
+      out = out.replace(/\s+/g, ' ').trim();
+    }
+
+    return { prompt, text: out };
+  }
+
+  startAwarenessDryRun() {
+    try { if (this.awarenessDryRunTimer) clearInterval(this.awarenessDryRunTimer); } catch {}
+    const intervalMs = 3 * 60 * 1000; // 3 minutes
+    this.awarenessDryRunTimer = setInterval(async () => {
+      try {
+        const { prompt, text } = await this.generateAwarenessPostTextLLM();
+        const samplePrompt = String(prompt || '').replace(/\s+/g, ' ').slice(0, 320);
+        const sampleText = String(text || '').replace(/\s+/g, ' ').slice(0, 220);
+        this.logger.info(`[AWARENESS-DRYRUN] Prompt (len=${(prompt||'').length}): "${samplePrompt}${prompt && prompt.length > samplePrompt.length ? '…' : ''}"`);
+        this.logger.info(`[AWARENESS-DRYRUN] Output: "${sampleText}${text && text.length > sampleText.length ? '…' : ''}"`);
+      } catch (err) {
+        this.logger.warn('[AWARENESS-DRYRUN] Failed:', err?.message || err);
+      }
+    }, intervalMs);
+    this.logger.info(`[AWARENESS-DRYRUN] Running every ${Math.round(intervalMs/1000)}s (no posting)`);
   }
 
   async generateDailyDigestPostText(report) {
@@ -5381,6 +5467,7 @@ ${postLines}`;
     if (this.semanticAnalyzer) { try { this.semanticAnalyzer.destroy(); } catch {} this.semanticAnalyzer = null; }
     if (this.userProfileManager) { try { await this.userProfileManager.destroy(); } catch {} this.userProfileManager = null; }
     if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch {} this.narrativeMemory = null; }
+    if (this.awarenessDryRunTimer) { try { clearInterval(this.awarenessDryRunTimer); } catch {} this.awarenessDryRunTimer = null; }
     logger.info('[NOSTR] Service stopped');
   }
 

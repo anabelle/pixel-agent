@@ -607,6 +607,58 @@ function sanitizeWhitelist(text) {
   return out.trim();
 }
 
+function buildAwarenessPostPrompt(character, contextData = null, reflection = null, topic = null, loreContinuity = null) {
+  const ch = character || {};
+  const name = ch.name || 'Agent';
+  const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
+
+  // Build compact context lines, but keep "pure awareness" tone (no links/asks/hashtags)
+  const contextLines = [];
+  if (contextData) {
+    const { emergingStories = [], currentActivity = null, topTopics = [], toneTrend = null } = contextData || {};
+    if (Array.isArray(emergingStories) && emergingStories.length) {
+      const s = emergingStories[0];
+      if (s?.topic) contextLines.push(`Whispers: ${s.topic}`);
+    }
+    if (Array.isArray(topTopics) && topTopics.length) {
+      const t = topTopics[0]?.topic || topTopics[0];
+      if (t) contextLines.push(`Pulse topic: ${t}`);
+    }
+    if (currentActivity && Number.isFinite(currentActivity.events)) {
+      const vibe = currentActivity.events >= 12 ? 'alive' : currentActivity.events >= 5 ? 'stirring' : 'quiet';
+      contextLines.push(`Vibe: ${vibe}`);
+    }
+    if (toneTrend) {
+      if (toneTrend.detected) contextLines.push(`Mood shift: ${toneTrend.shift}`);
+      else if (toneTrend.stable && toneTrend.tone) contextLines.push(`Mood steady: ${toneTrend.tone}`);
+    }
+  }
+
+  if (loreContinuity && loreContinuity.hasEvolution && loreContinuity.summary) {
+    contextLines.push(`Arc: ${loreContinuity.summary}`);
+  }
+
+  const topicLine = topic ? `If it feels natural, gently allude to: ${String(topic).slice(0, 60)}` : '';
+
+  const reflectionLines = [];
+  if (reflection) {
+    const strengths = Array.isArray(reflection.strengths) ? reflection.strengths.slice(0, 2) : [];
+    const patterns = Array.isArray(reflection.patterns) ? reflection.patterns.slice(0, 1) : [];
+    if (strengths.length) reflectionLines.push(`Lean into: ${strengths.join('; ')}`);
+    if (patterns.length) reflectionLines.push(`Note: ${patterns[0]}`);
+  }
+
+  return [
+    `You are ${name}. Compose a single, reflective "pure awareness" Nostr note.`,
+    style.length ? `Style: ${style.join(' | ')}` : '',
+    contextLines.length ? `Context hints: ${contextLines.join(' • ')}` : '',
+    topicLine,
+    reflectionLines.length ? `Quiet self-adjustments: ${reflectionLines.join(' • ')}` : '',
+    'Tone: observant, evolving, humane. No links. No hashtags. No calls to action. No zap mentions. Do not sound like a status report.',
+    'Output rules: one paragraph; 120–220 characters preferred; feel lived-in and specific; never start with "Ah,"; avoid emojis unless they truly fit; do not include any URLs or @handles.'
+  ].filter(Boolean).join('\n\n');
+}
+
 module.exports = {
   buildPostPrompt,
   buildReplyPrompt,
@@ -614,6 +666,7 @@ module.exports = {
   buildZapThanksPrompt,
   buildDailyDigestPostPrompt,
   buildPixelBoughtPrompt,
+  buildAwarenessPostPrompt,
   extractTextFromModelResult,
   sanitizeWhitelist,
 };

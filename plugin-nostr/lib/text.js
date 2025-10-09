@@ -86,6 +86,43 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
         contextSection += `${contextSection ? '\n\n' : '\n\n'}MOOD STABLE: Community maintaining "${trend.tone}" tone consistently (${trend.duration} recent digests).`;
       }
     }
+
+    // NEW: Compact context hints line (subtle steer only)
+    try {
+      const hints = [];
+      // Top topics by name only
+      if (Array.isArray(topTopics) && topTopics.length) {
+        const names = topTopics.slice(0, 5).map(t => t?.topic || String(t)).filter(Boolean);
+        if (names.length) hints.push(`topics: ${names.join(', ')}`);
+      }
+      // Recent hour digest snapshot
+      const digest = contextData?.recentDigest;
+      if (digest?.metrics?.events) {
+        const ev = digest.metrics.events;
+        const us = digest.metrics.activeUsers;
+        const tt = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, 2).map(t => t.topic).join(', ') : '';
+        hints.push(`hour: ${ev} posts${us ? `/${us} users` : ''}${tt ? ` • ${tt}` : ''}`);
+      }
+      // Tone trend concise label
+      if (contextData?.toneTrend) {
+        const tr = contextData.toneTrend;
+        if (tr.detected && tr.shift) hints.push(`mood: ${tr.shift}`);
+        else if (tr.stable && tr.tone) hints.push(`mood: ${tr.tone}`);
+      }
+      // Watchlist items
+      const wsItems = Array.isArray(contextData?.watchlistState?.items) ? contextData.watchlistState.items.slice(-3) : [];
+      if (wsItems.length) hints.push(`watch: ${wsItems.join(', ')}`);
+      // Daily/weekly arc summaries (very short)
+      const daily = contextData?.dailyNarrative?.summary ? String(contextData.dailyNarrative.summary).slice(0, 60) : null;
+      const weekly = contextData?.weeklyNarrative?.summary ? String(contextData.weeklyNarrative.summary).slice(0, 60) : null;
+      if (daily) hints.push(`daily: ${daily}`);
+      if (weekly) hints.push(`weekly: ${weekly}`);
+
+      if (hints.length) {
+        const joined = hints.join(' • ').slice(0, 320);
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}CONTEXT HINTS (do not copy verbatim; use only as subtle steer): ${joined}`;
+      }
+    } catch {}
   }
 
   let reflectionSection = '';
@@ -369,6 +406,44 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
     }
   }
 
+  // NEW: Compact context hints for replies (subtle steer only)
+  let replyContextHints = '';
+  try {
+    const hints = [];
+    // Emerging story topics
+    if (narrativeContext?.emergingStories?.length) {
+      const names = narrativeContext.emergingStories.slice(0, 3).map(s => s.topic).filter(Boolean);
+      if (names.length) hints.push(`topics: ${names.join(', ')}`);
+    }
+    // Topic momentum
+    if (narrativeContext?.topicEvolution && narrativeContext.topicEvolution.trend && narrativeContext.topicEvolution.trend !== 'stable') {
+      const evo = narrativeContext.topicEvolution;
+      hints.push(`momentum: ${evo.topic} is ${evo.trend}`);
+    }
+    // Activity change if notable
+    if (narrativeContext?.historicalInsights?.eventTrend && Math.abs(narrativeContext.historicalInsights.eventTrend.change) > 20) {
+      const chg = narrativeContext.historicalInsights.eventTrend.change;
+      hints.push(`activity: ${chg > 0 ? '+' : ''}${Math.round(chg)}% vs usual`);
+    }
+    // Recurring themes / tone progression
+    if (loreContinuity?.recurringThemes?.length) {
+      const themes = loreContinuity.recurringThemes.slice(0, 3);
+      hints.push(`themes: ${themes.join(', ')}`);
+    }
+    if (loreContinuity?.toneProgression?.from && loreContinuity?.toneProgression?.to) {
+      hints.push(`mood: ${loreContinuity.toneProgression.from} → ${loreContinuity.toneProgression.to}`);
+    }
+    // Similar moments (just note presence)
+    if (narrativeContext?.similarMoments?.length) {
+      const m = narrativeContext.similarMoments[0];
+      if (m?.date) hints.push(`echo: ${m.date}`);
+    }
+    if (hints.length) {
+      const joined = hints.join(' • ').slice(0, 320);
+      replyContextHints = `\n\nCONTEXT HINTS (do not copy verbatim; use only as subtle steer): ${joined}`;
+    }
+  } catch {}
+
     return [
       `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}${proactiveInsight ? ' You have detected a significant pattern worth mentioning.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
@@ -381,6 +456,7 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
   globalTimelineSection, // NEW: Global timeline snapshot (optional)
   timelineLoreContextSection, // NEW: Timeline lore context
       narrativeContextSection, // NEW: Narrative context
+      replyContextHints, // NEW: Compact context hints
       proactiveInsightSection, // NEW: Proactive insight
       selfReflectionSection, // NEW: Self-reflection insights
       threadContextSection,

@@ -157,9 +157,37 @@ async function extractTopicsFromEvent(event, runtime) {
   const content = event.content.toLowerCase();
   const topics = [];
 
-  // Extract hashtags first
+  // Helper: sanitize a single topic string from LLM or hashtags
+  const sanitizeTopic = (t) => {
+    if (!t || typeof t !== 'string') return '';
+    let s = t
+      .trim()
+      // strip leading list bullets/quotes/arrows
+      .replace(/^[-–—•*>"]+\s*/g, '')
+      // remove URLs and nostr: handles
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/nostr:[a-z0-9]+\b/gi, ' ')
+      // collapse punctuation noise to spaces
+      .replace(/[\p{Ps}\p{Pe}\p{Pi}\p{Pf}\p{Po}\p{S}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    // keep multi-word entities; final lightweight guardrails
+    if (!s || s.length < 2 || s.length > 100) return '';
+    // ignore pure numbers
+    if (/^\d+$/.test(s)) return '';
+    return s;
+  };
+
+  // Extract hashtags first (apply same ignore rules)
   const hashtags = content.match(/#\w+/g) || [];
-  topics.push(...hashtags.map((h) => h.slice(1)));
+  const hashtagTopics = hashtags
+    .map((h) => sanitizeTopic(h.slice(1)))
+    .filter((t) => t && !FORBIDDEN_TOPIC_WORDS.has(t) && !TIMELINE_LORE_IGNORED_TERMS.has(t));
+  if (hashtagTopics.length && debugLog) {
+    debugLog(`[NOSTR] Hashtag topics for ${event.id?.slice(0, 8)}: [${hashtagTopics.join(', ')}]`);
+  }
+  topics.push(...hashtagTopics);
 
    // Use LLM to extract additional topics
    if (runtime?.useModel) {
@@ -198,30 +226,34 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
 
         if (response?.text) {
           // Trim outer whitespace/newlines first, then lowercase
-          const responseTrimmed = response.text.trim().toLowerCase();
+          const responseTrimmed = String(response.text).trim();
 
           // Handle "none" style responses for posts with no clear topics
-          if (responseTrimmed !== 'none') {
+          if (responseTrimmed.toLowerCase() !== 'none') {
             // Split on commas OR newlines to handle different model output formats
             const rawTopics = responseTrimmed
-              .split(/[,\n]+/)
+              .split(/[\,\n]+/)
               .map((t) => t.trim())
-              .filter((t) => t.length > 0 && t.length < 500);
-            
-            const llmTopics = rawTopics
+              .filter((t) => t && t.length < 500);
+
+            const cleanedTopics = rawTopics
+              .map((t) => sanitizeTopic(t))
+              .filter(Boolean)
+              // remove obvious noise after sanitize
               .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')
+              .filter((t) => !/^(https?:\/\/|www\.)/i.test(t))
               .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t))
-              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t));
-            
-            // Debug: log if topics were filtered out
-            if (rawTopics.length > 0 && llmTopics.length === 0 && debugLog) {
-              debugLog(`[NOSTR] All LLM topics filtered for ${event.id?.slice(0, 8)}: [${rawTopics.join(', ')}]`);
-            } else if (rawTopics.length > llmTopics.length && debugLog) {
-              const filtered = rawTopics.filter(t => !llmTopics.includes(t));
-              debugLog(`[NOSTR] Filtered ${filtered.length} LLM topics for ${event.id?.slice(0, 8)}: [${filtered.join(', ')}]`);
+              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t))
+              // drop nostr bech32 identifiers that slipped through
+              .filter((t) => !/\b(nprofile1|npub1|nevent1|naddr1|note1)[a-z0-9]+/i.test(t));
+
+            if (debugLog) {
+              debugLog(`[NOSTR] LLM raw topics for ${event.id?.slice(0, 8)}: [${rawTopics.join(' | ')}]`);
+              debugLog(`[NOSTR] LLM cleaned topics for ${event.id?.slice(0, 8)}: [${cleanedTopics.join(', ')}]`);
             }
-            
-            topics.push(...llmTopics);
+
+            // Push at most 3 cleaned topics
+            topics.push(...cleanedTopics.slice(0, 3));
           }
         }
     } catch (error) {
@@ -235,15 +267,22 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
     }
   }
 
-  if (!topics.length) {
+  // Deduplicate and cap to 3 topics overall
+  const uniqueTopics = Array.from(new Set(topics)).filter(Boolean);
+  if (uniqueTopics.length > 3) uniqueTopics.length = 3;
+
+  if (!uniqueTopics.length) {
     const fallbackTopics = _extractFallbackTopics(event.content);
     if (fallbackTopics.length) {
       debugLog?.(`[NOSTR] Topic fallback used for ${event.id?.slice(0, 8) || 'unknown'} -> ${fallbackTopics.join(', ')}`);
-      topics.push(...fallbackTopics);
+      uniqueTopics.push(...fallbackTopics.slice(0, 3));
     }
   }
 
-  return [...new Set(topics)];
+  if (debugLog) {
+    debugLog(`[NOSTR] Final topics for ${event.id?.slice(0, 8)}: [${uniqueTopics.join(', ')}]`);
+  }
+  return uniqueTopics;
 }
 
 function isSelfAuthor(evt, selfPkHex) {

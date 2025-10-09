@@ -4399,19 +4399,34 @@ Use this if it elevates the quote.`;
     if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
 
     const normalized = this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim();
-    if (!normalized) return;
+    if (!normalized) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (empty after sanitize)`);
+      return;
+    }
 
-    if (normalized.length < this.timelineLoreCandidateMinChars) return;
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-    if (wordCount < this.timelineLoreCandidateMinWords) return;
+    if (normalized.length < this.timelineLoreCandidateMinChars) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (too short: ${normalized.length} chars, ${wordCount} words)`);
+      return;
+    }
+    if (wordCount < this.timelineLoreCandidateMinWords) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (insufficient words: ${wordCount} < ${this.timelineLoreCandidateMinWords})`);
+      return;
+    }
 
     const heuristics = this._evaluateTimelineLoreCandidate(evt, normalized, context);
-    if (!heuristics || heuristics.reject === true) return;
+    if (!heuristics || heuristics.reject === true) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore heuristics rejected ${evt.id.slice(0, 8)} (score=${heuristics?.score ?? 'n/a'} reason=${heuristics?.reason || 'n/a'})`);
+      return;
+    }
 
     let verdict = heuristics;
     if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
       verdict = await this._screenTimelineLoreWithLLM(normalized, heuristics);
-      if (!verdict || verdict.accept === false) return;
+      if (!verdict || verdict.accept === false) {
+        this.logger?.debug?.(`[NOSTR] Timeline lore LLM rejected ${evt.id.slice(0, 8)} (score=${heuristics.score})`);
+        return;
+      }
     }
 
     const mergedTags = new Set();
@@ -4596,6 +4611,7 @@ CONTENT:
       }
     }
 
+    this.logger?.debug?.(`[NOSTR] Timeline lore buffer size now ${this.timelineLoreBuffer.length}`);
     this._maybeTriggerTimelineLoreDigest();
   }
 
@@ -4609,7 +4625,8 @@ CONTENT:
     const enoughBuffer = bufferSize >= this.timelineLoreBatchSize;
     const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs;
 
-    if (force || (enoughBuffer && intervalReached)) {
+    if (force || enoughBuffer || (intervalReached && bufferSize >= Math.max(3, Math.floor(this.timelineLoreBatchSize / 2)))) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore digest triggered (force=${force} buffer=${bufferSize} intervalReached=${intervalReached})`);
       this._processTimelineLoreBuffer(true).catch((err) => logger.debug('[NOSTR] Timeline lore digest error:', err?.message || err));
       return;
     }
@@ -4637,6 +4654,7 @@ CONTENT:
       this.timelineLoreTimer = null;
       this._processTimelineLoreBuffer().catch((err) => logger.debug('[NOSTR] Timeline lore scheduled digest failed:', err?.message || err));
     }, delayMs);
+    this.logger?.debug?.(`[NOSTR] Timeline lore digest scheduled in ~${Math.round(delayMs / 60000)}m (buffer=${this.timelineLoreBuffer.length})`);
   }
 
   _prepareTimelineLoreBatch(limit = this.timelineLoreBatchSize) {
@@ -4665,6 +4683,7 @@ CONTENT:
     if (!force) {
       const sinceLast = now - this.timelineLoreLastRun;
       if (sinceLast < this.timelineLoreMinIntervalMs && this.timelineLoreBuffer.length < this.timelineLoreBatchSize) {
+        this.logger?.debug?.(`[NOSTR] Timeline lore processing deferred (sinceLast=${Math.round(sinceLast / 60000)}m, buffer=${this.timelineLoreBuffer.length})`);
         this._ensureTimelineLoreTimer();
         return;
       }
@@ -4682,6 +4701,7 @@ CONTENT:
     try {
       const digest = await this._generateTimelineLoreSummary(batch);
       if (!digest) {
+        this.logger?.debug?.('[NOSTR] Timeline lore digest generation returned empty');
         return;
       }
 

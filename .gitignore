@@ -5,6 +5,7 @@ bun.lockb
 # Build output
 dist/
 build/
+.elizadb-test/
 
 # Environment variables
 .env

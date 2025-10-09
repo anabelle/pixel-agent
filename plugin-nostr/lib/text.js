@@ -615,14 +615,32 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
   // Build compact context lines, but keep "pure awareness" tone (no links/asks/hashtags)
   const contextLines = [];
   if (contextData) {
-    const { emergingStories = [], currentActivity = null, topTopics = [], toneTrend = null } = contextData || {};
+    const {
+      emergingStories = [],
+      currentActivity = null,
+      topTopics = [],
+      toneTrend = null,
+      timelineLore = [],
+      recentDigest = null,
+      topicEvolution = null,
+      similarMoments = [],
+      dailyNarrative = null,
+      weeklyNarrative = null,
+      monthlyNarrative = null
+    } = contextData || {};
     if (Array.isArray(emergingStories) && emergingStories.length) {
       const s = emergingStories[0];
       if (s?.topic) contextLines.push(`Whispers: ${s.topic}`);
     }
     if (Array.isArray(topTopics) && topTopics.length) {
-      const t = topTopics[0]?.topic || topTopics[0];
-      if (t) contextLines.push(`Pulse topic: ${t}`);
+      const tnames = topTopics.slice(0, 3).map(t => (typeof t === 'string' ? t : t?.topic)).filter(Boolean);
+      if (tnames.length) contextLines.push(`Topics now: ${tnames.join(' • ')}`);
+      const sample = topTopics.find(t => t?.sample?.content);
+      if (sample && sample.sample?.content) {
+        const raw = String(sample.sample.content).replace(/\s+/g, ' ').trim();
+        const snip = raw.slice(0, 120) + (raw.length > 120 ? '…' : '');
+        contextLines.push(`sample: "${snip}"`);
+      }
     }
     if (currentActivity && Number.isFinite(currentActivity.events)) {
       const vibe = currentActivity.events >= 12 ? 'alive' : currentActivity.events >= 5 ? 'stirring' : 'quiet';
@@ -631,6 +649,49 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
     if (toneTrend) {
       if (toneTrend.detected) contextLines.push(`Mood shift: ${toneTrend.shift}`);
       else if (toneTrend.stable && toneTrend.tone) contextLines.push(`Mood steady: ${toneTrend.tone}`);
+    }
+
+    // Timeline lore highlights
+    if (Array.isArray(timelineLore) && timelineLore.length) {
+      const loreLines = timelineLore.slice(-2)
+        .map((e) => (e?.headline || e?.narrative || ''))
+        .filter(Boolean)
+        .map((s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 140) + (String(s).length > 140 ? '…' : ''));
+      if (loreLines.length) contextLines.push(`lore: ${loreLines.map(x => `- ${x}`).join(' ')}`);
+    }
+
+    // Daily digest headline
+    if (recentDigest && recentDigest[0]?.headline) {
+      const h = String(recentDigest[0].headline).replace(/\s+/g, ' ').trim().slice(0, 140);
+      if (h) contextLines.push(`digest: ${h}`);
+    }
+
+    // Topic momentum for selected topic
+    if (topicEvolution && topicEvolution.trend && topicEvolution.summary) {
+      contextLines.push(`momentum: ${topicEvolution.trend} (${topicEvolution.summary})`);
+    }
+
+    // Similar past moments
+    if (Array.isArray(similarMoments) && similarMoments.length) {
+      const m = similarMoments[0];
+      if (m?.date && m?.summary) {
+        const ms = String(m.summary).replace(/\s+/g, ' ').trim().slice(0, 100) + (String(m.summary).length > 100 ? '…' : '');
+        contextLines.push(`echoes: ${m.date} — ${ms}`);
+      }
+    }
+
+    // Daily/Weekly/Monthly arcs (compact)
+    if (dailyNarrative?.narrative?.summary || dailyNarrative?.summary?.summary) {
+      const d = String(dailyNarrative.narrative?.summary || dailyNarrative.summary?.summary || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (d) contextLines.push(`day: ${d}`);
+    }
+    if (weeklyNarrative?.narrative?.summary || weeklyNarrative?.summary) {
+      const w = String(weeklyNarrative.narrative?.summary || weeklyNarrative.summary || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (w) contextLines.push(`week: ${w}`);
+    }
+    if (monthlyNarrative?.narrative?.summary || monthlyNarrative?.summary) {
+      const m = String(monthlyNarrative.narrative?.summary || monthlyNarrative.summary || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      if (m) contextLines.push(`month: ${m}`);
     }
   }
 

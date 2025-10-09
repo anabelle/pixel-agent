@@ -1913,13 +1913,36 @@ Response (YES/NO):`;
           minMentions: 2
         }) || [];
         let toneTrend = null;
+        let timelineLore = null;
+        let recentDigest = null;
         if (this.narrativeMemory?.trackToneTrend) {
           try { toneTrend = await this.narrativeMemory.trackToneTrend(); } catch {}
         }
-        contextData = { emergingStories, currentActivity, topTopics, toneTrend };
+        try {
+          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 3);
+          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 3;
+          timelineLore = this.contextAccumulator.getTimelineLore(limit);
+        } catch {}
+        try {
+          recentDigest = this.contextAccumulator.getRecentDigest(1);
+        } catch {}
+        contextData = { emergingStories, currentActivity, topTopics, toneTrend, timelineLore, recentDigest };
       }
       if (this.narrativeMemory?.analyzeLoreContinuity) {
         try { loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(3); } catch {}
+      }
+      // Pull daily/weekly/monthly narratives to reflect temporal arcs
+      if (this.narrativeMemory?.getHistoricalContext) {
+        try {
+          const last7d = await this.narrativeMemory.getHistoricalContext('7d');
+          const last30d = await this.narrativeMemory.getHistoricalContext('30d');
+          const latestDaily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
+          const latestWeekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
+          const latestMonthly = Array.isArray(last30d?.monthly) && last30d.monthly.length ? last30d.monthly[last30d.monthly.length - 1] : null;
+          if (latestDaily || latestWeekly || latestMonthly) {
+            contextData = { ...(contextData || {}), dailyNarrative: latestDaily, weeklyNarrative: latestWeekly, monthlyNarrative: latestMonthly };
+          }
+        } catch {}
       }
     } catch {}
 
@@ -1935,6 +1958,23 @@ Response (YES/NO):`;
       if (topTopics.length) {
         const t = topTopics[0];
         topic = typeof t === 'string' ? t : (t?.topic || null);
+      }
+    } catch {}
+
+    // Enrich with topic momentum and similar past moments for selected topic
+    try {
+      if (topic) {
+        if (this.narrativeMemory?.getTopicEvolution) {
+          try { contextData.topicEvolution = await this.narrativeMemory.getTopicEvolution(topic, 14) || null; } catch {}
+        }
+        if (this.contextAccumulator?.getRecentDigest && this.narrativeMemory?.getSimilarPastMoments) {
+          try {
+            const digest = this.contextAccumulator.getRecentDigest(1);
+            if (digest && digest[0]) {
+              contextData.similarMoments = await this.narrativeMemory.getSimilarPastMoments(digest[0], 1);
+            }
+          } catch {}
+        }
       }
     } catch {}
 

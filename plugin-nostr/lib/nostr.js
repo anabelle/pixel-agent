@@ -10,6 +10,67 @@ function getConversationIdFromEvent(evt) {
   return evt?.id || 'nostr';
 }
 
+const FORBIDDEN_TOPIC_WORDS = new Set([
+  'pixel',
+  'art',
+  'lnpixels',
+  'vps',
+  'freedom',
+  'creativity',
+  'survival',
+  'collaborative',
+  'douglas',
+  'adams',
+  'pratchett',
+  'terry'
+]);
+
+const STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'can', 'could', 'did', 'do', 'does',
+  'for', 'from', 'had', 'has', 'have', 'here', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'let',
+  'like', 'make', 'me', 'my', 'of', 'on', 'or', 'our', 'out', 'put', 'say', 'see', 'she', 'so', 'some',
+  'than', 'that', 'the', 'their', 'them', 'then', 'there', 'they', 'this', 'those', 'to', 'up', 'was',
+  'we', 'were', 'what', 'when', 'where', 'which', 'who', 'why', 'will', 'with', 'would', 'you', 'your',
+  'yours', 'thanks', 'thank', 'hey', 'hi', 'hmm', 'ok', 'okay', 'got', 'mean', 'means'
+]);
+
+function _cleanAndTokenizeText(rawText) {
+  if (!rawText || typeof rawText !== 'string') return [];
+  const stripped = rawText
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/nostr:[a-z0-9]+\b/gi, ' ');
+  const tokens = stripped
+    .toLowerCase()
+    .match(/[\p{L}\p{N}][\p{L}\p{N}\-']*/gu);
+  if (!tokens) return [];
+  return tokens.filter((token) => token.length > 2 && !STOPWORDS.has(token));
+}
+
+function _extractFallbackTopics(content, maxTopics = 3) {
+  const singles = _cleanAndTokenizeText(content);
+  if (!singles.length) return [];
+
+  const phrases = [];
+  for (let i = 0; i < singles.length - 1; i++) {
+    const first = singles[i];
+    const second = singles[i + 1];
+    if (first && second && first !== second) {
+      phrases.push(`${first} ${second}`);
+    }
+  }
+
+  const combined = [...phrases, ...singles];
+  const unique = [];
+  for (const candidate of combined) {
+    if (!candidate) continue;
+    if (FORBIDDEN_TOPIC_WORDS.has(candidate)) continue;
+    if (unique.includes(candidate)) continue;
+    unique.push(candidate);
+    if (unique.length >= maxTopics) break;
+  }
+  return unique;
+}
+
 async function extractTopicsFromEvent(event, runtime) {
   if (!event || !event.content) return [];
 
@@ -62,15 +123,14 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
         if (response?.text) {
           const responseTrimmed = response.text.trim().toLowerCase();
 
-          // Handle "none" response for posts with no clear topics
+          // Handle "none" style responses for posts with no clear topics
           if (responseTrimmed !== 'none') {
-            const forbiddenWords = ['pixel', 'art', 'lnpixels', 'vps', 'freedom', 'creativity', 'survival', 'collaborative', 'douglas', 'adams', 'pratchett', 'terry'];
             const llmTopics = responseTrimmed
               .split(',')
-              .map(t => t.trim())
-              .filter(t => t.length > 0 && t.length < 500) // Reasonable length
-              .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none') // Filter out vague terms
-              .filter(t => !forbiddenWords.includes(t.toLowerCase())); // Filter out forbidden words
+              .map((t) => t.trim())
+              .filter((t) => t.length > 0 && t.length < 500)
+              .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')
+              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t.toLowerCase()));
             topics.push(...llmTopics);
           }
         }
@@ -82,6 +142,14 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
       } else if (debugLog) {
         debugLog(`[NOSTR] LLM topic extraction failed: ${message}`);
       }
+    }
+  }
+
+  if (!topics.length) {
+    const fallbackTopics = _extractFallbackTopics(event.content);
+    if (fallbackTopics.length) {
+      debugLog?.(`[NOSTR] Topic fallback used for ${event.id?.slice(0, 8) || 'unknown'} -> ${fallbackTopics.join(', ')}`);
+      topics.push(...fallbackTopics);
     }
   }
 

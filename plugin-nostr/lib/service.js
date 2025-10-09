@@ -1115,7 +1115,7 @@ Response (YES/NO):`;
   _scoreEventForEngagement(evt) { 
     let baseScore = _scoreEventForEngagement(evt);
     
-    // NEW: Boost score if event relates to trending topics
+    // Boost score if event relates to trending topics
     if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions({
@@ -1141,6 +1141,30 @@ Response (YES/NO):`;
         }
       } catch (err) {
         logger.debug('[NOSTR] Failed to apply context boost to score:', err.message);
+      }
+    }
+    
+    // Phase 4: Boost score if event matches active watchlist
+    if (this.narrativeMemory?.checkWatchlistMatch && evt?.content) {
+      try {
+        // Extract topics from event tags for matching
+        const eventTags = Array.isArray(evt.tags) 
+          ? evt.tags.filter(t => t?.[0] === 't').map(t => t[1]).filter(Boolean)
+          : [];
+        
+        const watchlistMatch = this.narrativeMemory.checkWatchlistMatch(evt.content, eventTags);
+        if (watchlistMatch) {
+          // Convert watchlist boost (0.2-0.5) to engagement score scale (0-1)
+          // Use 60% of the boost to keep it proportional
+          const discoveryBoost = watchlistMatch.boostScore * 0.6;
+          baseScore += discoveryBoost;
+          
+          this.logger?.debug?.(
+            `[WATCHLIST-DISCOVERY] ${evt.id.slice(0, 8)} matched: ${watchlistMatch.matches.map(m => m.item).join(', ')} (+${discoveryBoost.toFixed(2)})`
+          );
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to apply watchlist boost to discovery score:', err?.message || err);
       }
     }
     
@@ -4593,6 +4617,22 @@ Use this if it elevates the quote.`;
       logger.debug('[NOSTR] Timeline lore trending check failed:', err?.message || err);
     }
 
+    // Phase 4: Check watchlist matches
+    let watchlistMatch = null;
+    try {
+      if (this.narrativeMemory?.checkWatchlistMatch) {
+        watchlistMatch = this.narrativeMemory.checkWatchlistMatch(normalizedContent, topics);
+        if (watchlistMatch) {
+          score += watchlistMatch.boostScore;
+          this.logger?.debug?.(
+            `[WATCHLIST-HIT] ${evt.id.slice(0, 8)} matched: ${watchlistMatch.matches.map(m => m.item).join(', ')} (+${watchlistMatch.boostScore.toFixed(2)})`
+          );
+        }
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore watchlist check failed:', err?.message || err);
+    }
+
     if (score < 1 && authorScore < 0.4) {
       return null;
     }
@@ -4602,11 +4642,15 @@ Use this if it elevates the quote.`;
     if (hasLink) signals.push('references external source');
     if (isThreadContribution) signals.push('thread activity');
     if (trendingMatches.length) signals.push(`trending: ${trendingMatches.join(', ')}`);
+    if (watchlistMatch) {
+      signals.push(watchlistMatch.reason);
+    }
 
     const reasonParts = [];
     if (wordCount >= 40) reasonParts.push('long-form');
     if (trendingMatches.length) reasonParts.push('touches active themes');
     if (authorScore >= 0.7) reasonParts.push('trusted author');
+    if (watchlistMatch) reasonParts.push(`predicted storyline (${watchlistMatch.matches.length} match${watchlistMatch.matches.length > 1 ? 'es' : ''})`);
     if (signals.length) reasonParts.push(signals.join('; '));
 
     return {
@@ -4616,6 +4660,7 @@ Use this if it elevates the quote.`;
       reason: reasonParts.join(', ') || 'notable activity',
       topics,
       trendingMatches,
+      watchlistMatches: watchlistMatch?.matches || [],
       authorScore: Number(authorScore.toFixed(2)),
       signals,
       summary: null,
@@ -5299,6 +5344,11 @@ ${postLines.slice(0, 5500)}`;
   getCurrentActivity() {
     if (!this.contextAccumulator) return null;
     return this.contextAccumulator.getCurrentActivity();
+  }
+
+  getWatchlistState() {
+    if (!this.narrativeMemory?.getWatchlistState) return null;
+    return this.narrativeMemory.getWatchlistState();
   }
 
   getTopicTimeline(topic, limit = 10) {

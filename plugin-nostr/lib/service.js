@@ -4924,6 +4924,10 @@ CONTENT:
       const { generateWithModelOrFallback } = require('./generation');
       const type = this._getSmallModelType();
 
+      // Take most recent posts that fit in prompt (prioritize recency)
+      const maxPostsInPrompt = Math.min(this.timelineLoreMaxPostsInPrompt, batch.length);
+      const recentBatch = batch.slice(-maxPostsInPrompt);
+
       const topicCounts = new Map();
       for (const item of batch) {
         for (const tag of item.tags || []) {
@@ -4937,7 +4941,7 @@ CONTENT:
         .slice(0, 6)
         .map(([tag, count]) => `${tag}(${count})`);
 
-      const postLines = batch.map((item, idx) => {
+      const postLines = recentBatch.map((item, idx) => {
         const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
         const cleanContent = this._stripHtmlForLore(item.content || '');
         const rationale = this._coerceLoreString(item.rationale || 'signal');
@@ -4950,6 +4954,14 @@ CONTENT:
           `SIGNALS: ${signalLine}`,
         ].join('\n');
       }).join('\n\n');
+      
+      // Sanity check: warn if prompt is still very long
+      if (postLines.length > 8000) {
+        this.logger?.warn?.(
+          `[NOSTR] Timeline lore prompt very long (${postLines.length} chars, ${recentBatch.length} posts). ` +
+          `Consider reducing timelineLoreMaxPostsInPrompt.`
+        );
+      }
 
       const prompt = `You are Pixel's home-feed analyst. Distill the following Nostr posts into a concise \"timeline lore\" entry capturing the community's evolving story.
 
@@ -4980,8 +4992,8 @@ WATCHLIST GUIDELINES:
 
 Ranked tags from heuristics: ${rankedTags.join(', ') || 'none'}
 
-POSTS:
-${postLines.slice(0, 5500)}`;
+POSTS (${recentBatch.length} most recent from batch of ${batch.length}):
+${postLines}`;
 
       const raw = await generateWithModelOrFallback(
         this.runtime,

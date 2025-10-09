@@ -19,26 +19,45 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   // NEW: Build context section if available
   let contextSection = '';
   if (contextData) {
-    const { emergingStories, currentActivity } = contextData;
-    
+    const { emergingStories, currentActivity, topTopics } = contextData;
+
     if (emergingStories && emergingStories.length > 0) {
       const topStory = emergingStories[0];
-      contextSection += `COMMUNITY CONTEXT: There's active discussion about "${topStory.topic}" (${topStory.mentions} mentions by ${topStory.users} users, ${Object.keys(topStory.sentiment).sort((a,b) => topStory.sentiment[b] - topStory.sentiment[a])[0]} sentiment). `;
-      
+      const dominantSentiment = Object.keys(topStory.sentiment || {})
+        .sort((a, b) => (topStory.sentiment[b] || 0) - (topStory.sentiment[a] || 0))[0] || 'mixed';
+      contextSection += `COMMUNITY CONTEXT: "${topStory.topic}" is buzzing (${topStory.mentions} mentions by ${topStory.users} users, mood: ${dominantSentiment}). `;
+
       if (emergingStories.length > 1) {
         contextSection += `Also trending: ${emergingStories.slice(1, 3).map(s => s.topic).join(', ')}. `;
       }
     }
-    
-    if (currentActivity && currentActivity.events > 20) {
-      contextSection += `Current vibe: ${currentActivity.events} recent posts, ${currentActivity.users} active users. `;
-      if (currentActivity.topics && currentActivity.topics.length > 0) {
-        contextSection += `Hot topics: ${currentActivity.topics.slice(0, 3).map(t => t.topic).join(', ')}. `;
+
+    if (Array.isArray(topTopics) && topTopics.length > 0) {
+      const headline = topTopics
+        .slice(0, 4)
+        .map(t => `${t.topic} (${t.count})`)
+        .join(' • ');
+      contextSection += `Community chatter highlights: ${headline}. `;
+
+      const sample = topTopics.find(t => t?.sample?.content);
+      if (sample && sample.sample.content) {
+        const rawSample = String(sample.sample.content);
+        const compactSample = rawSample.replace(/\s+/g, ' ').trim();
+        const snippet = compactSample.slice(0, 120);
+        const ellipsis = compactSample.length > snippet.length ? '…' : '';
+        contextSection += `Recent vibe from ${sample.topic}: "${snippet}${ellipsis}" `;
       }
     }
-    
+
+    if (currentActivity && Number.isFinite(currentActivity.events) && currentActivity.events > 0) {
+      const { events, users, topics = [] } = currentActivity;
+      const hotTopics = topics.slice(0, 3).map(t => t.topic).join(', ');
+      const qualifier = events >= 15 ? 'Current vibe' : events >= 5 ? 'Slow build' : 'Quiet hum';
+      contextSection += `${qualifier}: ${events} posts from ${users} users${hotTopics ? ` • Hot: ${hotTopics}` : ''}. `;
+    }
+
     if (contextSection) {
-      contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider engaging with these community trends naturally, but ONLY if it fits your authentic voice. Don't force it. You can also post about something completely different.`;
+      contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider weaving these community threads in naturally, but ONLY if it fits your authentic voice. It's okay to go elsewhere if inspiration hits differently.`;
     }
   }
 

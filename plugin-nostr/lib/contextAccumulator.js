@@ -1408,6 +1408,55 @@ Make it profound! Find the deeper story in the data.`;
     };
   }
 
+  getTopTopicsAcrossHours(options = {}) {
+    if (!this.hourlyDigests || this.hourlyDigests.size === 0) {
+      return [];
+    }
+
+    const hourMs = 60 * 60 * 1000;
+    const hours = Math.max(1, Number.parseInt(options.hours ?? 6, 10) || 6);
+    const limit = Math.max(1, Number.parseInt(options.limit ?? 5, 10) || 5);
+    const minMentions = Math.max(1, Number.parseInt(options.minMentions ?? 2, 10) || 2);
+
+    const cutoff = this._getCurrentHour() - ((hours - 1) * hourMs);
+    const totals = new Map();
+
+    for (const [bucket, digest] of this.hourlyDigests.entries()) {
+      if (!digest || bucket < cutoff) continue;
+      for (const [topic, count] of digest.topics.entries()) {
+        if (!topic || topic === 'general' || !Number.isFinite(count) || count <= 0) continue;
+        totals.set(topic, (totals.get(topic) || 0) + count);
+      }
+    }
+
+    if (totals.size === 0) {
+      return [];
+    }
+
+    const topicEntries = Array.from(totals.entries()).sort((a, b) => b[1] - a[1]);
+
+    const mapEntryToResult = ([topic, count]) => {
+      const timeline = this.topicTimelines.get(topic) || [];
+      const sample = timeline.length > 0 ? timeline[timeline.length - 1] : null;
+      return {
+        topic,
+        count,
+        sample
+      };
+    };
+
+    let results = topicEntries
+      .filter(([_, count]) => count >= minMentions)
+      .slice(0, limit)
+      .map(mapEntryToResult);
+
+    if (results.length === 0) {
+      results = topicEntries.slice(0, limit).map(mapEntryToResult);
+    }
+
+    return results;
+  }
+
   // Utility methods
   
   _createEmptyDigest() {

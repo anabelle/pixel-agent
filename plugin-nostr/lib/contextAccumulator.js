@@ -258,48 +258,24 @@ class ContextAccumulator {
     // Detect if it's a question
     const isQuestion = content.includes('?');
     
-    // Topic extraction: Try LLM first (if enabled), fallback to keyword-based
+    // Topic extraction: Use unified extraction from nostr.js (includes LLM + fallback)
     let topics = [];
     let topicSource = 'none';
 
     if (allowTopicExtraction) {
-      if (this.llmTopicExtractionEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
-          content.length >= this.llmTopicMinLength && content.length <= this.llmTopicMaxLength) {
-        // Use LLM for intelligent topic extraction
-        topics = await this._extractTopicsWithLLM(content);
-        if (topics.length > 0) {
-          topicSource = 'llm';
-        }
-      } else if (this.llmTopicExtractionEnabled) {
-        if (!this.runtime || typeof this.runtime.generateText !== 'function') {
-          topicSource = 'llm-unavailable';
-        } else if (content.length < this.llmTopicMinLength) {
-          topicSource = 'llm-too-short';
-        } else if (content.length > this.llmTopicMaxLength) {
-          topicSource = 'llm-too-long';
-        }
-      } else {
-        topicSource = 'llm-disabled';
+      // extractTopicsFromEvent handles LLM extraction with proper filtering and fallback
+      topics = await extractTopicsFromEvent(evt, this.runtime);
+      if (topics.length > 0) {
+        topicSource = 'extracted';
       }
     } else {
       topicSource = 'topic-extraction-disabled';
     }
     
-    // If LLM didn't work or returned nothing, use keyword-based extraction
-    if (allowTopicExtraction && topics.length === 0) {
-      const keywordTopics = await extractTopicsFromEvent(evt, this.runtime);
-      if (keywordTopics.length > 0) {
-        topics = keywordTopics;
-        topicSource = topicSource === 'llm' ? 'llm-fallback-keyword' : 'keyword';
-      }
-    }
-    
-    // If still no topics, use 'general' as fallback
-    if (topics.length === 0) {
-      if (!skipGeneralFallback) {
-        topics = ['general'];
-        topicSource = topicSource === 'keyword' ? 'keyword-fallback-general' : 'fallback-general';
-      }
+    // If still no topics and not skipping fallback, use 'general'
+    if (topics.length === 0 && !skipGeneralFallback) {
+      topics = ['general'];
+      topicSource = 'fallback-general';
     }
 
     if (this.logger?.debug) {

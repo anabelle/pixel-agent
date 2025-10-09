@@ -6,9 +6,9 @@ async function main() {
     warn: (...args) => console.log('[WARN]', ...args)
   };
 
-  const makeRuntime = (text) => ({
+  const makeRuntime = (text, asString = false) => ({
     logger,
-    useModel: async (_type, _opts) => ({ text })
+    useModel: async (_type, _opts) => (asString ? text : { text })
   });
 
   const cases = [
@@ -35,11 +35,18 @@ async function main() {
       },
       modelText: 'Nostr\nRelay\nBrasil',
       expect: ['relay','brasil','libernet'] // hashtags will add more; at least ensure not empty
+    },
+    {
+      name: 'String response',
+      event: { id: 'evt4', content: 'British journalist Yvonne Ridley shares her experience with the Taliban and Sumud Flotilla.' },
+      modelText: 'Yvonne Ridley\nSumud Flotilla\nTaliban',
+      expect: ['yvonne ridley','sumud flotilla','taliban'],
+      asString: true
     }
   ];
 
   for (const c of cases) {
-    const topics = await extractTopicsFromEvent(c.event, makeRuntime(c.modelText));
+    const topics = await extractTopicsFromEvent(c.event, makeRuntime(c.modelText, c.asString));
     console.log(`Case: ${c.name}`);
     console.log('Topics:', topics);
   }

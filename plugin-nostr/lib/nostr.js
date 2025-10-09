@@ -232,9 +232,13 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
          temperature: 0.3
        });
 
-        if (response?.text) {
+        const responseText = typeof response === 'string'
+          ? response
+          : (response?.text ?? '');
+
+        if (responseText) {
           // Trim outer whitespace/newlines first, then lowercase
-          const responseTrimmed = String(response.text).trim();
+          const responseTrimmed = String(responseText).trim();
 
           // Handle "none" style responses for posts with no clear topics
           if (responseTrimmed.toLowerCase() !== 'none') {

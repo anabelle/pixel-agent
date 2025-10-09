@@ -1516,14 +1516,37 @@ Response (YES/NO):`;
       }
       logger.info(`[NOSTR] Discovery round ${round + 1}/${this.discoveryMaxSearchRounds}`);
 
-      // Choose topics based on round
-      const topics = round === 0 ? this._pickDiscoveryTopics() : this._expandTopicSearch();
+      // Phase 4: Prioritize watchlist topics for discovery search
+      let topics = [];
+      let topicSource = 'primary';
+      
+      if (round === 0 && this.narrativeMemory?.getWatchlistState) {
+        const watchlistState = this.narrativeMemory.getWatchlistState();
+        if (watchlistState?.items?.length > 0) {
+          // Use watchlist items as discovery topics (take up to 3 most recent)
+          topics = watchlistState.items
+            .sort((a, b) => a.age - b.age) // Newest first
+            .slice(0, 3)
+            .map(item => item.item);
+          
+          if (topics.length > 0) {
+            topicSource = 'watchlist';
+            logger.info(`[NOSTR] Round ${round + 1}: using watchlist topics for proactive discovery (${topics.length} items)`);
+          }
+        }
+      }
+      
+      // Fallback to default topic selection if no watchlist or subsequent rounds
+      if (topics.length === 0) {
+        topics = round === 0 ? this._pickDiscoveryTopics() : this._expandTopicSearch();
+        topicSource = round === 0 ? 'primary' : 'fallback';
+      }
+      
       if (!topics.length) {
         logger.debug(`[NOSTR] Round ${round + 1}: no topics available, skipping`);
         continue;
       }
 
-      const topicSource = round === 0 ? 'primary' : 'fallback';
       logger.info(`[NOSTR] Round ${round + 1} topics (${topicSource}): ${topics.join(', ')}`);
 
       // Get search parameters for this round

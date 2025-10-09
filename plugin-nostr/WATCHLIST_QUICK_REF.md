@@ -2,17 +2,20 @@
 
 ## 🎯 What It Does
 
-Tracks predicted topics from lore digests and boosts matching content for 24 hours in **two systems**:
-1. **Timeline Lore Capture** - Boosts heuristic scores (+0.2 to +0.5)
-2. **Discovery Search** - Boosts engagement scores (+0.12 to +0.3)
+Tracks predicted topics from lore digests and uses them for **proactive discovery** + score boosting:
+
+1. **Proactive Discovery** - Uses watchlist as Round 1 search topics
+2. **Timeline Lore Capture** - Boosts heuristic scores (+0.2 to +0.5)
+3. **Discovery Scoring** - Boosts engagement scores (+0.12 to +0.3)
 
 **Example Flow:**
 1. Digest predicts: `["privacy tools", "wallet security"]`
 2. System tracks these for 24h
-3. **Timeline**: New post mentions "privacy tools" → heuristic score +0.2
-4. **Discovery**: Search finds account posting about "wallet security" → engagement score +0.18
-5. Post more likely to enter next digest, account more likely to get reply/follow
-6. Items auto-expire after 24h
+3. **Discovery Round 1**: Actively searches Nostr for "#privacy tools" and "#wallet security"
+4. **Timeline**: New post mentions "privacy tools" → heuristic score +0.2
+5. **Discovery Scoring**: Found events get additional boost if they match
+6. Results: Coherent narrative-driven engagement across all systems
+7. Items auto-expire after 24h
 
 ---
 
@@ -211,8 +214,12 @@ const testMatch = narrativeMemory.checkWatchlistMatch(
 
 ### Normal Operations
 ```
+[NOSTR] Discovery round 1/3
+[NOSTR] Round 1: using watchlist topics for proactive discovery (3 items)
+[NOSTR] Round 1 topics (watchlist): privacy tools, wallet security, zap splits
 [WATCHLIST] Added 4 items: privacy tools, wallet security, zap splits, self-custody
 [WATCHLIST-HIT] a1b2c3d4 matched: privacy tools (+0.20)
+[WATCHLIST-DISCOVERY] e5f6g7h8 matched: wallet security (+0.18)
 [WATCHLIST] Pruned 2 expired items
 ```
 

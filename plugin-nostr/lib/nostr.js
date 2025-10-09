@@ -163,6 +163,7 @@ async function extractTopicsFromEvent(event, runtime) {
   debugLog?.(`[NOSTR] Extracting topics for ${event.id?.slice(0, 8) || 'unknown'}`);
   const content = event.content.toLowerCase();
   const topics = [];
+  let llmCleanedTopics = [];
 
   // Helper: sanitize a single topic string from LLM or hashtags
   const sanitizeTopic = (t) => {
@@ -259,8 +260,8 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
               debugLog(`[NOSTR] LLM cleaned topics for ${event.id?.slice(0, 8)}: [${cleanedTopics.join(', ')}]`);
             }
 
-            // Push at most 3 cleaned topics
-            topics.push(...cleanedTopics.slice(0, 3));
+            // Prefer LLM topics explicitly
+            llmCleanedTopics = cleanedTopics.slice(0, 3);
           }
         }
     } catch (error) {
@@ -274,11 +275,16 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
     }
   }
 
-  // Deduplicate and cap to 3 topics overall
-  const uniqueTopics = Array.from(new Set(topics)).filter(Boolean);
+  // Merge hashtags + LLM topics, then dedupe and cap
+  const merged = [...topics, ...llmCleanedTopics];
+  let uniqueTopics = Array.from(new Set(merged)).filter(Boolean);
   if (uniqueTopics.length > 3) uniqueTopics.length = 3;
 
   if (!uniqueTopics.length) {
+    // Log if we had LLM topics but they were filtered out by merging/dedupe stage
+    if (llmCleanedTopics.length > 0 && debugLog) {
+      debugLog(`[NOSTR] Warning: LLM provided topics but none survived merge/filter for ${event.id?.slice(0, 8)}: [${llmCleanedTopics.join(', ')}]`);
+    }
     const fallbackTopics = _extractFallbackTopics(event.content);
     if (fallbackTopics.length) {
       debugLog?.(`[NOSTR] Topic fallback used for ${event.id?.slice(0, 8) || 'unknown'} -> ${fallbackTopics.join(', ')}`);

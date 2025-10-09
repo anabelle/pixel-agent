@@ -1722,13 +1722,13 @@ Response (YES/NO):`;
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
     logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection);
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection, timelineLoreSection);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -1745,18 +1745,31 @@ Response (YES/NO):`;
           limit: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_LIMIT') ?? process?.env?.NOSTR_CONTEXT_TOPICS_LIMIT ?? 5),
           minMentions: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_MIN_MENTIONS') ?? process?.env?.NOSTR_CONTEXT_TOPICS_MIN_MENTIONS ?? 2)
         });
+        let timelineLore = null;
+        try {
+          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 2);
+          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 2;
+          const loreEntries = this.contextAccumulator.getTimelineLore(limit);
+          if (Array.isArray(loreEntries) && loreEntries.length) {
+            timelineLore = loreEntries.slice(-limit);
+          }
+        } catch (err) {
+          logger.debug('[NOSTR] Failed to gather timeline lore for post:', err?.message || err);
+        }
         const activityEvents = currentActivity?.events || 0;
         const hasStories = emergingStories.length > 0;
         const hasMeaningfulActivity = activityEvents >= 5;
         const hasTopicHighlights = topTopics.length > 0;
+        const hasLoreHighlights = Array.isArray(timelineLore) && timelineLore.length > 0;
         
         // Only include context if there's something interesting
-        if (hasStories || hasMeaningfulActivity || hasTopicHighlights) {
+        if (hasStories || hasMeaningfulActivity || hasTopicHighlights || hasLoreHighlights) {
           contextData = {
             emergingStories,
             currentActivity,
             recentDigest: this.contextAccumulator.getRecentDigest(1),
-            topTopics
+            topTopics,
+            timelineLore
           };
           
           logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}`);
@@ -1793,6 +1806,7 @@ Response (YES/NO):`;
           hasReflection: !!reflectionInsights,
           emergingStories: Array.isArray(contextData?.emergingStories) ? contextData.emergingStories.length : 0,
           activityEvents: contextData?.currentActivity?.events ?? 0,
+          timelineLore: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore.length : 0,
         };
         logger.debug(`[NOSTR][DEBUG] Post prompt meta (len=${prompt.length}, model=${type}): ${JSON.stringify(meta)}`);
       }
@@ -2127,6 +2141,39 @@ Response (YES/NO):`;
       }
     } catch (e) { try { (this.logger || console).debug?.('[NOSTR] global timeline section error:', e?.message || e); } catch {} }
 
+    // Always attempt to surface recent timeline lore digests for richer awareness
+    let timelineLoreSection = null;
+    try {
+      if (this.contextAccumulator && typeof this.contextAccumulator.getTimelineLore === 'function') {
+        const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 2);
+        const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 2;
+        const loreEntries = this.contextAccumulator.getTimelineLore(limit);
+        if (Array.isArray(loreEntries) && loreEntries.length) {
+          const formatted = loreEntries
+            .slice(-limit)
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object') return null;
+              const headline = typeof entry.headline === 'string' && entry.headline.trim() ? entry.headline.trim() : null;
+              const narrative = typeof entry.narrative === 'string' && entry.narrative.trim() ? entry.narrative.trim() : null;
+              const insights = Array.isArray(entry.insights) ? entry.insights.slice(0, 2) : [];
+              const watch = Array.isArray(entry.watchlist) ? entry.watchlist.slice(0, 2) : [];
+              const pieces = [];
+              if (headline) pieces.push(headline);
+              if (!headline && narrative) pieces.push(narrative.slice(0, 160));
+              if (insights.length) pieces.push(`insights: ${insights.join(', ')}`);
+              if (watch.length) pieces.push(`watch: ${watch.join(', ')}`);
+              if (entry.tone) pieces.push(`tone: ${entry.tone}`);
+              return pieces.length ? `• ${pieces.join(' • ')}` : null;
+            })
+            .filter(Boolean);
+
+          if (formatted.length) {
+            timelineLoreSection = formatted.join('\n');
+          }
+        }
+      }
+    } catch (e) { try { (this.logger || console).debug?.('[NOSTR] timeline lore section error:', e?.message || e); } catch {} }
+
     // Fetch recent author posts for richer context
     let authorPostsSection = null;
     if (evt?.pubkey) {
@@ -2159,7 +2206,7 @@ Response (YES/NO):`;
     }
 
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection);
+  const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection, timelineLoreSection);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
@@ -2185,6 +2232,7 @@ Response (YES/NO):`;
             reflection: !!selfReflectionContext,
             userHistory: !!userHistorySection,
             globalTimeline: !!globalTimelineSection,
+            timelineLore: !!timelineLoreSection,
           },
           profile: userProfile ? {
             topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],

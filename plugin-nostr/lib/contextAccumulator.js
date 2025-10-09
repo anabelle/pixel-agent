@@ -257,16 +257,22 @@ class ContextAccumulator {
 
   async _extractTopicsWithLLM(content) {
     try {
-      const prompt = `Analyze this post and identify 1-3 specific topics or themes. Be precise and insightful - avoid generic terms like "general" or "discussion".
+      const prompt = `What are the main topics in this post? Give 1-3 specific topics.
 
 Post: "${content.slice(0, 800)}"
 
-Examples of good topics:
-- Instead of "tech": "AI agents", "nostr protocol", "bitcoin mining"
-- Instead of "art": "pixel art", "collaborative canvas", "generative design"
-- Instead of "social": "community building", "decentralization", "privacy advocacy"
+Rules:
+- ONLY use topics that are actually mentioned or clearly implied in the post
+- Do NOT invent or add topics that aren't in the post
+- NEVER include these words: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
+- Be specific, not general
+- If about a person, country, or event, use that as a topic
+- No words like "general", "discussion", "various"
+- If the post has no clear topics, respond with just 'none'
+- Just list the topics separated by commas
+- Maximum 3 topics
 
-Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropayments, value4value"):`;
+Topics:`;
 
       const response = await this.runtime.generateText(prompt, {
         temperature: 0.3,
@@ -274,15 +280,25 @@ Respond with ONLY the topics, comma-separated (e.g., "bitcoin lightning, micropa
       });
 
       // Parse comma-separated topics
-      const topicsRaw = response.trim()
+      const responseTrimmed = response.trim().toLowerCase();
+
+      // Handle "none" response for posts with no clear topics
+      if (responseTrimmed === 'none') {
+        this.logger.debug(`[CONTEXT] LLM topics returned 'none', using fallback`);
+        return [];
+      }
+
+      const forbiddenWords = ['pixel', 'art', 'lnpixels', 'vps', 'freedom', 'creativity', 'survival', 'collaborative', 'douglas', 'adams', 'pratchett', 'terry'];
+      const topicsRaw = responseTrimmed
         .split(',')
-        .map(t => t.trim().toLowerCase())
+        .map(t => t.trim())
         .filter(t => t.length > 0 && t.length < 50) // Reasonable length
-        .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion'); // Filter out only exact vague terms
-      
+        .filter(t => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none') // Filter out vague terms
+        .filter(t => !forbiddenWords.includes(t.toLowerCase())); // Filter out forbidden words
+
       // Limit to 3 topics
       const topics = topicsRaw.slice(0, 3);
-      
+
       // Validate we got something useful
       if (topics.length === 0) {
         this.logger.debug(`[CONTEXT] LLM topics returned empty, using fallback`);

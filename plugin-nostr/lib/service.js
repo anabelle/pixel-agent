@@ -4029,8 +4029,7 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
    }
 
   async handleHomeFeedEvent(evt) {
-    logger.info('handleHomeFeedEvent called for', evt.id);
-    logger.info('this.runtime.useModel', !!this.runtime?.useModel);
+    this.logger?.debug?.(`[NOSTR] Home feed event received: ${evt?.id?.slice(0, 8) || 'unknown'}`);
     // Deduplicate events (same event can arrive from multiple relays)
     if (!evt || !evt.id) return;
     if (this.homeFeedQualityTracked.has(evt.id)) return;

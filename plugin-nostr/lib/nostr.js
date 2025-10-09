@@ -11,11 +11,17 @@ function getConversationIdFromEvent(evt) {
 }
 
 async function extractTopicsFromEvent(event, runtime) {
-  console.log('extracting topics for event', event.id);
-  console.log('runtime.useModel', !!runtime?.useModel);
   if (!event || !event.content) return [];
-  console.log('extracting topics for event', event.id);
-  console.log('runtime.useModel', !!runtime?.useModel);
+
+  const runtimeLogger = runtime?.logger;
+  const debugLog = typeof runtimeLogger?.debug === 'function'
+    ? runtimeLogger.debug.bind(runtimeLogger)
+    : null;
+  const warnLog = typeof runtimeLogger?.warn === 'function'
+    ? runtimeLogger.warn.bind(runtimeLogger)
+    : null;
+
+  debugLog?.(`[NOSTR] Extracting topics for ${event.id?.slice(0, 8) || 'unknown'}`);
   const content = event.content.toLowerCase();
   const topics = [];
 
@@ -70,7 +76,12 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
         }
     } catch (error) {
       // Fallback to empty if LLM fails
-      console.log('[NOSTR] LLM topic extraction failed:', error.message);
+      const message = error?.message || String(error);
+      if (warnLog) {
+        warnLog(`[NOSTR] LLM topic extraction failed: ${message}`);
+      } else if (debugLog) {
+        debugLog(`[NOSTR] LLM topic extraction failed: ${message}`);
+      }
     }
   }
 

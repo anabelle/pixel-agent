@@ -355,7 +355,7 @@ New: wallet integration, self-custody
 
 ---
 
-### Use Case 6: Watchlist-Driven Discovery (NEW)
+### Use Case 6: Watchlist-Driven Discovery (PROACTIVE)
 **Scenario:** Digest predicts "privacy tools" will be important. Discovery search runs 2 hours later.
 
 **Watchlist State:**
@@ -364,33 +364,41 @@ Active watchlist: ["privacy tools", "wallet security", "zap splits"]
 Age: 2h | Expires in: 22h
 ```
 
-**Discovery Search Finds:**
+**Discovery Round 1 - Topic Selection:**
+```
+[NOSTR] Discovery round 1/3
+[NOSTR] Round 1: using watchlist topics for proactive discovery (3 items)
+[NOSTR] Round 1 topics (watchlist): privacy tools, wallet security, zap splits
+```
+
+**Discovery Search Actively Queries:**
+```
+Search 1: #privacy tools → finds 15 events
+Search 2: #wallet security → finds 22 events
+Search 3: #zap splits → finds 18 events
+```
+
+**Discovery Search Results:**
 ```
 Event A: "Just released: new privacy-preserving wallet features for Lightning"
   Topics: ["bitcoin", "lightning", "privacy"]
   Base engagement score: 0.55
+  Watchlist match: "privacy tools" + "wallet security"
+  Boost: +0.24
+  Final score: 0.79 ✅
 
 Event B: "GM everyone, building cool stuff today"
   Topics: ["general"]
   Base engagement score: 0.45
+  No watchlist match
+  Final score: 0.45 ❌
 
 Event C: "Here's how to use zap splits effectively in your workflow"
   Topics: ["lightning", "zaps"]
   Base engagement score: 0.62
-```
-
-**Watchlist Matching:**
-```
-Event A: "privacy-preserving wallet" matches "privacy tools" + "wallet security"
-  → Boost: +0.24 (0.4 base boost * 0.6 scaling for discovery)
-  → Final score: 0.79 (HIGH PRIORITY)
-
-Event B: No matches
-  → Final score: 0.45 (LOWER PRIORITY)
-
-Event C: "zap splits" matches "zap splits" exactly
-  → Boost: +0.12 (0.2 base boost * 0.6 scaling)
-  → Final score: 0.74 (HIGH PRIORITY)
+  Watchlist match: "zap splits"
+  Boost: +0.12
+  Final score: 0.74 ✅
 ```
 
 **Discovery Actions:**
@@ -403,9 +411,14 @@ Sorted by final score:
 
 **Logging:**
 ```
+[NOSTR] Discovery round 1/3
+[NOSTR] Round 1: using watchlist topics for proactive discovery (3 items)
+[NOSTR] Round 1 topics (watchlist): privacy tools, wallet security, zap splits
+[NOSTR] Round 1: 55 total -> 42 quality -> 38 scored events
 [WATCHLIST-DISCOVERY] abc12345 matched: privacy tools, wallet security (+0.24)
 [NOSTR] Boosted engagement score for abc12345 by +0.24 (watchlist match)
 [WATCHLIST-DISCOVERY] def67890 matched: zap splits (+0.12)
+[NOSTR] Quality target reached (3/1) after round 1, stopping early
 [NOSTR] Discovery: replied to 2 quality events
 [NOSTR] Discovery: following 1 new accounts
 ```
@@ -414,10 +427,11 @@ Sorted by final score:
 > "Love seeing this evolution—privacy tools have been the hot thread this week. How does this integrate with existing Lightning infrastructure?"
 
 **Impact:** 
-- Pixel discovers and engages with predicted topics proactively
-- Watchlist creates coherent narrative across timeline lore AND discovery
-- Authors discussing predicted topics get prioritized for relationship-building
-- 24h later, these engagements may produce new lore validating the predictions
+- **Proactive narrative building** - Pixel doesn't wait for watchlist content to appear, actively searches for it
+- **Faster validation** - Predictions tested immediately via targeted discovery
+- **Higher yield** - Discovery focused on topics already identified as important
+- **Coherent engagement** - All interactions aligned with lore predictions
+- **Fallback safety** - If Round 1 fails, Rounds 2-3 use traditional topics
 
 ---
 
@@ -527,17 +541,22 @@ Digest Generated → watchlist: ["privacy tools", "wallet security"]
           ┌─────────────────────────────────┐
           │                                 │
           ↓                                 ↓
-   NEW TIMELINE EVENT              NEW DISCOVERY SEARCH
-   "wallet security post"          finds accounts posting about
-          ↓                         "privacy tools"
-   checkWatchlistMatch()                   ↓
-   detects match                    _scoreEventForEngagement()
-          ↓                         checkWatchlistMatch()
-   Heuristic +0.2 to +0.5                  ↓
-          ↓                         Engagement score +0.12 to +0.3
-   More likely to enter                    ↓
-   next lore digest                 Higher priority for reply/follow
+   NEW TIMELINE EVENT              DISCOVERY SEARCH TRIGGERED
+   "wallet security post"          Round 1: What topics to search?
           ↓                                 ↓
+   checkWatchlistMatch()            Check watchlist first! ✨
+   detects match                    → ["privacy tools", "wallet security", "zap splits"]
+          ↓                                 ↓
+   Heuristic +0.2 to +0.5           Search Nostr for these topics
+          ↓                         (proactive discovery)
+   More likely to enter                    ↓
+   next lore digest                 Found accounts posting about watchlist items
+                                            ↓
+                                     _scoreEventForEngagement()
+                                     + checkWatchlistMatch() bonus
+                                            ↓
+                                     Higher priority for reply/follow
+                                            ↓
           └────────── Both paths reinforce predicted narrative ──────┘
                           ↓
            24h expiry prevents stale tracking
@@ -618,7 +637,8 @@ const state = service.getWatchlistState();
 - **Narrative momentum** - Emerging storylines reinforced across all engagement paths
 - **Controlled amplification** - Boost capped to prevent runaway loops
 - **Self-correcting** - 24h expiry limits long-term bias
-- **Discovery coherence (NEW)** - Pixel discovers and engages with predicted topics proactively
+- **Proactive discovery (NEW)** - Pixel actively searches for predicted topics in Round 1
+- **Discovery coherence** - Discovery aligned with narrative predictions before fallback topics
 
 ### Risk Mitigation
 ✅ **Score capping** - Max +0.5 boost  
@@ -802,8 +822,10 @@ PHASE 4 - Tone Trends:
 PHASE 5 - Watchlist Monitoring:
 - Extract watchlist items from lore digests
 - Track predicted topics with 24h expiry
+- **Proactive discovery:** Use watchlist as Round 1 search topics
 - Boost matching candidates in timeline lore (+0.2 to +0.5 cap)
-- Boost matching candidates in discovery search (+0.12 to +0.3 scaled)
+- Boost matching candidates in discovery scoring (+0.12 to +0.3 scaled)
+- Fallback to traditional discovery if watchlist yields insufficient results
 - Prevent feedback loops via score cap + time-bound tracking
 - Debug logging for match visibility across both systems
 

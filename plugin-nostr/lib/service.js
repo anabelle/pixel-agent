@@ -1998,7 +1998,7 @@ Response (YES/NO):`;
       }
     } catch {}
 
-    let prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, topic, loreContinuity);
+  let prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, topic, loreContinuity);
 
     // Append a large memory debugging dump: full timeline lore, full narratives, and 100+ topics
     try {
@@ -2015,6 +2015,8 @@ Response (YES/NO):`;
         },
         // Include the recent digest object directly (if available)
         recentDigest: contextData?.recentDigest || null,
+        // Include the latest self-reflection insights (compact summary)
+        selfReflection: reflectionInsights || null,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;

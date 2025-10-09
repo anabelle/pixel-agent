@@ -114,7 +114,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -236,6 +236,16 @@ ${interestsText}
 PERSONALIZATION: Tailor your response to their interests and established rapport. ${userProfile.relationshipDepth === 'regular' ? 'You can reference past conversations naturally.' : userProfile.relationshipDepth === 'familiar' ? 'Build on your growing connection.' : 'Make a good first impression.'}`;
   }
 
+  // NEW: Build author recent posts section if available
+  let authorPostsContextSection = '';
+  if (authorPostsSection) {
+    authorPostsContextSection = `
+AUTHOR CONTEXT:
+${authorPostsSection}
+
+USE: Reference their recent posts naturally when it deepens the reply. Do not quote large chunks.`;
+  }
+
   // NEW: Build proactive insight section if detected
   let proactiveInsightSection = '';
   if (proactiveInsight && proactiveInsight.message) {
@@ -299,16 +309,17 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
-    userProfileSection, // NEW: User profile context
+      userProfileSection, // NEW: User profile context
+      authorPostsContextSection, // NEW: Author recent posts context
       userHistorySection, // NEW: Compact user history (optional)
-    globalTimelineSection, // NEW: Global timeline snapshot (optional)
-  narrativeContextSection, // NEW: Narrative context
-  proactiveInsightSection, // NEW: Proactive insight
-  selfReflectionSection, // NEW: Self-reflection insights
+      globalTimelineSection, // NEW: Global timeline snapshot (optional)
+      narrativeContextSection, // NEW: Narrative context
+      proactiveInsightSection, // NEW: Proactive insight
+      selfReflectionSection, // NEW: Self-reflection insights
       threadContextSection,
       imageContextSection,
-      history,
-      `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
+    history,
+    `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
       'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
       `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}${imageContext ? ' and visually-aware (reference what you see in the images)' : ''}${narrativeContext ? ' and community-aware (acknowledge trending topics naturally)' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
     ].filter(Boolean).join('\n\n');

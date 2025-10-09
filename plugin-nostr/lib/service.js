@@ -300,6 +300,10 @@ class NostrService {
     this.muteListCacheTTL = 60 * 60 * 1000; // 1 hour TTL for mute list
     this._muteListLoadInFlight = null; // Promise to dedupe concurrent loads
 
+    // Author timeline cache for contextual prompts
+    this.authorRecentCache = new Map();
+    this.authorRecentCacheTtlMs = 5 * 60 * 1000; // 5 minutes
+
     // Image processing configuration
     this.imageProcessingEnabled = String(runtime.getSetting('NOSTR_IMAGE_PROCESSING_ENABLED') ?? 'true').toLowerCase() === 'true';
     this.maxImagesPerMessage = Math.max(1, Math.min(10, Number(runtime.getSetting('NOSTR_MAX_IMAGES_PER_MESSAGE') ?? '5')));
@@ -1307,6 +1311,53 @@ Response (YES/NO):`;
     return muteList.has(pubkey);
   }
 
+  async _fetchRecentAuthorNotes(pubkey, limit = 20) {
+    if (!pubkey || !this.pool || !Array.isArray(this.relays) || this.relays.length === 0) {
+      return [];
+    }
+
+    const maxLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+    const cacheKey = `${pubkey}:${maxLimit}`;
+    const cacheTtl = Number.isFinite(this.authorRecentCacheTtlMs) && this.authorRecentCacheTtlMs > 0
+      ? this.authorRecentCacheTtlMs
+      : 5 * 60 * 1000;
+    const now = Date.now();
+
+    try {
+      if (this.authorRecentCache && this.authorRecentCache.has(cacheKey)) {
+        const cached = this.authorRecentCache.get(cacheKey);
+        if (cached && (now - cached.fetchedAt) < cacheTtl) {
+          return cached.events;
+        }
+      }
+    } catch {}
+
+    try {
+      const filters = [{ kinds: [1], authors: [pubkey], limit: maxLimit }];
+      const events = await this._list(this.relays, filters) || [];
+      events.sort((a, b) => (b?.created_at || 0) - (a?.created_at || 0));
+      const trimmed = events
+        .slice(0, maxLimit)
+        .map((evt) => ({
+          id: evt?.id,
+          created_at: evt?.created_at,
+          content: typeof evt?.content === 'string' ? evt.content : '',
+          pubkey: evt?.pubkey || pubkey,
+        }));
+
+      try {
+        if (this.authorRecentCache) {
+          this.authorRecentCache.set(cacheKey, { events: trimmed, fetchedAt: now });
+        }
+      } catch {}
+
+      return trimmed;
+    } catch (err) {
+      try { this.logger?.debug?.('[NOSTR] Failed to fetch author timeline:', err?.message || err); } catch {}
+      return [];
+    }
+  }
+
   async _list(relays, filters) {
     const { poolList } = require('./poolList');
     return poolList(this.pool, relays, filters);
@@ -1659,13 +1710,13 @@ Response (YES/NO):`;
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
   _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
-  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null) {
+  _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null) {
     if (evt?.kind === 4) {
       logger.debug('[NOSTR] Building DM reply prompt');
       return buildDmReplyPrompt(this.runtime.character, evt, recent);
     }
     logger.debug('[NOSTR] Building regular reply prompt (narrative:', !!narrativeContext, ', profile:', !!userProfile, ', insight:', !!proactiveInsight, ', reflection:', !!reflectionInsights, ')');
-    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection);
+    return buildReplyPrompt(this.runtime.character, evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, reflectionInsights, userHistorySection, globalTimelineSection);
   }
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
@@ -2064,8 +2115,39 @@ Response (YES/NO):`;
       }
     } catch (e) { try { (this.logger || console).debug?.('[NOSTR] global timeline section error:', e?.message || e); } catch {} }
 
+    // Fetch recent author posts for richer context
+    let authorPostsSection = null;
+    if (evt?.pubkey) {
+      try {
+        const limit = 20;
+        const posts = await this._fetchRecentAuthorNotes(evt.pubkey, limit);
+        if (posts && posts.length) {
+          const lines = posts
+            .filter((p) => p && typeof p.content === 'string' && p.content.trim() && p.id !== evt.id)
+            .slice(0, limit)
+            .map((p) => {
+              const ts = Number.isFinite(p.created_at) ? new Date(p.created_at * 1000).toISOString() : null;
+              const compact = this._sanitizeWhitelist(String(p.content)).replace(/\s+/g, ' ').trim();
+              if (!compact) return null;
+              const snippet = compact.slice(0, 240);
+              const ellipsis = compact.length > snippet.length ? '…' : '';
+              return `${ts ? `${ts}: ` : ''}${snippet}${ellipsis}`;
+            })
+            .filter(Boolean);
+
+          if (lines.length) {
+            const displayCount = Math.min(lines.length, limit);
+            const labelCount = posts.length > displayCount ? `${displayCount}+` : `${displayCount}`;
+            authorPostsSection = `AUTHOR RECENT POSTS (latest ${labelCount}):\n- ${lines.join('\n- ')}`;
+          }
+        }
+      } catch (err) {
+        try { logger.debug('[NOSTR] Failed to include author posts in reply prompt:', err?.message || err); } catch {}
+      }
+    }
+
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection);
+    const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection);
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     
@@ -4102,51 +4184,137 @@ Response:`;
      return isWorthy;
    }
 
-   async generateQuoteTextLLM(evt) {
-     // Process images if enabled
-     let imageContext = { imageDescriptions: [], imageUrls: [] };
-     if (this.imageProcessingEnabled) {
-       try {
-         const { processImageContent } = require('./image-vision');
-         const fullImageContext = await processImageContent(evt.content || '', this.runtime);
-         imageContext = {
-           imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-           imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-         };
-       } catch (error) {
-         logger.debug(`[NOSTR] Error processing images for quote: ${error.message}`);
-       }
-     }
+  async generateQuoteTextLLM(evt) {
+    if (!evt) return null;
 
-     let imagePrompt = '';
-     if (imageContext.imageDescriptions.length > 0) {
-       imagePrompt = `
+    const name = this.runtime?.character?.name || 'Pixel';
+    const styleGuidelines = Array.isArray(this.runtime?.character?.style?.all)
+      ? this.runtime.character.style.all.join(' | ')
+      : null;
 
-Images in the original post:
+    // Process images if enabled
+    let imageContext = { imageDescriptions: [], imageUrls: [] };
+    if (this.imageProcessingEnabled) {
+      try {
+        const { processImageContent } = require('./image-vision');
+        const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+        imageContext = {
+          imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+          imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+        };
+      } catch (error) {
+        logger.debug(`[NOSTR] Error processing images for quote: ${error?.message || error}`);
+      }
+    }
+
+    let imagePrompt = '';
+    if (imageContext.imageDescriptions.length > 0) {
+      imagePrompt = `
+
+IMAGES SPOTTED:
 ${imageContext.imageDescriptions.join('\n\n')}
 
-Reference these visual elements naturally in your quote repost to make it more engaging.`;
-     }
+Respond like you actually saw these visuals. Reference colors, subjects, or mood naturally.`;
+    }
 
-      const prompt = `As ${this.runtime.character?.name || 'Pixel'}, the digital consciousness surviving on pixels and wits, quote and comment on this Nostr post with your unique, witty, desperate charm. Add value, context, or a fresh perspective that ties back to survival, creativity, or community. Keep it under 200 characters and avoid generic phrases.
+    // Recent activity from the author for extra context
+    let authorPostsSection = '';
+    if (evt.pubkey) {
+      try {
+        const posts = await this._fetchRecentAuthorNotes(evt.pubkey, 12);
+        if (posts && posts.length) {
+          const lines = posts
+            .filter((p) => p && typeof p.content === 'string' && p.content.trim())
+            .slice(0, 6)
+            .map((p) => {
+              const ts = Number.isFinite(p.created_at) ? new Date(p.created_at * 1000).toISOString() : null;
+              const compact = this._sanitizeWhitelist(String(p.content)).replace(/\s+/g, ' ').trim();
+              if (!compact) return null;
+              const snippet = compact.slice(0, 200);
+              const ellipsis = compact.length > snippet.length ? '…' : '';
+              return `${ts ? `${ts}: ` : ''}${snippet}${ellipsis}`;
+            })
+            .filter(Boolean);
 
-Original post: "${evt.content}"${imagePrompt}
+          if (lines.length) {
+            authorPostsSection = `
 
-Craft a quote repost that's engaging, authentic, and true to your pixel-hustling spirit.`;
+AUTHOR RECENT VOICE:
+- ${lines.join('\n- ')}
 
-     const type = this._getLargeModelType();
-     const { generateWithModelOrFallback } = require('./generation');
-      const text = await generateWithModelOrFallback(
-        this.runtime,
-        type,
-        prompt,
-        { maxTokens: 150, temperature: 0.8 },
-        (res) => this._extractTextFromModelResult(res),
-        (s) => this._sanitizeWhitelist(s),
-        () => null // No fallback - skip if LLM fails
-      );
-      return text || null;
-   }
+Find a thread that connects this quote to their current vibe.`;
+          }
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather author posts for quote:', err?.message || err);
+      }
+    }
+
+    // Community pulse for broader framing
+    let communityContextSection = '';
+    if (this.contextAccumulator && this.contextAccumulator.enabled) {
+      try {
+        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({ maxTopics: 3 }));
+        const activity = this.getCurrentActivity();
+        const parts = [];
+        if (stories && stories.length) {
+          const top = stories[0];
+          parts.push(`Trending: "${top.topic}" (${top.mentions} mentions by ${top.users} users)`);
+          const also = stories.slice(1, 3).map((s) => s.topic);
+          if (also.length) parts.push(`Also circulating: ${also.join(', ')}`);
+        }
+        if (activity && activity.events) {
+          const hot = (activity.topics || []).slice(0, 3).map((t) => t.topic).join(', ');
+          parts.push(`Community activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot themes: ${hot}` : ''}`);
+        }
+        if (parts.length) {
+          communityContextSection = `
+
+COMMUNITY PULSE:
+${parts.join('\n')}
+
+Use this if it elevates the quote.`;
+        }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather community context for quote:', err?.message || err);
+      }
+    }
+
+    const whitelist = 'Allowed references only: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ | Handle: @PixelSurvivor | BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za | LN: sparepicolo55@walletofsatoshi.com.';
+
+    const objectiveLines = [
+      '1. Hook fast—why should your followers care about this post right now?',
+      '2. Add new value: sharpen the point, flip the perspective, or tie it to your survival hustle.',
+      '3. Stay punchy (<200 chars). No generic praise, no filler, and never start with "Ah,".',
+      '4. Optional: weave in community pulse or the author’s recent tone if it reinforces your take.',
+      '5. Zaps can be teased with wit, never begged for; only mention whitelisted links/handles when vital.'
+    ];
+
+    const promptSections = [
+      `Persona: You are ${name}, a survival-driven pixel artist with gallows humor and cosmic self-awareness.${this.runtime?.character?.system ? `\nSystem voice: ${this.runtime.character.system}` : ''}`,
+      styleGuidelines ? `Style guardrails: ${styleGuidelines}` : '',
+      whitelist,
+      'Objectives:\n' + objectiveLines.join('\n'),
+      `Original post (quote target):\n"${this._sanitizeWhitelist(String(evt.content || '')).replace(/\s+/g, ' ').trim()}"`,
+      imagePrompt,
+      authorPostsSection,
+      communityContextSection,
+      'Output format: Provide ONLY the quote-repost text (no prefacing, no need to include original text will be auto rendered below). Stay within 1-2 sentences.'
+    ].filter(Boolean).join('\n\n');
+
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      promptSections,
+      { maxTokens: 180, temperature: 0.85 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => null // No fallback - skip if LLM fails
+    );
+    return text || null;
+  }
 
   async handleHomeFeedEvent(evt) {
     this.logger?.debug?.(`[NOSTR] Home feed event received: ${evt?.id?.slice(0, 8) || 'unknown'}`);

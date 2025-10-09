@@ -19,7 +19,7 @@ describe('self-reflection prompt integration', () => {
   });
 
   it('injects self-reflection guidance into reply prompts', () => {
-    const prompt = buildReplyPrompt({ name: 'Pixel' }, { content: 'hello there' }, [], null, null, null, null, null, reflection);
+  const prompt = buildReplyPrompt({ name: 'Pixel' }, { content: 'hello there' }, [], null, null, null, null, null, null, reflection);
     expect(prompt).toContain('SELF-REFLECTION');
     expect(prompt).toContain('Best recent reply: "loved how you framed the collab, let\'s build it! ⚡"');
     expect(prompt).toContain('Pitfall to avoid: "cool."');

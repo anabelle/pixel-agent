@@ -19,7 +19,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   // NEW: Build context section if available
   let contextSection = '';
   if (contextData) {
-    const { emergingStories, currentActivity, topTopics } = contextData;
+    const { emergingStories, currentActivity, topTopics, timelineLore } = contextData;
 
     if (emergingStories && emergingStories.length > 0) {
       const topStory = emergingStories[0];
@@ -58,6 +58,23 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
 
     if (contextSection) {
       contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider weaving these community threads in naturally, but ONLY if it fits your authentic voice. It's okay to go elsewhere if inspiration hits differently.`;
+    }
+
+    if (Array.isArray(timelineLore) && timelineLore.length > 0) {
+      const loreLines = timelineLore.slice(-2).map((entry) => {
+        const headline = (entry?.headline || entry?.narrative || '').toString().trim();
+        const tone = entry?.tone ? ` • tone: ${entry.tone}` : '';
+        const watchlist = Array.isArray(entry?.watchlist) && entry.watchlist.length
+          ? ` • watch: ${entry.watchlist.slice(0, 2).join(', ')}`
+          : '';
+        const summary = headline ? headline.slice(0, 160) : null;
+        return summary ? `- ${summary}${tone}${watchlist}` : null;
+      }).filter(Boolean);
+
+      if (loreLines.length) {
+        const loreBlock = [`TIMELINE LORE SNAPSHOT:`, ...loreLines].join('\n');
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}${loreBlock}\n\nREMEMBER: Treat lore as situational awareness—reference it only when it naturally strengthens your post.`;
+      }
     }
   }
 
@@ -114,7 +131,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   ].filter(Boolean).join('\n\n');
 }
 
-function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null) {
+function buildReplyPrompt(character, evt, recentMessages, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, selfReflection = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
@@ -259,6 +276,16 @@ ${proactiveInsight.message}
 SUGGESTION: You could naturally weave this insight into your reply if it adds value to the conversation. Don't force it, but it's interesting context you're aware of. Type: ${proactiveInsight.type}`;
   }
 
+  // NEW: Build timeline lore section if available
+  let timelineLoreContextSection = '';
+  if (timelineLoreSection) {
+    timelineLoreContextSection = `
+TIMELINE LORE:
+${timelineLoreSection}
+
+USE: Treat these as the community's evolving plot points. Reference them only when it elevates your reply.`;
+  }
+
   // NEW: Apply self-reflection adjustments
   let selfReflectionSection = '';
   if (selfReflection) {
@@ -311,8 +338,9 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
       whitelist,
       userProfileSection, // NEW: User profile context
       authorPostsContextSection, // NEW: Author recent posts context
-      userHistorySection, // NEW: Compact user history (optional)
-      globalTimelineSection, // NEW: Global timeline snapshot (optional)
+  userHistorySection, // NEW: Compact user history (optional)
+  globalTimelineSection, // NEW: Global timeline snapshot (optional)
+  timelineLoreContextSection, // NEW: Timeline lore context
       narrativeContextSection, // NEW: Narrative context
       proactiveInsightSection, // NEW: Proactive insight
       selfReflectionSection, // NEW: Self-reflection insights

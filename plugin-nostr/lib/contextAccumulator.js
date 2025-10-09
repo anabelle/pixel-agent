@@ -1261,27 +1261,33 @@ ${report.summary.emergingStories.length > 0 ? report.summary.emergingStories.map
 SAMPLE POSTS FROM THROUGHOUT THE DAY:
 ${sampledEvents.map(e => `[${e.author}] ${e.content}`).join('\n\n').slice(0, this.llmNarrativeMaxContentLength)}
 
+ANALYSIS FOCUS:
+- Prioritize SPECIFIC developments: people, places, events, projects, tools, concrete happenings
+- Avoid generic terms like "bitcoin", "nostr", "crypto", "lightning", "protocol", "technology", "community"
+- Look for NEW, TIMELY, and ACTIONABLE insights, not general interests
+- Focus on what's CHANGING, not what's static or always discussed
+
 ANALYZE THE DAY:
-1. What was the arc of the day? How did conversations evolve?
-2. What communities formed? What groups emerged?
-3. What moments defined today? Any breakthroughs or conflicts?
+1. What was the arc of the day? How did conversations evolve? What specific events happened?
+2. What communities formed? What specific groups or projects emerged?
+3. What moments defined today? Any breakthroughs or conflicts? Name specifics.
 4. How did the energy shift throughout the day?
-5. What patterns in human behavior showed up?
+5. What patterns in human behavior showed up around specific topics?
 6. If you had to capture today's essence in one compelling paragraph, what would you say?
 
 OUTPUT JSON:
 {
-  "headline": "Captivating summary of the day (15-20 words)",
-  "summary": "Rich narrative paragraph (4-6 sentences) that tells the story of today's activity with depth and insight",
-  "arc": "How the day evolved (beginning → middle → end)",
-  "keyMoments": ["Most significant moment 1", "Important turning point 2", "Notable event 3"],
-  "communities": ["Community/group pattern observed 1", "Social dynamic 2"],
-  "insights": ["Deep insight about human behavior 1", "Pattern observed 2", "Surprising finding 3"],
+  "headline": "Captivating summary of the day with specific details (15-20 words)",
+  "summary": "Rich narrative paragraph (4-6 sentences) that tells the story of today's activity with depth and concrete specifics",
+  "arc": "How the day evolved with specific milestones (beginning → middle → end)",
+  "keyMoments": ["Most significant specific moment 1", "Important concrete turning point 2", "Notable specific event 3"],
+  "communities": ["Specific community/project/group pattern observed 1", "Concrete social dynamic 2"],
+  "insights": ["Deep insight about specific behavior 1", "Concrete pattern observed 2", "Surprising specific finding 3"],
   "vibe": "Overall energy of the day (2-3 words)",
-  "tomorrow": "What to watch for tomorrow based on today's patterns (1 sentence)"
+  "tomorrow": "What specific things to watch for tomorrow based on today's patterns (1 sentence)"
 }
 
-Make it profound! Find the deeper story in the data.`;
+Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
 
       const response = await this.runtime.generateText(prompt, {
         temperature: 0.8,

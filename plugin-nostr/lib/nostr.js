@@ -25,6 +25,39 @@ const FORBIDDEN_TOPIC_WORDS = new Set([
   'terry'
 ]);
 
+// Terms too generic/common for timeline lore and watchlist - focus on specific topics instead
+const TIMELINE_LORE_IGNORED_TERMS = new Set([
+  'bitcoin',
+  'btc',
+  'nostr',
+  'crypto',
+  'cryptocurrency',
+  'blockchain',
+  'decentralized',
+  'lightning',
+  'ln',
+  'sats',
+  'satoshis',
+  'web3',
+  'protocol',
+  'network',
+  'technology',
+  'tech',
+  'development',
+  'community',
+  'discussion',
+  'conversation',
+  'post',
+  'posts',
+  'posting',
+  'update',
+  'updates',
+  'news',
+  'today',
+  'yesterday',
+  'tomorrow'
+]);
+
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'but', 'by', 'can', 'could', 'did', 'do', 'does',
   'for', 'from', 'had', 'has', 'have', 'here', 'how', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'let',
@@ -53,6 +86,7 @@ function _isMeaningfulToken(token) {
   if (!token) return false;
   if (STOPWORDS.has(token)) return false;
   if (FORBIDDEN_TOPIC_WORDS.has(token)) return false;
+  if (TIMELINE_LORE_IGNORED_TERMS.has(token)) return false;
   return /[a-z0-9]/i.test(token);
 }
 
@@ -137,11 +171,16 @@ Rules:
 - ONLY use topics that are actually mentioned or clearly implied in the post
 - Do NOT invent or add topics that aren't in the post
 - NEVER include these words: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
-- Be specific, not general
-- If about a person, country, or event, use that as a topic
-- No words like "general", "discussion", "various"
+- Be specific, not general - focus on CONCRETE topics: specific people, places, events, projects, tools, or concepts
+- PREFER: proper names (e.g., "Jack Dorsey", "El Salvador"), specific projects (e.g., "Alby", "Damus"), concrete events (e.g., "Bitcoin Conference 2025"), specific technologies (e.g., "cashu", "fedimint")
+- AVOID overly generic terms: bitcoin, btc, nostr, crypto, cryptocurrency, blockchain, lightning, protocol, network, technology, community, discussion
+- If about a person, use their name or handle
+- If about a place, use the location name
+- If about an event, use the event name
+- If about a specific project/product/tool, use that name
+- No words like "general", "discussion", "various", "update", "news"
 - Only respond with 'none' if the post truly contains no meaningful words or context (e.g., empty or just symbols)
-- For short greetings or brief statements, choose the closest meaningful topic (e.g., 'greetings', 'motivation', 'bitcoin', the named person, etc.)
+- For short greetings or brief statements, choose the closest meaningful topic (not generic terms)
 - If the post includes hashtags, named entities, or obvious subjects, use those as topics instead of 'none'
 - Never answer with 'none' when any real words, hashtags, or references are present—pick the best fitting topic
 - Respond with only the topics separated by commas on a single line
@@ -167,7 +206,8 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
               .map((t) => t.trim())
               .filter((t) => t.length > 0 && t.length < 500)
               .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')
-              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t.toLowerCase()));
+              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t.toLowerCase()))
+              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t.toLowerCase()));
             topics.push(...llmTopics);
           }
         }
@@ -352,4 +392,6 @@ module.exports = {
   decryptDirectMessage,
   decryptNIP04Manual,
   encryptNIP04Manual,
+  TIMELINE_LORE_IGNORED_TERMS,
+  FORBIDDEN_TOPIC_WORDS,
 };

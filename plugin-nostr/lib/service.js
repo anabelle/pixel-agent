@@ -4957,17 +4957,26 @@ FOCUS:
 - Spotlight connective threads, conflicts, wins, or calls to action.
 - Mention why it matters for the next decisions or tone.
 - Keep it grounded in the provided posts—no speculation beyond them.
+- Focus on SPECIFIC, CURRENT topics: names of people, places, events, projects, tools, or concrete happenings.
+- AVOID generic terms like: bitcoin, btc, nostr, crypto, lightning, protocol, blockchain, technology, community, discussion.
+- Prioritize what's NEW, TIMELY, and ACTIONABLE over general interests.
+- Extract watchlist items that are CONCRETE and TRACKABLE (e.g., "Jack Dorsey keynote", "Alby updates", "El Salvador regulations"), NOT generic concepts.
 
 Return STRICT JSON:
 {
-  "headline": "<=18 words, punchy narrative hook",
-  "narrative": "3-4 sentence arc explaining what's unfolding",
-  "insights": ["key micro-trend or signal", ... up to 4],
-  "watchlist": ["what to monitor next", ... up to 4],
-  "tags": ["topic", ... up to 5],
+  "headline": "<=18 words, punchy narrative hook focused on specific developments",
+  "narrative": "3-4 sentence arc explaining what's unfolding with concrete details",
+  "insights": ["key micro-trend or signal with specifics", ... up to 4],
+  "watchlist": ["specific people/places/events/projects to monitor", ... up to 4],
+  "tags": ["specific concrete topic", ... up to 5],
   "priority": "high"|"medium"|"low",
   "tone": "emotional tenor"
 }
+
+WATCHLIST GUIDELINES:
+- Include specific names, events, projects, or trackable developments
+- Example GOOD watchlist items: "Alby wallet launch", "Jack Dorsey", "Bitcoin Nashville", "cashu implementation", "Strike expansion"
+- Example BAD watchlist items: "bitcoin", "nostr", "lightning", "development", "community discussion"
 
 Ranked tags from heuristics: ${rankedTags.join(', ') || 'none'}
 

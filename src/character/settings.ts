@@ -66,10 +66,11 @@ export const settings = {
   NOSTR_DM_ENABLE: process.env.NOSTR_DM_ENABLE || "true",
   NOSTR_DM_REPLY_ENABLE: process.env.NOSTR_DM_REPLY_ENABLE || "true",
   NOSTR_DM_THROTTLE_SEC: process.env.NOSTR_DM_THROTTLE_SEC || "60",
-  // Home feed interaction chances (make rare to avoid spam)
-  NOSTR_HOME_FEED_REPOST_CHANCE: process.env.NOSTR_HOME_FEED_REPOST_CHANCE || "0.005",
-  NOSTR_HOME_FEED_QUOTE_CHANCE: process.env.NOSTR_HOME_FEED_QUOTE_CHANCE || "0.001",
-  // LNPixels WS for activity stream
+   // Home feed interaction chances (make rare to avoid spam)
+   NOSTR_HOME_FEED_REPOST_CHANCE: process.env.NOSTR_HOME_FEED_REPOST_CHANCE || "0.005",
+   NOSTR_HOME_FEED_QUOTE_CHANCE: process.env.NOSTR_HOME_FEED_QUOTE_CHANCE || "0.001",
+   NOSTR_SELF_REFLECTION_ENABLE: process.env.NOSTR_SELF_REFLECTION_ENABLE || "true",
+   // LNPixels WS for activity stream
  LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "https://ln.pixel.xx.kg",
   // Shell plugin settings
   SHELL_ENABLED: process.env.SHELL_ENABLED || "true",

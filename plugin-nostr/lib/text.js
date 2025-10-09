@@ -660,10 +660,13 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
       if (loreLines.length) contextLines.push(`lore: ${loreLines.map(x => `- ${x}`).join(' ')}`);
     }
 
-    // Daily digest headline
-    if (recentDigest && recentDigest[0]?.headline) {
-      const h = String(recentDigest[0].headline).replace(/\s+/g, ' ').trim().slice(0, 140);
-      if (h) contextLines.push(`digest: ${h}`);
+    // Daily/hourly digest headline (supports object or legacy array shape)
+    if (recentDigest) {
+      const headline = recentDigest.headline || (Array.isArray(recentDigest) ? recentDigest[0]?.headline : null);
+      if (headline) {
+        const h = String(headline).replace(/\s+/g, ' ').trim().slice(0, 140);
+        if (h) contextLines.push(`digest: ${h}`);
+      }
     }
 
     // Topic momentum for selected topic

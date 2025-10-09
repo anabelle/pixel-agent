@@ -66,9 +66,11 @@ class ContextAccumulator {
     this.hourlyDigestEnabled = true;
     this.dailyReportEnabled = true;
     this.emergingStoriesEnabled = true;
-    this.llmAnalysisEnabled = process.env.CONTEXT_LLM_ANALYSIS_ENABLED === 'true' || false;
-    this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
-    this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+  // Respect constructor option llmAnalysis to turn on LLM paths without new env vars
+  const llmOpt = options?.llmAnalysis === true;
+  this.llmAnalysisEnabled = llmOpt || process.env.CONTEXT_LLM_ANALYSIS_ENABLED === 'true' || false;
+  this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+  this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
     
   // Performance tuning
   this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment

@@ -1912,6 +1912,15 @@ Response (YES/NO):`;
           limit: 5,
           minMentions: 2
         }) || [];
+        // Long list for debugging (ensure >= 100 topics if available)
+        let topTopicsLong = [];
+        try {
+          topTopicsLong = this.contextAccumulator.getTopTopicsAcrossHours({
+            hours: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_LOOKBACK_HOURS_DEBUG') ?? 24),
+            limit: 200,
+            minMentions: 1
+          }) || [];
+        } catch {}
         let toneTrend = null;
         let timelineLore = null;
         let recentDigest = null;
@@ -1919,14 +1928,14 @@ Response (YES/NO):`;
           try { toneTrend = await this.narrativeMemory.trackToneTrend(); } catch {}
         }
         try {
-          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 3);
-          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 3;
+          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 20;
           timelineLore = this.contextAccumulator.getTimelineLore(limit);
         } catch {}
         try {
           recentDigest = this.contextAccumulator.getRecentDigest(1);
         } catch {}
-        contextData = { emergingStories, currentActivity, topTopics, toneTrend, timelineLore, recentDigest };
+        contextData = { emergingStories, currentActivity, topTopics, topTopicsLong, toneTrend, timelineLore, recentDigest };
       }
       if (this.narrativeMemory?.analyzeLoreContinuity) {
         try { loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(3); } catch {}
@@ -1978,7 +1987,28 @@ Response (YES/NO):`;
       }
     } catch {}
 
-    const prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, topic, loreContinuity);
+    let prompt = this._buildAwarenessPrompt(contextData, reflectionInsights, topic, loreContinuity);
+
+    // Append a large memory debugging dump: full timeline lore, full narratives, and 100+ topics
+    try {
+      const topicsList = Array.isArray(contextData?.topTopicsLong) ? contextData.topTopicsLong : [];
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      const debugDump = {
+        currentActivity: contextData?.currentActivity || null,
+        emergingStories: contextData?.emergingStories || [],
+        timelineLoreFull: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore : [],
+        narratives: {
+          daily: contextData?.dailyNarrative || null,
+          weekly: contextData?.weeklyNarrative || null,
+          monthly: contextData?.monthlyNarrative || null,
+        },
+        recentDigest: Array.isArray(contextData?.recentDigest) ? contextData.recentDigest[0] : null,
+        topics: topicsSummary,
+      };
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
+      prompt = `${prompt}${debugHeader}${debugBody}`;
+    } catch {}
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     const text = await generateWithModelOrFallback(

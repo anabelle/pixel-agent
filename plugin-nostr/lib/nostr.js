@@ -39,9 +39,10 @@ Rules:
 - If the post has no clear topics, respond with just 'none'
 - Respond with only the topics separated by commas on a single line
 - Maximum 3 topics
+- The post content is provided inside <POST_TO_ANALYZE> tags at the end.
 
 THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
-${truncatedContent}`;
+<POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
 
        const response = await runtime.useModel('TEXT_SMALL', {
          prompt,

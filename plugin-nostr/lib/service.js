@@ -751,6 +751,14 @@ Response (YES/NO):`;
    static async start(runtime) {
      await ensureDeps();
      const svc = new NostrService(runtime);
+      // Load historical narratives so daily/weekly/monthly context is available early
+      try {
+        if (svc.narrativeMemory && typeof svc.narrativeMemory.initialize === 'function') {
+          await svc.narrativeMemory.initialize();
+        }
+      } catch (err) {
+        logger?.debug?.('[NOSTR] Narrative memory initialize failed (continuing):', err?.message || err);
+      }
      await svc._loadInteractionCounts();
   await svc._loadLastDailyDigestPostDate();
      svc._setupResetTimer();
@@ -1933,7 +1941,10 @@ Response (YES/NO):`;
           timelineLore = this.contextAccumulator.getTimelineLore(limit);
         } catch {}
         try {
+          // Prefer previous hour digest; may be null shortly after startup or early in the hour
           recentDigest = this.contextAccumulator.getRecentDigest(1);
+          // If none available yet, we can optionally fall back to current hour stats via getCurrentActivity
+          // but keep recentDigest as null to avoid shape mismatch with similarity checks.
         } catch {}
         contextData = { emergingStories, currentActivity, topTopics, topTopicsLong, toneTrend, timelineLore, recentDigest };
       }
@@ -1979,8 +1990,8 @@ Response (YES/NO):`;
         if (this.contextAccumulator?.getRecentDigest && this.narrativeMemory?.getSimilarPastMoments) {
           try {
             const digest = this.contextAccumulator.getRecentDigest(1);
-            if (digest && digest[0]) {
-              contextData.similarMoments = await this.narrativeMemory.getSimilarPastMoments(digest[0], 1);
+            if (digest) {
+              contextData.similarMoments = await this.narrativeMemory.getSimilarPastMoments(digest, 1);
             }
           } catch {}
         }
@@ -2002,7 +2013,8 @@ Response (YES/NO):`;
           weekly: contextData?.weeklyNarrative || null,
           monthly: contextData?.monthlyNarrative || null,
         },
-        recentDigest: Array.isArray(contextData?.recentDigest) ? contextData.recentDigest[0] : null,
+        // Include the recent digest object directly (if available)
+        recentDigest: contextData?.recentDigest || null,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;

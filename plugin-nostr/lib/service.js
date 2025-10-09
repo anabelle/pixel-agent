@@ -1659,16 +1659,26 @@ Response (YES/NO):`;
       try {
         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
         const currentActivity = this.getCurrentActivity();
+        const topTopics = this.contextAccumulator.getTopTopicsAcrossHours({
+          hours: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_LOOKBACK_HOURS') ?? process?.env?.NOSTR_CONTEXT_TOPICS_LOOKBACK_HOURS ?? 6),
+          limit: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_LIMIT') ?? process?.env?.NOSTR_CONTEXT_TOPICS_LIMIT ?? 5),
+          minMentions: Number(this.runtime?.getSetting?.('NOSTR_CONTEXT_TOPICS_MIN_MENTIONS') ?? process?.env?.NOSTR_CONTEXT_TOPICS_MIN_MENTIONS ?? 2)
+        });
+        const activityEvents = currentActivity?.events || 0;
+        const hasStories = emergingStories.length > 0;
+        const hasMeaningfulActivity = activityEvents >= 5;
+        const hasTopicHighlights = topTopics.length > 0;
         
         // Only include context if there's something interesting
-        if (emergingStories.length > 0 || (currentActivity && currentActivity.events > 20)) {
+        if (hasStories || hasMeaningfulActivity || hasTopicHighlights) {
           contextData = {
             emergingStories,
             currentActivity,
-            recentDigest: this.contextAccumulator.getRecentDigest(1)
+            recentDigest: this.contextAccumulator.getRecentDigest(1),
+            topTopics
           };
           
-          logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${currentActivity?.events || 0} events`);
+          logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}`);
         }
       } catch (err) {
         logger.debug('[NOSTR] Failed to gather context for post:', err.message);

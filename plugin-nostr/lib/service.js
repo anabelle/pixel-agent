@@ -966,6 +966,43 @@ Response (YES/NO):`;
         }, 5000); // small delay to let systems settle
       }
     } catch {}
+
+    // Warm-up context: ensure we have at least one recent hourly digest and a daily report for narrative fields
+    try {
+      if (svc.contextAccumulator && svc.contextAccumulator.enabled) {
+        setTimeout(async () => {
+          try {
+            // Ensure a recent hourly digest exists
+            let digest = null;
+            try { digest = svc.contextAccumulator.getRecentDigest(1); } catch {}
+            if (!digest) {
+              try {
+                await svc.contextAccumulator.generateHourlyDigest();
+                logger?.info?.('[NOSTR] Startup warm-up: generated hourly digest');
+              } catch (e) {
+                logger?.debug?.('[NOSTR] Startup warm-up: hourly digest generation failed:', e?.message || e);
+              }
+            }
+
+            // Ensure we have a daily report for today if none exists recently
+            try {
+              if (svc.narrativeMemory && typeof svc.narrativeMemory.getHistoricalContext === 'function') {
+                const last7d = await svc.narrativeMemory.getHistoricalContext('7d');
+                const hasRecentDaily = Array.isArray(last7d?.daily) && last7d.daily.length > 0;
+                if (!hasRecentDaily && svc.contextAccumulator?.generateDailyReport) {
+                  try {
+                    await svc.contextAccumulator.generateDailyReport();
+                    logger?.info?.('[NOSTR] Startup warm-up: generated daily report');
+                  } catch (e) {
+                    logger?.debug?.('[NOSTR] Startup warm-up: daily report generation failed:', e?.message || e);
+                  }
+                }
+              }
+            } catch {}
+          } catch {}
+        }, 8000);
+      }
+    } catch {}
     return svc;
   }
 
@@ -2018,6 +2055,24 @@ Response (YES/NO):`;
     try {
       const topicsList = Array.isArray(contextData?.topTopicsLong) ? contextData.topTopicsLong : [];
       const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      // Collect a few recent agent posts from memory (best-effort)
+      let recentAgentPosts = [];
+      try {
+        if (this.runtime?.getMemories) {
+          const rows = await this.runtime.getMemories({ tableName: 'messages', count: 40, unique: false });
+          if (Array.isArray(rows) && rows.length) {
+            recentAgentPosts = rows
+              .filter(m => m?.content?.source === 'nostr' && typeof m?.content?.text === 'string')
+              .slice(-6)
+              .map(m => ({
+                id: m.id,
+                createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+                text: String(m.content.text).slice(0, 200)
+              }));
+          }
+        }
+      } catch {}
+
       const debugDump = {
         currentActivity: contextData?.currentActivity || null,
         emergingStories: contextData?.emergingStories || [],
@@ -2031,6 +2086,7 @@ Response (YES/NO):`;
         recentDigest: contextData?.recentDigest || null,
         // Include the latest self-reflection insights (compact summary)
         selfReflection: reflectionInsights || null,
+        recentAgentPosts,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;

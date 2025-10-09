@@ -18,6 +18,10 @@ class NarrativeMemory {
     this.sentimentTrends = new Map(); // date -> {positive, negative, neutral}
     this.engagementTrends = []; // {date, events, users, quality}
     
+    // Watchlist tracking (Phase 4)
+    this.activeWatchlist = new Map(); // item -> {addedAt, source, digestId}
+    this.watchlistExpiryMs = 24 * 60 * 60 * 1000; // 24 hours
+    
     // Configuration
     this.maxHourlyCache = 7 * 24; // 7 days
     this.maxDailyCache = 90; // 90 days
@@ -135,6 +139,11 @@ class NarrativeMemory {
     this.timelineLore.push(record);
     if (this.timelineLore.length > this.maxTimelineLoreCache) {
       this.timelineLore.shift();
+    }
+
+    // Phase 4: Extract and track watchlist items
+    if (Array.isArray(entry.watchlist) && entry.watchlist.length) {
+      this.addWatchlistItems(entry.watchlist, 'digest', entry.id);
     }
 
     try {
@@ -1009,6 +1018,128 @@ OUTPUT JSON:
     }
     
     return null;
+  }
+
+  /**
+   * PHASE 4: WATCHLIST MONITORING
+   * Add watchlist items from a lore digest with 24h expiry
+   */
+  addWatchlistItems(watchlistItems, source = 'digest', digestId = null) {
+    if (!Array.isArray(watchlistItems) || !watchlistItems.length) return;
+    
+    const now = Date.now();
+    const added = [];
+    
+    for (const item of watchlistItems) {
+      const normalized = String(item || '').trim().toLowerCase();
+      if (!normalized || normalized.length < 3) continue;
+      
+      // Deduplicate - don't re-add if already tracking
+      if (this.activeWatchlist.has(normalized)) {
+        this.logger?.debug?.(`[WATCHLIST] Already tracking: ${normalized}`);
+        continue;
+      }
+      
+      this.activeWatchlist.set(normalized, {
+        addedAt: now,
+        source,
+        digestId,
+        original: item
+      });
+      
+      added.push(normalized);
+    }
+    
+    if (added.length) {
+      this.logger?.info?.(`[WATCHLIST] Added ${added.length} items: ${added.join(', ')}`);
+    }
+    
+    // Cleanup expired items
+    this._pruneExpiredWatchlist();
+    
+    return added;
+  }
+
+  /**
+   * Check if content matches any active watchlist items
+   * Returns matched items with boost recommendation
+   */
+  checkWatchlistMatch(content, tags = []) {
+    if (!content || !this.activeWatchlist.size) return null;
+    
+    this._pruneExpiredWatchlist(); // Lazy cleanup
+    
+    const contentLower = String(content).toLowerCase();
+    const tagsLower = tags.map(t => String(t || '').toLowerCase());
+    const matches = [];
+    
+    for (const [item, metadata] of this.activeWatchlist.entries()) {
+      // Check content match
+      const inContent = contentLower.includes(item);
+      
+      // Check tag match (fuzzy - either way contains other)
+      const inTags = tagsLower.some(tag => 
+        tag.includes(item) || item.includes(tag)
+      );
+      
+      if (inContent || inTags) {
+        matches.push({
+          item: metadata.original || item,
+          matchType: inContent ? 'content' : 'tag',
+          source: metadata.source,
+          age: Math.round((Date.now() - metadata.addedAt) / (60 * 60 * 1000)) // hours
+        });
+      }
+    }
+    
+    if (!matches.length) return null;
+    
+    // Conservative boost: cap at +0.5 regardless of match count
+    const boostScore = Math.min(0.5, 0.2 * matches.length);
+    
+    return {
+      matches,
+      boostScore,
+      reason: `watchlist_match: ${matches.map(m => m.item).join(', ')}`
+    };
+  }
+
+  /**
+   * Get current watchlist state for debugging
+   */
+  getWatchlistState() {
+    this._pruneExpiredWatchlist();
+    
+    return {
+      active: this.activeWatchlist.size,
+      items: Array.from(this.activeWatchlist.entries()).map(([item, meta]) => ({
+        item: meta.original || item,
+        source: meta.source,
+        age: Math.round((Date.now() - meta.addedAt) / (60 * 60 * 1000)),
+        expiresIn: Math.round((this.watchlistExpiryMs - (Date.now() - meta.addedAt)) / (60 * 60 * 1000))
+      }))
+    };
+  }
+
+  /**
+   * Remove expired watchlist items (24h timeout)
+   */
+  _pruneExpiredWatchlist() {
+    const now = Date.now();
+    const expired = [];
+    
+    for (const [item, metadata] of this.activeWatchlist.entries()) {
+      if (now - metadata.addedAt > this.watchlistExpiryMs) {
+        expired.push(item);
+        this.activeWatchlist.delete(item);
+      }
+    }
+    
+    if (expired.length) {
+      this.logger?.debug?.(`[WATCHLIST] Pruned ${expired.length} expired items`);
+    }
+    
+    return expired.length;
   }
 }
 

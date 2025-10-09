@@ -564,7 +564,7 @@ class NostrService {
      let contextInfo = '';
      if (this.contextAccumulator && this.contextAccumulator.enabled) {
        try {
-         const emergingStories = this.getEmergingStories(3);
+         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
          
          if (emergingStories.length > 0) {
            const topics = emergingStories.map(s => s.topic).join(', ');
@@ -622,7 +622,7 @@ class NostrService {
      let contextInfo = '';
      if (this.contextAccumulator && this.contextAccumulator.enabled) {
        try {
-         const emergingStories = this.getEmergingStories(3);
+         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
          const currentActivity = this.getCurrentActivity();
          
          if (emergingStories.length > 0) {
@@ -1102,7 +1102,9 @@ Response (YES/NO):`;
     // NEW: Boost score if event relates to trending topics
     if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
-        const emergingStories = this.getEmergingStories(5);
+        const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions({
+          minUsers: Math.max(5, this.contextAccumulator?.emergingStoryContextMinUsers || 0)
+        }));
         if (emergingStories.length > 0) {
           const contentLower = evt.content.toLowerCase();
           const matchingStory = emergingStories.find((s, index) => {
@@ -1655,7 +1657,7 @@ Response (YES/NO):`;
     let contextData = null;
     if (useContext && this.contextAccumulator && this.contextAccumulator.enabled) {
       try {
-        const emergingStories = this.getEmergingStories(3);
+        const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
         const currentActivity = this.getCurrentActivity();
         
         // Only include context if there's something interesting
@@ -2013,7 +2015,9 @@ Response (YES/NO):`;
     try {
       const globalEnabled = String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true';
       if (globalEnabled && this.contextAccumulator && this.contextAccumulator.enabled) {
-        const stories = this.getEmergingStories(3);
+        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({
+          maxTopics: 5
+        }));
         const activity = this.getCurrentActivity();
         const parts = [];
         if (stories && stories.length) {
@@ -4268,9 +4272,20 @@ Craft a quote repost that's engaging, authentic, and true to your pixel-hustling
     return this.contextAccumulator.getStats();
   }
 
-  getEmergingStories(minUsers = 3) {
+  _getEmergingStoryContextOptions(overrides = {}) {
+    if (!this.contextAccumulator) return { ...overrides };
+    const base = {
+      minUsers: this.contextAccumulator.emergingStoryContextMinUsers,
+      minMentions: this.contextAccumulator.emergingStoryContextMinMentions,
+      maxTopics: this.contextAccumulator.emergingStoryContextMaxTopics,
+      recentEventLimit: this.contextAccumulator.emergingStoryContextRecentEvents
+    };
+    return { ...base, ...overrides };
+  }
+
+  getEmergingStories(options = {}) {
     if (!this.contextAccumulator) return [];
-    return this.contextAccumulator.getEmergingStories(minUsers);
+    return this.contextAccumulator.getEmergingStories(options);
   }
 
   getCurrentActivity() {

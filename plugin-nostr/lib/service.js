@@ -296,6 +296,10 @@ class NostrService {
   // Awareness dry-run scheduler (no posting)
   this.awarenessDryRunTimer = null;
 
+    // Recent home feed samples ring buffer for debugging/awareness prompts
+    this.homeFeedRecent = [];
+    this.homeFeedRecentMax = 120;
+
     // Unfollow configuration
     this.unfollowEnabled = true; // Disabled by default to prevent mass unfollows
     this.unfollowMinQualityScore = 0.2; // Lower threshold to be less aggressive
@@ -2057,19 +2061,43 @@ Response (YES/NO):`;
       const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
       // Collect a few recent agent posts from memory (best-effort)
       let recentAgentPosts = [];
+      let recentHomeFeed = [];
       try {
         if (this.runtime?.getMemories) {
           const rows = await this.runtime.getMemories({ tableName: 'messages', count: 40, unique: false });
           if (Array.isArray(rows) && rows.length) {
-            recentAgentPosts = rows
+            // Classify pixels vs replies when possible
+            const mapped = rows
               .filter(m => m?.content?.source === 'nostr' && typeof m?.content?.text === 'string')
-              .slice(-6)
-              .map(m => ({
-                id: m.id,
-                createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null,
-                text: String(m.content.text).slice(0, 200)
-              }));
+              .map(m => {
+                const c = m.content || {};
+                let type = 'post';
+                if (c.type === 'lnpixels_post') type = 'pixel';
+                else if (c.inReplyTo) type = 'reply';
+                else if (c.type) type = c.type;
+                return {
+                  id: m.id,
+                  createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+                  type,
+                  text: String(c.text).slice(0, 200)
+                };
+              });
+            recentAgentPosts = mapped.slice(-8);
           }
+        }
+      } catch {}
+
+      // Include a few recent home feed samples captured live
+      try {
+        if (Array.isArray(this.homeFeedRecent) && this.homeFeedRecent.length) {
+          recentHomeFeed = this.homeFeedRecent.slice(-12).map(s => ({
+            id: s.id,
+            pubkey: s.pubkey ? String(s.pubkey).slice(0, 8) : null,
+            createdAtIso: s.createdAt ? new Date(s.createdAt * 1000).toISOString() : null,
+            allowTopicExtraction: !!s.allowTopicExtraction,
+            timelineLore: s.timelineLore || null,
+            text: typeof s.content === 'string' ? s.content.slice(0, 160) : ''
+          }));
         }
       } catch {}
 
@@ -2087,6 +2115,7 @@ Response (YES/NO):`;
         // Include the latest self-reflection insights (compact summary)
         selfReflection: reflectionInsights || null,
         recentAgentPosts,
+        recentHomeFeed,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
@@ -4704,6 +4733,16 @@ Use this if it elevates the quote.`;
     this.homeFeedQualityTracked.add(evt.id);
 
     const allowTopicExtraction = this._hasFullSentence(evt?.content);
+    // Prepare a sample record for debugging ring buffer
+    const sample = {
+      id: evt.id,
+      pubkey: evt.pubkey,
+      createdAt: evt.created_at || Math.floor(Date.now() / 1000),
+      content: typeof evt.content === 'string' ? evt.content.slice(0, 280) : '',
+      allowTopicExtraction,
+      processed: false,
+      timelineLore: { considered: false, accepted: null, reason: null },
+    };
     if (!allowTopicExtraction) {
       logger.debug(`[NOSTR] Skipping topic extraction for ${evt.id.slice(0, 8)} (no full sentence detected)`);
     }
@@ -4740,16 +4779,27 @@ Use this if it elevates the quote.`;
     }
 
     try {
+      sample.timelineLore.considered = true;
       await this._considerTimelineLoreCandidate(evt, {
         allowTopicExtraction,
         topics: extractedTopics
       });
+  // Acceptance is internal to lore buffer; keep accepted unknown here
+  sample.timelineLore.accepted = null;
     } catch (err) {
       logger.debug('[NOSTR] Timeline lore consideration failed:', err?.message || err);
+      sample.timelineLore.reason = err?.message || String(err);
     }
 
     // Optional: Log home feed events for debugging
     logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
+    // Push into recent samples ring buffer
+    try {
+      this.homeFeedRecent.push(sample);
+      if (this.homeFeedRecent.length > this.homeFeedRecentMax) {
+        this.homeFeedRecent.splice(0, this.homeFeedRecent.length - this.homeFeedRecentMax);
+      }
+    } catch {}
   }
 
   async _considerTimelineLoreCandidate(evt, context = {}) {

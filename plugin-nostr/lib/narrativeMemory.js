@@ -9,8 +9,9 @@ class NarrativeMemory {
     // In-memory cache of recent narratives
     this.hourlyNarratives = []; // Last 7 days of hourly narratives
     this.dailyNarratives = []; // Last 90 days of daily narratives
-    this.weeklyNarratives = []; // Last 52 weeks
-    this.monthlyNarratives = []; // Last 24 months
+  this.weeklyNarratives = []; // Last 52 weeks
+  this.monthlyNarratives = []; // Last 24 months
+  this.timelineLore = []; // Recent timeline lore digests
     
     // Trend tracking
     this.topicTrends = new Map(); // topic -> {counts: [], timestamps: []}
@@ -21,7 +22,8 @@ class NarrativeMemory {
     this.maxHourlyCache = 7 * 24; // 7 days
     this.maxDailyCache = 90; // 90 days
     this.maxWeeklyCache = 52; // 52 weeks
-    this.maxMonthlyCache = 24; // 24 months
+  this.maxMonthlyCache = 24; // 24 months
+  this.maxTimelineLoreCache = 120; // Recent timeline lore entries
     
     this.initialized = false;
 
@@ -119,6 +121,34 @@ class NarrativeMemory {
     
     // Check if we should generate weekly summary
     await this._maybeGenerateWeeklySummary();
+  }
+
+  async storeTimelineLore(entry) {
+    if (!entry || (typeof entry !== 'object')) return;
+
+    const record = {
+      ...entry,
+      timestamp: entry.timestamp || Date.now(),
+      type: 'timeline'
+    };
+
+    this.timelineLore.push(record);
+    if (this.timelineLore.length > this.maxTimelineLoreCache) {
+      this.timelineLore.shift();
+    }
+
+    try {
+      await this._persistNarrative(record, 'timeline');
+    } catch (err) {
+      this.logger.debug('[NARRATIVE-MEMORY] Failed to persist timeline lore:', err?.message || err);
+    }
+  }
+
+  getTimelineLore(limit = 5) {
+    if (!Number.isFinite(limit) || limit <= 0) {
+      limit = 5;
+    }
+    return this.timelineLore.slice(-limit);
   }
 
   async getHistoricalContext(timeframe = '24h') {
@@ -668,10 +698,29 @@ OUTPUT JSON:
       
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
+      // Load timeline lore entries
+      const timelineMems = await this.runtime.getMemories({
+        tableName: 'messages',
+        count: this.maxTimelineLoreCache,
+      }).catch(() => []);
+
+      for (const mem of timelineMems) {
+        if (mem.content?.type === 'narrative_timeline' && mem.content?.data) {
+          this.timelineLore.push({
+            ...mem.content.data,
+            timestamp: mem.createdAt || Date.now(),
+            type: 'timeline'
+          });
+        }
+      }
+
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
+
       // Sort all by timestamp
       this.hourlyNarratives.sort((a, b) => a.timestamp - b.timestamp);
       this.dailyNarratives.sort((a, b) => a.timestamp - b.timestamp);
       this.weeklyNarratives.sort((a, b) => a.timestamp - b.timestamp);
+      this.timelineLore.sort((a, b) => a.timestamp - b.timestamp);
 
     } catch (err) {
       this.logger.error('[NARRATIVE-MEMORY] Failed to load narratives:', err.message);
@@ -701,7 +750,8 @@ OUTPUT JSON:
         hourly: rooms.narrativesHourly,
         daily: rooms.narrativesDaily,
         weekly: rooms.narrativesWeekly,
-        monthly: rooms.narrativesMonthly
+        monthly: rooms.narrativesMonthly,
+        timeline: rooms.narrativesTimeline
       };
 
       const roomId = narrativeRooms[type] || createUniqueUuid(this.runtime, `nostr-narratives-${type}`);
@@ -769,6 +819,7 @@ OUTPUT JSON:
       dailyNarratives: this.dailyNarratives.length,
       weeklyNarratives: this.weeklyNarratives.length,
       monthlyNarratives: this.monthlyNarratives.length,
+      timelineLore: this.timelineLore.length,
       trackedTopics: this.topicTrends.size,
       engagementDataPoints: this.engagementTrends.length,
       oldestNarrative: this.dailyNarratives[0] 

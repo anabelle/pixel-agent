@@ -281,6 +281,18 @@ class NostrService {
      this.homeFeedQualityTracked = new Set(); // Track events for quality scoring (dedup across relays)
      this.homeFeedUnsub = null;
 
+    // Timeline lore buffering (home feed intelligence digestion)
+    this.timelineLoreBuffer = [];
+    this.timelineLoreMaxBuffer = 120;
+    this.timelineLoreBatchSize = 10;
+    this.timelineLoreMinIntervalMs = 30 * 60 * 1000; // Minimum 30 minutes between lore digests
+    this.timelineLoreMaxIntervalMs = 90 * 60 * 1000; // Force digest at least every 90 minutes when buffer has content
+    this.timelineLoreTimer = null;
+    this.timelineLoreLastRun = 0;
+    this.timelineLoreProcessing = false;
+    this.timelineLoreCandidateMinWords = 12;
+    this.timelineLoreCandidateMinChars = 80;
+
     // Unfollow configuration
     this.unfollowEnabled = true; // Disabled by default to prevent mass unfollows
     this.unfollowMinQualityScore = 0.2; // Lower threshold to be less aggressive
@@ -3709,6 +3721,7 @@ Response (YES/NO):`;
     if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
     if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
     if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.timelineLoreTimer) { clearTimeout(this.timelineLoreTimer); this.timelineLoreTimer = null; }
     if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
@@ -4347,10 +4360,11 @@ Use this if it elevates the quote.`;
     }
     
     // Update user topic interests from home feed
+    let extractedTopics = [];
     if (allowTopicExtraction && evt.pubkey && evt.content) {
       try {
-        const topics = await extractTopicsFromEvent(evt, this.runtime);
-        for (const topic of topics) {
+        extractedTopics = await extractTopicsFromEvent(evt, this.runtime);
+        for (const topic of extractedTopics) {
           await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
         }
       } catch (err) {
@@ -4365,8 +4379,435 @@ Use this if it elevates the quote.`;
       this._updateUserQualityScore(evt.pubkey, evt);
     }
 
+    try {
+      await this._considerTimelineLoreCandidate(evt, {
+        allowTopicExtraction,
+        topics: extractedTopics
+      });
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore consideration failed:', err?.message || err);
+    }
+
     // Optional: Log home feed events for debugging
     logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
+  }
+
+  async _considerTimelineLoreCandidate(evt, context = {}) {
+    if (!this.homeFeedEnabled || !this.contextAccumulator || !this.contextAccumulator.enabled) return;
+    if (!evt || !evt.content || !evt.pubkey || !evt.id) return;
+    if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
+    if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
+
+    const normalized = this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim();
+    if (!normalized) return;
+
+    if (normalized.length < this.timelineLoreCandidateMinChars) return;
+    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+    if (wordCount < this.timelineLoreCandidateMinWords) return;
+
+    const heuristics = this._evaluateTimelineLoreCandidate(evt, normalized, context);
+    if (!heuristics || heuristics.reject === true) return;
+
+    let verdict = heuristics;
+    if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
+      verdict = await this._screenTimelineLoreWithLLM(normalized, heuristics);
+      if (!verdict || verdict.accept === false) return;
+    }
+
+    const mergedTags = new Set();
+    for (const list of [context?.topics || [], heuristics.trendingMatches || [], verdict?.tags || []]) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        const clean = typeof item === 'string' ? item.trim() : '';
+        if (clean) mergedTags.add(clean.slice(0, 40));
+      }
+    }
+
+    const candidate = {
+      id: evt.id,
+      pubkey: evt.pubkey,
+      created_at: evt.created_at || Math.floor(Date.now() / 1000),
+      content: normalized.slice(0, 480),
+      summary: verdict?.summary || heuristics.summary || null,
+      rationale: verdict?.rationale || heuristics.reason || null,
+      tags: Array.from(mergedTags).slice(0, 8),
+      importance: verdict?.priority || heuristics.priority || 'medium',
+      score: Number.isFinite(verdict?.score) ? verdict.score : heuristics.score,
+      bufferedAt: Date.now(),
+      metadata: {
+        wordCount,
+        charCount: normalized.length,
+        topics: context?.topics || [],
+        trendingMatches: heuristics.trendingMatches || [],
+        authorScore: heuristics.authorScore,
+        signals: verdict?.signals || heuristics.signals || []
+      }
+    };
+
+    this._addTimelineLoreCandidate(candidate);
+  }
+
+  _evaluateTimelineLoreCandidate(evt, normalizedContent, context = {}) {
+    const topics = Array.isArray(context?.topics) ? context.topics : [];
+    const wordCount = normalizedContent.split(/\s+/).filter(Boolean).length;
+    const charCount = normalizedContent.length;
+    const hasQuestion = /[?¿\u061F]/u.test(normalizedContent);
+    const hasExclaim = /[!¡]/u.test(normalizedContent);
+    const hasLink = /https?:\/\//i.test(normalizedContent);
+    const hasHashtag = /(^|\s)#\w+/u.test(normalizedContent);
+    const isThreadContribution = Array.isArray(evt.tags) && evt.tags.some((tag) => tag?.[0] === 'e');
+    const authorScore = Number.isFinite(this.userQualityScores?.get(evt.pubkey))
+      ? this.userQualityScores.get(evt.pubkey)
+      : 0.5;
+
+    if (authorScore < 0.1 && wordCount < 25) {
+      return null;
+    }
+
+    let score = 0;
+    if (wordCount >= 30) score += 1.2;
+    if (wordCount >= 60) score += 0.4;
+    if (charCount >= 220) score += 0.4;
+    if (hasQuestion) score += 0.4;
+    if (hasExclaim) score += 0.1;
+    if (hasLink) score += 0.2;
+    if (hasHashtag) score += 0.2;
+    if (isThreadContribution) score += 0.3;
+    if (topics.length >= 2) score += 0.5;
+
+    score += (authorScore - 0.5);
+
+    let trendingMatches = [];
+    try {
+      const activity = this.getCurrentActivity?.();
+      if (activity?.topics?.length) {
+        const hotTopics = new Set(activity.topics.slice(0, 6).map((t) => String(t.topic || t).toLowerCase()));
+        trendingMatches = topics.filter((t) => hotTopics.has(String(t).toLowerCase()));
+        if (trendingMatches.length) {
+          score += 0.6 + 0.15 * Math.min(3, trendingMatches.length);
+        }
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore trending check failed:', err?.message || err);
+    }
+
+    if (score < 1 && authorScore < 0.4) {
+      return null;
+    }
+
+    const signals = [];
+    if (hasQuestion) signals.push('seeking answers');
+    if (hasLink) signals.push('references external source');
+    if (isThreadContribution) signals.push('thread activity');
+    if (trendingMatches.length) signals.push(`trending: ${trendingMatches.join(', ')}`);
+
+    const reasonParts = [];
+    if (wordCount >= 40) reasonParts.push('long-form');
+    if (trendingMatches.length) reasonParts.push('touches active themes');
+    if (authorScore >= 0.7) reasonParts.push('trusted author');
+    if (signals.length) reasonParts.push(signals.join('; '));
+
+    return {
+      accept: true,
+      score: Number(score.toFixed(2)),
+      priority: score >= 2.2 ? 'high' : score >= 1.4 ? 'medium' : 'low',
+      reason: reasonParts.join(', ') || 'notable activity',
+      topics,
+      trendingMatches,
+      authorScore: Number(authorScore.toFixed(2)),
+      signals,
+      summary: null,
+      skipLLM: score >= 2.8,
+      wordCount,
+      charCount
+    };
+  }
+
+  async _screenTimelineLoreWithLLM(content, heuristics) {
+    try {
+      const { generateWithModelOrFallback } = require('./generation');
+      const type = this._getSmallModelType();
+      const heuristicsSummary = {
+        score: heuristics.score,
+        wordCount: heuristics.wordCount,
+        charCount: heuristics.charCount,
+        authorScore: heuristics.authorScore,
+        trendingMatches: heuristics.trendingMatches,
+        signals: heuristics.signals
+      };
+      const prompt = `You triage Nostr posts to decide if they belong in Pixel's \"timeline lore\" digest. The lore captures threads, shifts, or signals that matter to ongoing community narratives.
+
+Consider the content and provided heuristics. ACCEPT only if the post brings:
+- fresh situational awareness (news, crisis, win, decision, actionable info),
+- a strong narrative beat (emotional turn, rallying cry, ongoing saga update), or
+- questions/coordination that require follow-up.
+Reject bland status updates, generic greetings, meme drops without context, or trivial small-talk.
+
+Return STRICT JSON:
+{
+  "accept": true|false,
+  "summary": "<=32 words capturing the core",
+  "rationale": "<=20 words explaining the decision",
+  "tags": ["topic", ... up to 4],
+  "priority": "high"|"medium"|"low",
+  "signals": ["signal", ... up to 4]
+}
+
+HEURISTICS: ${JSON.stringify(heuristicsSummary)}
+CONTENT:
+"""${content.slice(0, 600)}"""`;
+
+      const raw = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 280, temperature: 0.3 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => (typeof s === 'string' ? s.trim() : ''),
+        () => null
+      );
+
+      if (!raw) return heuristics;
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return heuristics;
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed === 'object') {
+        parsed.accept = parsed.accept !== false;
+        parsed.score = heuristics.score;
+        return parsed;
+      }
+      return heuristics;
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore LLM screen failed:', err?.message || err);
+      return heuristics;
+    }
+  }
+
+  _addTimelineLoreCandidate(candidate) {
+    if (!candidate || !candidate.id) return;
+
+    const existingIndex = this.timelineLoreBuffer.findIndex((item) => item.id === candidate.id);
+    if (existingIndex >= 0) {
+      this.timelineLoreBuffer[existingIndex] = { ...this.timelineLoreBuffer[existingIndex], ...candidate };
+    } else {
+      this.timelineLoreBuffer.push(candidate);
+      if (this.timelineLoreBuffer.length > this.timelineLoreMaxBuffer) {
+        this.timelineLoreBuffer.shift();
+      }
+    }
+
+    this._maybeTriggerTimelineLoreDigest();
+  }
+
+  _maybeTriggerTimelineLoreDigest(force = false) {
+    if (this.timelineLoreProcessing) return;
+    if (!this.timelineLoreBuffer.length) return;
+
+    const now = Date.now();
+    const sinceLast = now - this.timelineLoreLastRun;
+    const bufferSize = this.timelineLoreBuffer.length;
+    const enoughBuffer = bufferSize >= this.timelineLoreBatchSize;
+    const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs;
+
+    if (force || (enoughBuffer && intervalReached)) {
+      this._processTimelineLoreBuffer(true).catch((err) => logger.debug('[NOSTR] Timeline lore digest error:', err?.message || err));
+      return;
+    }
+
+    const minDelayMs = Math.max(5 * 60 * 1000, this.timelineLoreMinIntervalMs - sinceLast);
+    const maxDelayMs = Math.max(minDelayMs + 10 * 60 * 1000, this.timelineLoreMaxIntervalMs);
+    this._ensureTimelineLoreTimer(minDelayMs, maxDelayMs);
+  }
+
+  _ensureTimelineLoreTimer(minDelayMs, maxDelayMs) {
+    if (this.timelineLoreTimer) return;
+
+    let delayMs;
+    if (Number.isFinite(minDelayMs) && Number.isFinite(maxDelayMs) && maxDelayMs >= minDelayMs) {
+      const minSec = Math.max(5 * 60, Math.floor(minDelayMs / 1000));
+      const maxSec = Math.max(minSec + 60, Math.floor(maxDelayMs / 1000));
+      delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
+    } else {
+      const minSec = Math.max(5 * 60, Math.floor(this.timelineLoreMinIntervalMs / 1000));
+      const maxSec = Math.max(minSec + 60, Math.floor(this.timelineLoreMaxIntervalMs / 1000));
+      delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
+    }
+
+    this.timelineLoreTimer = setTimeout(() => {
+      this.timelineLoreTimer = null;
+      this._processTimelineLoreBuffer().catch((err) => logger.debug('[NOSTR] Timeline lore scheduled digest failed:', err?.message || err));
+    }, delayMs);
+  }
+
+  _prepareTimelineLoreBatch(limit = this.timelineLoreBatchSize) {
+    if (!this.timelineLoreBuffer.length) return [];
+    const unique = new Map();
+    for (let i = this.timelineLoreBuffer.length - 1; i >= 0; i--) {
+      const item = this.timelineLoreBuffer[i];
+      if (!item || !item.id) continue;
+      if (!unique.has(item.id)) unique.set(item.id, item);
+    }
+    const items = Array.from(unique.values());
+    items.sort((a, b) => {
+      const aTs = a.created_at ? a.created_at * 1000 : a.bufferedAt;
+      const bTs = b.created_at ? b.created_at * 1000 : b.bufferedAt;
+      return aTs - bTs;
+    });
+    const maxItems = Math.max(3, limit);
+    return items.slice(-maxItems);
+  }
+
+  async _processTimelineLoreBuffer(force = false) {
+    if (this.timelineLoreProcessing) return;
+    if (!this.timelineLoreBuffer.length) return;
+
+    const now = Date.now();
+    if (!force) {
+      const sinceLast = now - this.timelineLoreLastRun;
+      if (sinceLast < this.timelineLoreMinIntervalMs && this.timelineLoreBuffer.length < this.timelineLoreBatchSize) {
+        this._ensureTimelineLoreTimer();
+        return;
+      }
+    }
+
+    const batch = this._prepareTimelineLoreBatch();
+    if (!batch.length) {
+      this._ensureTimelineLoreTimer();
+      return;
+    }
+
+    this.timelineLoreProcessing = true;
+    this.timelineLoreTimer = null;
+
+    try {
+      const digest = await this._generateTimelineLoreSummary(batch);
+      if (!digest) {
+        return;
+      }
+
+      const timestamps = batch.map((item) => (item.created_at ? item.created_at * 1000 : item.bufferedAt));
+      const entry = {
+        id: `timeline-${Date.now().toString(36)}`,
+        ...digest,
+        batchSize: batch.length,
+        timeframe: {
+          start: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
+          end: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
+        },
+        sample: batch.map((item) => ({
+          id: item.id,
+          author: item.pubkey,
+          summary: item.summary,
+          rationale: item.rationale,
+          tags: item.tags,
+          importance: item.importance,
+          score: item.score,
+          content: item.content
+        }))
+      };
+
+      this.contextAccumulator?.recordTimelineLore(entry);
+      if (this.narrativeMemory?.storeTimelineLore) {
+        await this.narrativeMemory.storeTimelineLore(entry);
+      }
+
+      if (this.logger?.info) {
+        this.logger.info(`[NOSTR] Timeline lore captured (${batch.length} posts${entry?.headline ? ` • ${entry.headline}` : ''})`);
+      }
+
+      const usedIds = new Set(batch.map((item) => item.id));
+      this.timelineLoreBuffer = this.timelineLoreBuffer.filter((item) => !usedIds.has(item.id));
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore processing failed:', err?.message || err);
+    } finally {
+      this.timelineLoreProcessing = false;
+      this.timelineLoreLastRun = Date.now();
+      if (this.timelineLoreBuffer.length) {
+        this._ensureTimelineLoreTimer();
+      }
+    }
+  }
+
+  async _generateTimelineLoreSummary(batch) {
+    if (!batch || !batch.length) return null;
+
+    try {
+      const { generateWithModelOrFallback } = require('./generation');
+      const type = this._getSmallModelType();
+
+      const topicCounts = new Map();
+      for (const item of batch) {
+        for (const tag of item.tags || []) {
+          const key = String(tag || '').trim().toLowerCase();
+          if (!key) continue;
+          topicCounts.set(key, (topicCounts.get(key) || 0) + 1);
+        }
+      }
+      const rankedTags = Array.from(topicCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([tag, count]) => `${tag}(${count})`);
+
+      const postLines = batch.map((item, idx) => {
+        const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
+        const summary = item.summary || item.content.slice(0, 140);
+        const rationale = item.rationale || 'signal';
+        const signalLine = (item.metadata?.signals || []).join('; ') || 'no explicit signals';
+        return `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}
+SUMMARY: ${summary}
+RATIONALE: ${rationale}
+SIGNALS: ${signalLine}
+CONTENT: ${item.content}`;
+      }).join('\n\n');
+
+      const prompt = `You are Pixel's home-feed analyst. Distill the following Nostr posts into a concise \"timeline lore\" entry capturing the community's evolving story.
+
+FOCUS:
+- Spotlight connective threads, conflicts, wins, or calls to action.
+- Mention why it matters for the next decisions or tone.
+- Keep it grounded in the provided posts—no speculation beyond them.
+
+Return STRICT JSON:
+{
+  "headline": "<=18 words, punchy narrative hook",
+  "narrative": "3-4 sentence arc explaining what's unfolding",
+  "insights": ["key micro-trend or signal", ... up to 4],
+  "watchlist": ["what to monitor next", ... up to 4],
+  "tags": ["topic", ... up to 5],
+  "priority": "high"|"medium"|"low",
+  "tone": "emotional tenor"
+}
+
+Ranked tags from heuristics: ${rankedTags.join(', ') || 'none'}
+
+POSTS:
+${postLines.slice(0, 5500)}`;
+
+      const raw = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 420, temperature: 0.45 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => (typeof s === 'string' ? s.trim() : ''),
+        () => null
+      );
+
+      if (!raw) return null;
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      if (!Array.isArray(parsed.tags) || !parsed.tags.length) {
+        parsed.tags = rankedTags.slice(0, 4).map((entry) => entry.split('(')[0]);
+      }
+
+      return parsed;
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore summary generation failed:', err?.message || err);
+      return null;
+    }
   }
 
   _updateUserQualityScore(pubkey, evt) {

@@ -4963,36 +4963,58 @@ CONTENT:
         );
       }
 
-      const prompt = `You are Pixel's home-feed analyst. Distill the following Nostr posts into a concise \"timeline lore\" entry capturing the community's evolving story.
+      const prompt = `YOU ARE A TIMELINE ANALYST. Your ONLY job is to summarize what's in the posts below.
 
-FOCUS:
-- Spotlight connective threads, conflicts, wins, or calls to action.
-- Mention why it matters for the next decisions or tone.
-- Keep it grounded in the provided posts—no speculation beyond them.
-- Focus on SPECIFIC, CURRENT topics: names of people, places, events, projects, tools, or concrete happenings.
-- AVOID generic terms like: bitcoin, btc, nostr, crypto, lightning, protocol, blockchain, technology, community, discussion.
-- Prioritize what's NEW, TIMELY, and ACTIONABLE over general interests.
-- Extract watchlist items that are CONCRETE and TRACKABLE (e.g., "Jack Dorsey keynote", "Alby updates", "El Salvador regulations"), NOT generic concepts.
+⚠️ CRITICAL: IGNORE ALL OTHER CONTEXT
+- Do NOT use any knowledge about agents, characters, or personas
+- Do NOT reference any information not explicitly in the posts
+- Do NOT assume relationships or storylines beyond what posts show
+- ONLY analyze the exact content provided in the POSTS section below
 
-Return STRICT JSON:
+TASK: Create a factual summary of what these Nostr timeline posts discuss.
+
+EXTRACT FROM POSTS:
+✅ SPECIFIC people: "Donald Trump", "Jack Dorsey", "Pavel Durov", actual names/handles
+✅ SPECIFIC places: "El Salvador", "Gaza", "Nashville", actual locations  
+✅ SPECIFIC events: "Bitcoin Conference 2025", "BlockParty", named happenings
+✅ SPECIFIC projects: "Alby", "Strike", "Damus", "cashu", named tools/apps
+✅ CONCRETE developments: policy changes, launches, conflicts, announcements
+
+IGNORE COMPLETELY:
+❌ Generic terms: bitcoin, btc, nostr, crypto, lightning, blockchain, protocol, network, technology, community, discussion, development
+❌ Abstract concepts: freedom, decentralization, innovation, adoption, collaboration
+❌ Filler words: people, things, various, general, update, news
+
+IF POSTS MENTION AN AGENT/BOT:
+- Treat it as just another topic (not the main focus)
+- Don't build narrative around the agent's perspective
+- Focus on OTHER topics in those posts
+
+OUTPUT FORMAT (strict JSON, no markdown):
 {
-  "headline": "<=18 words, punchy narrative hook focused on specific developments",
-  "narrative": "3-4 sentence arc explaining what's unfolding with concrete details",
-  "insights": ["key micro-trend or signal with specifics", ... up to 4],
-  "watchlist": ["specific people/places/events/projects to monitor", ... up to 4],
-  "tags": ["specific concrete topic", ... up to 5],
+  "headline": "<=18 words stating what the timeline posts are about",
+  "narrative": "2-3 sentences describing ONLY what you read in the posts",
+  "insights": ["observable pattern from posts", "another pattern", "max 3 total"],
+  "watchlist": ["specific trackable item from posts", "another item", "max 3 total"],
+  "tags": ["concrete topic from posts", "another topic", "max 5 total"],
   "priority": "high"|"medium"|"low",
-  "tone": "emotional tenor"
+  "tone": "emotional tenor of the posts"
 }
 
-WATCHLIST GUIDELINES:
-- Include specific names, events, projects, or trackable developments
-- Example GOOD watchlist items: "Alby wallet launch", "Jack Dorsey", "Bitcoin Nashville", "cashu implementation", "Strike expansion"
-- Example BAD watchlist items: "bitcoin", "nostr", "lightning", "development", "community discussion"
+EXAMPLE (if posts discussed Trump and Antifa):
+{
+  "headline": "Trump Signals Foreign Terrorist Designation for Antifa",
+  "narrative": "Posts discuss Trump's announcement about designating Antifa as a foreign terrorist organization with sanctions. Multiple users sharing and reacting to this policy development.",
+  "insights": ["Political policy shift generating discussion", "International implications being debated"],
+  "watchlist": ["Trump executive orders", "Antifa designation"],
+  "tags": ["Donald Trump", "Antifa", "sanctions"],
+  "priority": "high",
+  "tone": "urgent, political"
+}
 
-Ranked tags from heuristics: ${rankedTags.join(', ') || 'none'}
+Tags from post metadata: ${rankedTags.join(', ') || 'none'}
 
-POSTS (${recentBatch.length} most recent from batch of ${batch.length}):
+POSTS TO ANALYZE (${recentBatch.length} posts):
 ${postLines}`;
 
       const raw = await generateWithModelOrFallback(

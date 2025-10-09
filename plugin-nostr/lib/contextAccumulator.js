@@ -15,6 +15,9 @@ class ContextAccumulator {
     
     // Topic timelines: topic -> [events over time]
     this.topicTimelines = new Map();
+
+    // Timeline lore digests generated from home feed reasoning
+    this.timelineLoreEntries = [];
     
     // Daily narrative accumulator
     this.dailyEvents = [];
@@ -51,6 +54,11 @@ class ContextAccumulator {
     this.emergingStoryContextRecentEvents = parsePositiveInt(
       options?.contextRecentEvents ?? process.env.CONTEXT_EMERGING_STORY_CONTEXT_RECENT_EVENTS,
       5
+    );
+
+    this.maxTimelineLoreEntries = parsePositiveInt(
+      options?.timelineLoreLimit ?? process.env.CONTEXT_TIMELINE_LORE_LIMIT,
+      60
     );
     
     // Feature flags
@@ -206,6 +214,27 @@ class ContextAccumulator {
     } catch (err) {
       this.logger.debug('[CONTEXT] processEvent error:', err.message);
     }
+  }
+
+  recordTimelineLore(entry) {
+    if (!entry) return null;
+
+    const record = {
+      ...entry,
+      timestamp: entry.timestamp || Date.now()
+    };
+
+    this.timelineLoreEntries.push(record);
+    if (this.timelineLoreEntries.length > this.maxTimelineLoreEntries) {
+      this.timelineLoreEntries.shift();
+    }
+
+    return record;
+  }
+
+  getTimelineLore(limit = 5) {
+    if (!Number.isFinite(limit) || limit <= 0) limit = 5;
+    return this.timelineLoreEntries.slice(-limit);
   }
 
   async _extractStructuredData(evt, options = {}) {

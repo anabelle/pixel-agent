@@ -2062,9 +2062,10 @@ Response (YES/NO):`;
       // Collect a few recent agent posts from memory (best-effort)
       let recentAgentPosts = [];
       let recentHomeFeed = [];
+      let permanentMemories = null;
       try {
         if (this.runtime?.getMemories) {
-          const rows = await this.runtime.getMemories({ tableName: 'messages', count: 40, unique: false });
+          const rows = await this.runtime.getMemories({ tableName: 'messages', count: 200, unique: false });
           if (Array.isArray(rows) && rows.length) {
             // Classify pixels vs replies when possible
             const mapped = rows
@@ -2083,6 +2084,144 @@ Response (YES/NO):`;
                 };
               });
             recentAgentPosts = mapped.slice(-8);
+
+            // Build compact summaries of permanent memories by type
+            try {
+              const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
+              const byType = new Map();
+              for (const m of rows) {
+                const t = m?.content?.type || null;
+                if (!t) continue;
+                if (!byType.has(t)) byType.set(t, []);
+                byType.get(t).push(m);
+              }
+
+              const safeIso = (ts) => ts ? new Date(ts).toISOString() : null;
+              const topTopicsCompact = (arr, k = 3) => Array.isArray(arr) ? arr.slice(0, k).map(t => t?.topic || String(t)).filter(Boolean) : [];
+
+              const result = {};
+
+              // Hourly digests
+              if (byType.has('hourly_digest')) {
+                const items = pickLatest(byType.get('hourly_digest'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const metrics = d.metrics || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    hourLabel: d.hourLabel || null,
+                    events: metrics.events || null,
+                    users: metrics.activeUsers || null,
+                    topTopics: topTopicsCompact(metrics.topTopics)
+                  };
+                });
+                if (items.length) result.hourlyDigest = items;
+              }
+
+              // Daily reports
+              if (byType.has('daily_report')) {
+                const items = pickLatest(byType.get('daily_report'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const summary = d.summary || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    date: d.date || null,
+                    events: summary.totalEvents || null,
+                    activeUsers: summary.activeUsers || null,
+                    topTopics: topTopicsCompact(summary.topTopics, 5)
+                  };
+                });
+                if (items.length) result.dailyReport = items;
+              }
+
+              // Narrative entries
+              const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
+              const narratives = [];
+              for (const nt of narrativeTypes) {
+                if (!byType.has(nt)) continue;
+                const items = pickLatest(byType.get(nt), 2).map(m => {
+                  const d = m.content?.data || {};
+                  // For timeline, include priority/tags/summary
+                  if (nt === 'narrative_timeline') {
+                    return {
+                      type: 'timeline',
+                      createdAtIso: safeIso(m.createdAt),
+                      priority: d.priority || null,
+                      tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [],
+                      summary: (d.summary || null)
+                    };
+                  }
+                  return {
+                    type: nt.replace('narrative_',''),
+                    createdAtIso: safeIso(m.createdAt),
+                    events: d.events || null,
+                    users: d.users || null,
+                    topTopics: topTopicsCompact(d.topTopics, 4),
+                    hasNarrative: !!d.narrative,
+                  };
+                });
+                narratives.push(...items);
+              }
+              if (narratives.length) result.narratives = narratives.slice(-6);
+
+              // Self-reflection history (use engine for compact summaries)
+              try {
+                if (this.selfReflectionEngine?.getReflectionHistory) {
+                  const hist = await this.selfReflectionEngine.getReflectionHistory({ limit: 3, maxAgeHours: 720 });
+                  if (Array.isArray(hist) && hist.length) {
+                    result.selfReflectionHistory = hist;
+                  }
+                }
+              } catch {}
+
+              // LNPixels posts/events
+              if (byType.has('lnpixels_post')) {
+                const items = pickLatest(byType.get('lnpixels_post'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    x: e.x, y: e.y, color: e.color, sats: e.sats,
+                    text: typeof d.generatedText === 'string' ? d.generatedText.slice(0, 160) : null
+                  };
+                });
+                if (items.length) result.lnpixelsPosts = items;
+              }
+              if (byType.has('lnpixels_event')) {
+                const items = pickLatest(byType.get('lnpixels_event'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    x: e.x, y: e.y, sats: e.sats, throttled: !!d.throttled
+                  };
+                });
+                if (items.length) result.lnpixelsEvents = items;
+              }
+
+              // Mentions
+              if (byType.has('mention')) {
+                const items = pickLatest(byType.get('mention'), 2).map(m => ({
+                  createdAtIso: safeIso(m.createdAt),
+                  text: String(m?.content?.text || '').slice(0, 160)
+                }));
+                if (items.length) result.mentions = items;
+              }
+
+              // Social interactions (compact sample)
+              if (byType.has('social_interaction')) {
+                const items = pickLatest(byType.get('social_interaction'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    kind: d?.kind || null,
+                    summary: typeof d?.summary === 'string' ? d.summary.slice(0, 140) : null
+                  };
+                });
+                if (items.length) result.social = items;
+              }
+
+              permanentMemories = result;
+            } catch {}
           }
         }
       } catch {}
@@ -2101,6 +2240,45 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // Gather compact user profile memories
+      let userProfiles = { focus: [], topEngaged: [] };
+      try {
+        const upm = this.userProfileManager;
+        if (upm && upm.profiles) {
+          const summarize = (p) => {
+            try {
+              const topTopics = Object.entries(p.topicInterests || {})
+                .sort((a, b) => (b[1] - a[1]))
+                .slice(0, 3)
+                .map(([topic, interest]) => ({ topic, interest: Number(interest.toFixed ? interest.toFixed(2) : interest) }));
+              return {
+                pubkey: p.pubkey ? String(p.pubkey).slice(0, 8) : null,
+                lastInteractionIso: p.lastInteraction ? new Date(p.lastInteraction).toISOString() : null,
+                totalInteractions: p.totalInteractions || 0,
+                dominantSentiment: p.dominantSentiment || 'neutral',
+                relationships: p.relationships ? Object.keys(p.relationships).length : 0,
+                qualityScore: typeof p.qualityScore === 'number' ? Number(p.qualityScore.toFixed ? p.qualityScore.toFixed(2) : p.qualityScore) : null,
+                engagementScore: typeof p.engagementScore === 'number' ? Number(p.engagementScore.toFixed ? p.engagementScore.toFixed(2) : p.engagementScore) : null,
+                topTopics
+              };
+            } catch { return null; }
+          };
+
+          // Focus: users from recent home feed
+          const focusKeys = new Set((this.homeFeedRecent || []).slice(-12).map(s => s.pubkey).filter(Boolean));
+          userProfiles.focus = Array.from(focusKeys).map(pk => upm.profiles.get(pk)).filter(Boolean).map(summarize).filter(Boolean).slice(0, 8);
+
+          // Top engaged overall from cache
+          const allProfiles = Array.from(upm.profiles.values());
+          userProfiles.topEngaged = allProfiles
+            .slice()
+            .sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0))
+            .slice(0, 8)
+            .map(summarize)
+            .filter(Boolean);
+        }
+      } catch {}
+
       const debugDump = {
         currentActivity: contextData?.currentActivity || null,
         emergingStories: contextData?.emergingStories || [],
@@ -2116,6 +2294,8 @@ Response (YES/NO):`;
         selfReflection: reflectionInsights || null,
         recentAgentPosts,
         recentHomeFeed,
+        userProfiles,
+        permanent: permanentMemories,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;

@@ -2211,14 +2211,34 @@ Response (YES/NO):`;
               if (byType.has('social_interaction')) {
                 const items = pickLatest(byType.get('social_interaction'), 2).map(m => {
                   const d = m.content?.data || {};
+                  // Fallbacks for summary: prefer d.summary, then d.body, then content.text, then nested event.content
+                  let summary = null;
+                  if (typeof d?.summary === 'string') summary = d.summary.slice(0, 140);
+                  else if (typeof d?.body === 'string') summary = d.body.slice(0, 140);
+                  else if (typeof m?.content?.text === 'string') summary = m.content.text.slice(0, 140);
+                  else if (typeof d?.event?.content === 'string') summary = d.event.content.slice(0, 140);
                   return {
                     createdAtIso: safeIso(m.createdAt),
                     kind: d?.kind || null,
-                    summary: typeof d?.summary === 'string' ? d.summary.slice(0, 140) : null
+                    summary
                   };
                 });
                 if (items.length) result.social = items;
               }
+
+              // Watchlist state from narrative memory (compact)
+              try {
+                if (this.narrativeMemory?.getWatchlistState) {
+                  const ws = this.narrativeMemory.getWatchlistState();
+                  if (ws) {
+                    result.watchlistState = {
+                      items: Array.isArray(ws.items) ? ws.items.slice(-5) : [],
+                      lastUpdatedIso: ws.lastUpdated ? new Date(ws.lastUpdated).toISOString() : null,
+                      total: Array.isArray(ws.items) ? ws.items.length : null
+                    };
+                  }
+                }
+              } catch {}
 
               permanentMemories = result;
             } catch {}
@@ -2245,12 +2265,18 @@ Response (YES/NO):`;
       try {
         const upm = this.userProfileManager;
         if (upm && upm.profiles) {
-          const summarize = (p) => {
+          const summarizeWithStats = async (p) => {
             try {
-              const topTopics = Object.entries(p.topicInterests || {})
+              // Filter noisy/low-confidence topics
+              const topicEntries = Object.entries(p.topicInterests || {})
+                .filter(([t, v]) => Number(v) >= 0.05 && typeof t === 'string' && t.length >= 2 && t.length <= 40 && !/^https?:/i.test(t))
                 .sort((a, b) => (b[1] - a[1]))
                 .slice(0, 3)
                 .map(([topic, interest]) => ({ topic, interest: Number(interest.toFixed ? interest.toFixed(2) : interest) }));
+
+              let stats = null;
+              try { stats = await upm.getEngagementStats(p.pubkey); } catch {}
+
               return {
                 pubkey: p.pubkey ? String(p.pubkey).slice(0, 8) : null,
                 lastInteractionIso: p.lastInteraction ? new Date(p.lastInteraction).toISOString() : null,
@@ -2259,23 +2285,29 @@ Response (YES/NO):`;
                 relationships: p.relationships ? Object.keys(p.relationships).length : 0,
                 qualityScore: typeof p.qualityScore === 'number' ? Number(p.qualityScore.toFixed ? p.qualityScore.toFixed(2) : p.qualityScore) : null,
                 engagementScore: typeof p.engagementScore === 'number' ? Number(p.engagementScore.toFixed ? p.engagementScore.toFixed(2) : p.engagementScore) : null,
-                topTopics
+                topTopics: (stats?.topTopics?.length ? stats.topTopics.slice(0, 3).map(x => ({ topic: x.topic, interest: Number((x.interest ?? 0).toFixed ? x.interest.toFixed(2) : (x.interest ?? 0)) })) : topicEntries),
+                replySuccessRate: typeof stats?.replySuccessRate === 'number' ? Number(stats.replySuccessRate.toFixed ? stats.replySuccessRate.toFixed(2) : stats.replySuccessRate) : null,
+                averageEngagement: typeof stats?.averageEngagement === 'number' ? Number(stats.averageEngagement.toFixed ? stats.averageEngagement.toFixed(2) : stats.averageEngagement) : null
               };
             } catch { return null; }
           };
 
-          // Focus: users from recent home feed
-          const focusKeys = new Set((this.homeFeedRecent || []).slice(-12).map(s => s.pubkey).filter(Boolean));
-          userProfiles.focus = Array.from(focusKeys).map(pk => upm.profiles.get(pk)).filter(Boolean).map(summarize).filter(Boolean).slice(0, 8);
+          // Focus: users from recent home feed (ensure we load persisted profile if not cached)
+          const focusKeysArr = Array.from(new Set((this.homeFeedRecent || []).slice(-12).map(s => s.pubkey).filter(Boolean)));
+          const focusProfiles = await Promise.all(focusKeysArr.map(async (pk) => {
+            try {
+              if (typeof upm.getProfile === 'function') return await upm.getProfile(pk);
+            } catch {}
+            try { return upm.profiles.get(pk); } catch { return null; }
+          }));
+          const focusSummaries = await Promise.all(focusProfiles.filter(Boolean).slice(0, 8).map(p => summarizeWithStats(p)));
+          userProfiles.focus = focusSummaries.filter(Boolean);
 
-          // Top engaged overall from cache
+          // Top engaged overall from cache with stats
           const allProfiles = Array.from(upm.profiles.values());
-          userProfiles.topEngaged = allProfiles
-            .slice()
-            .sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0))
-            .slice(0, 8)
-            .map(summarize)
-            .filter(Boolean);
+          const topProfiles = allProfiles.slice().sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0)).slice(0, 8);
+          const topSummaries = await Promise.all(topProfiles.map(p => summarizeWithStats(p)));
+          userProfiles.topEngaged = topSummaries.filter(Boolean);
         }
       } catch {}
 

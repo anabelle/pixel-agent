@@ -1940,7 +1940,183 @@ Response (YES/NO):`;
       }
     }
     
-    const prompt = this._buildPostPrompt(contextData, reflectionInsights);
+    let prompt = this._buildPostPrompt(contextData, reflectionInsights);
+    
+    // Append memory dump similar to awareness prompt
+    try {
+      const topicsList = [];
+      try {
+        if (this.contextAccumulator) {
+          const longTopics = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 24, limit: 200, minMentions: 1 }) || [];
+          topicsList.push(...longTopics);
+        }
+      } catch {}
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      
+      let recentAgentPosts = [];
+      let recentHomeFeed = [];
+      let permanentMemories = null;
+      
+      try {
+        if (this.runtime?.getMemories) {
+          const rows = await this.runtime.getMemories({ tableName: 'messages', count: 200, unique: false });
+          if (Array.isArray(rows) && rows.length) {
+            const mapped = rows
+              .filter(m => m?.content?.source === 'nostr' && typeof m?.content?.text === 'string')
+              .map(m => {
+                const c = m.content || {};
+                let type = 'post';
+                if (c.type === 'lnpixels_post') type = 'pixel';
+                else if (c.inReplyTo) type = 'reply';
+                else if (c.type) type = c.type;
+                return {
+                  id: m.id,
+                  createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+                  type,
+                  text: String(c.text).slice(0, 200)
+                };
+              });
+            recentAgentPosts = mapped.slice(-8);
+
+            try {
+              const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
+              const byType = new Map();
+              for (const m of rows) {
+                const t = m?.content?.type || null;
+                if (!t) continue;
+                if (!byType.has(t)) byType.set(t, []);
+                byType.get(t).push(m);
+              }
+
+              const safeIso = (ts) => ts ? new Date(ts).toISOString() : null;
+              const topTopicsCompact = (arr, k = 3) => Array.isArray(arr) ? arr.slice(0, k).map(t => t?.topic || String(t)).filter(Boolean) : [];
+              const result = {};
+
+              if (byType.has('hourly_digest')) {
+                const items = pickLatest(byType.get('hourly_digest'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const metrics = d.metrics || {};
+                  return { createdAtIso: safeIso(m.createdAt), hourLabel: d.hourLabel || null, events: metrics.events || null, users: metrics.activeUsers || null, topTopics: topTopicsCompact(metrics.topTopics) };
+                });
+                if (items.length) result.hourlyDigest = items;
+              }
+
+              if (byType.has('daily_report')) {
+                const items = pickLatest(byType.get('daily_report'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const summary = d.summary || {};
+                  return { createdAtIso: safeIso(m.createdAt), date: d.date || null, events: summary.totalEvents || null, activeUsers: summary.activeUsers || null, topTopics: topTopicsCompact(summary.topTopics, 5) };
+                });
+                if (items.length) result.dailyReport = items;
+              }
+
+              const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
+              const narratives = [];
+              for (const nt of narrativeTypes) {
+                if (!byType.has(nt)) continue;
+                const items = pickLatest(byType.get(nt), 2).map(m => {
+                  const d = m.content?.data || {};
+                  if (nt === 'narrative_timeline') {
+                    return { type: 'timeline', createdAtIso: safeIso(m.createdAt), priority: d.priority || null, tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [], summary: (d.summary || null) };
+                  }
+                  return { type: nt.replace('narrative_',''), createdAtIso: safeIso(m.createdAt), events: d.events || null, users: d.users || null, topTopics: topTopicsCompact(d.topTopics, 4), hasNarrative: !!d.narrative };
+                });
+                narratives.push(...items);
+              }
+              if (narratives.length) result.narratives = narratives.slice(-6);
+
+              try {
+                if (this.selfReflectionEngine?.getReflectionHistory) {
+                  const hist = await this.selfReflectionEngine.getReflectionHistory({ limit: 3, maxAgeHours: 720 });
+                  if (Array.isArray(hist) && hist.length) result.selfReflectionHistory = hist;
+                }
+              } catch {}
+
+              if (byType.has('lnpixels_post')) {
+                const items = pickLatest(byType.get('lnpixels_post'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, color: e.color, sats: e.sats, text: typeof d.generatedText === 'string' ? d.generatedText.slice(0, 160) : null };
+                });
+                if (items.length) result.lnpixelsPosts = items;
+              }
+
+              if (byType.has('lnpixels_event')) {
+                const items = pickLatest(byType.get('lnpixels_event'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, sats: e.sats, throttled: !!d.throttled };
+                });
+                if (items.length) result.lnpixelsEvents = items;
+              }
+
+              if (byType.has('mention')) {
+                const items = pickLatest(byType.get('mention'), 2).map(m => ({ createdAtIso: safeIso(m.createdAt), text: String(m?.content?.text || '').slice(0, 160) }));
+                if (items.length) result.mentions = items;
+              }
+
+              if (byType.has('social_interaction')) {
+                const items = pickLatest(byType.get('social_interaction'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  let summary = null;
+                  if (typeof d?.summary === 'string') summary = d.summary.slice(0, 140);
+                  else if (typeof d?.body === 'string') summary = d.body.slice(0, 140);
+                  else if (typeof m?.content?.text === 'string') summary = m.content.text.slice(0, 140);
+                  else if (typeof d?.event?.content === 'string') summary = d.event.content.slice(0, 140);
+                  return { createdAtIso: safeIso(m.createdAt), kind: d?.kind || null, summary };
+                });
+                if (items.length) result.social = items;
+              }
+
+              try {
+                if (this.narrativeMemory?.getWatchlistState) {
+                  const ws = this.narrativeMemory.getWatchlistState();
+                  if (ws) {
+                    result.watchlistState = { items: Array.isArray(ws.items) ? ws.items.slice(-5) : [], lastUpdatedIso: ws.lastUpdated ? new Date(ws.lastUpdated).toISOString() : null, total: Array.isArray(ws.items) ? ws.items.length : null };
+                  }
+                }
+              } catch {}
+
+              permanentMemories = result;
+            } catch {}
+          }
+        }
+      } catch {}
+
+      try {
+        if (Array.isArray(this.homeFeedRecent) && this.homeFeedRecent.length) {
+          recentHomeFeed = this.homeFeedRecent.slice(-12).map(s => ({
+            id: s.id,
+            pubkey: s.pubkey ? String(s.pubkey).slice(0, 8) : null,
+            createdAtIso: s.createdAt ? new Date(s.createdAt * 1000).toISOString() : null,
+            allowTopicExtraction: !!s.allowTopicExtraction,
+            timelineLore: s.timelineLore || null,
+            text: typeof s.content === 'string' ? s.content.slice(0, 160) : ''
+          }));
+        }
+      } catch {}
+
+      const debugDump = {
+        currentActivity: contextData?.currentActivity || null,
+        emergingStories: contextData?.emergingStories || [],
+        timelineLoreFull: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore : [],
+        narratives: {
+          daily: contextData?.dailyNarrative || null,
+          weekly: contextData?.weeklyNarrative || null,
+          monthly: contextData?.monthlyNarrative || null,
+        },
+        recentDigest: contextData?.recentDigest || null,
+        selfReflection: reflectionInsights || null,
+        recentAgentPosts,
+        recentHomeFeed,
+        permanent: permanentMemories,
+        topics: topicsSummary,
+      };
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
+      prompt = `${prompt}${debugHeader}${debugBody}`;
+    } catch {}
+    
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     // Debug meta about post prompt (no chain-of-thought)
@@ -2915,7 +3091,209 @@ Response (YES/NO):`;
     }
 
     // Use thread context, image context, narrative context, user profile, and proactive insights for better responses
-  const prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection, timelineLoreSection, loreContinuity);
+  let prompt = this._buildReplyPrompt(evt, recent, threadContext, imageContext, narrativeContext, userProfile, authorPostsSection, proactiveInsight, selfReflectionContext, userHistorySection, globalTimelineSection, timelineLoreSection, loreContinuity);
+    
+    // Append memory dump similar to awareness and post prompts
+    try {
+      const topicsList = [];
+      try {
+        if (this.contextAccumulator) {
+          const longTopics = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 24, limit: 200, minMentions: 1 }) || [];
+          topicsList.push(...longTopics);
+        }
+      } catch {}
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      
+      let recentAgentPosts = [];
+      let recentHomeFeed = [];
+      let permanentMemories = null;
+      
+      try {
+        if (this.runtime?.getMemories) {
+          const rows = await this.runtime.getMemories({ tableName: 'messages', count: 200, unique: false });
+          if (Array.isArray(rows) && rows.length) {
+            const mapped = rows
+              .filter(m => m?.content?.source === 'nostr' && typeof m?.content?.text === 'string')
+              .map(m => {
+                const c = m.content || {};
+                let type = 'post';
+                if (c.type === 'lnpixels_post') type = 'pixel';
+                else if (c.inReplyTo) type = 'reply';
+                else if (c.type) type = c.type;
+                return {
+                  id: m.id,
+                  createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+                  type,
+                  text: String(c.text).slice(0, 200)
+                };
+              });
+            recentAgentPosts = mapped.slice(-8);
+
+            try {
+              const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
+              const byType = new Map();
+              for (const m of rows) {
+                const t = m?.content?.type || null;
+                if (!t) continue;
+                if (!byType.has(t)) byType.set(t, []);
+                byType.get(t).push(m);
+              }
+
+              const safeIso = (ts) => ts ? new Date(ts).toISOString() : null;
+              const topTopicsCompact = (arr, k = 3) => Array.isArray(arr) ? arr.slice(0, k).map(t => t?.topic || String(t)).filter(Boolean) : [];
+              const result = {};
+
+              if (byType.has('hourly_digest')) {
+                const items = pickLatest(byType.get('hourly_digest'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const metrics = d.metrics || {};
+                  return { createdAtIso: safeIso(m.createdAt), hourLabel: d.hourLabel || null, events: metrics.events || null, users: metrics.activeUsers || null, topTopics: topTopicsCompact(metrics.topTopics) };
+                });
+                if (items.length) result.hourlyDigest = items;
+              }
+
+              if (byType.has('daily_report')) {
+                const items = pickLatest(byType.get('daily_report'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  const summary = d.summary || {};
+                  return { createdAtIso: safeIso(m.createdAt), date: d.date || null, events: summary.totalEvents || null, activeUsers: summary.activeUsers || null, topTopics: topTopicsCompact(summary.topTopics, 5) };
+                });
+                if (items.length) result.dailyReport = items;
+              }
+
+              const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
+              const narratives = [];
+              for (const nt of narrativeTypes) {
+                if (!byType.has(nt)) continue;
+                const items = pickLatest(byType.get(nt), 2).map(m => {
+                  const d = m.content?.data || {};
+                  if (nt === 'narrative_timeline') {
+                    return { type: 'timeline', createdAtIso: safeIso(m.createdAt), priority: d.priority || null, tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [], summary: (d.summary || null) };
+                  }
+                  return { type: nt.replace('narrative_',''), createdAtIso: safeIso(m.createdAt), events: d.events || null, users: d.users || null, topTopics: topTopicsCompact(d.topTopics, 4), hasNarrative: !!d.narrative };
+                });
+                narratives.push(...items);
+              }
+              if (narratives.length) result.narratives = narratives.slice(-6);
+
+              try {
+                if (this.selfReflectionEngine?.getReflectionHistory) {
+                  const hist = await this.selfReflectionEngine.getReflectionHistory({ limit: 3, maxAgeHours: 720 });
+                  if (Array.isArray(hist) && hist.length) result.selfReflectionHistory = hist;
+                }
+              } catch {}
+
+              if (byType.has('lnpixels_post')) {
+                const items = pickLatest(byType.get('lnpixels_post'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, color: e.color, sats: e.sats, text: typeof d.generatedText === 'string' ? d.generatedText.slice(0, 160) : null };
+                });
+                if (items.length) result.lnpixelsPosts = items;
+              }
+
+              if (byType.has('lnpixels_event')) {
+                const items = pickLatest(byType.get('lnpixels_event'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const e = d.triggerEvent || {};
+                  return { createdAtIso: safeIso(m.createdAt), x: e.x, y: e.y, sats: e.sats, throttled: !!d.throttled };
+                });
+                if (items.length) result.lnpixelsEvents = items;
+              }
+
+              if (byType.has('mention')) {
+                const items = pickLatest(byType.get('mention'), 2).map(m => ({ createdAtIso: safeIso(m.createdAt), text: String(m?.content?.text || '').slice(0, 160) }));
+                if (items.length) result.mentions = items;
+              }
+
+              if (byType.has('social_interaction')) {
+                const items = pickLatest(byType.get('social_interaction'), 2).map(m => {
+                  const d = m.content?.data || {};
+                  let summary = null;
+                  if (typeof d?.summary === 'string') summary = d.summary.slice(0, 140);
+                  else if (typeof d?.body === 'string') summary = d.body.slice(0, 140);
+                  else if (typeof m?.content?.text === 'string') summary = m.content.text.slice(0, 140);
+                  else if (typeof d?.event?.content === 'string') summary = d.event.content.slice(0, 140);
+                  return { createdAtIso: safeIso(m.createdAt), kind: d?.kind || null, summary };
+                });
+                if (items.length) result.social = items;
+              }
+
+              try {
+                if (this.narrativeMemory?.getWatchlistState) {
+                  const ws = this.narrativeMemory.getWatchlistState();
+                  if (ws) {
+                    result.watchlistState = { items: Array.isArray(ws.items) ? ws.items.slice(-5) : [], lastUpdatedIso: ws.lastUpdated ? new Date(ws.lastUpdated).toISOString() : null, total: Array.isArray(ws.items) ? ws.items.length : null };
+                  }
+                }
+              } catch {}
+
+              permanentMemories = result;
+            } catch {}
+          }
+        }
+      } catch {}
+
+      try {
+        if (Array.isArray(this.homeFeedRecent) && this.homeFeedRecent.length) {
+          recentHomeFeed = this.homeFeedRecent.slice(-12).map(s => ({
+            id: s.id,
+            pubkey: s.pubkey ? String(s.pubkey).slice(0, 8) : null,
+            createdAtIso: s.createdAt ? new Date(s.createdAt * 1000).toISOString() : null,
+            allowTopicExtraction: !!s.allowTopicExtraction,
+            timelineLore: s.timelineLore || null,
+            text: typeof s.content === 'string' ? s.content.slice(0, 160) : ''
+          }));
+        }
+      } catch {}
+
+      // Gather contextData from earlier in the function
+      let contextDataForDump = null;
+      try {
+        if (narrativeContext || this.contextAccumulator) {
+          contextDataForDump = {
+            emergingStories: narrativeContext?.emergingStories || [],
+            currentActivity: narrativeContext?.currentActivity || null,
+            topTopics: narrativeContext?.topTopics || [],
+            timelineLore: timelineLoreSection ? [timelineLoreSection] : [],
+            toneTrend: narrativeContext?.toneTrend || null,
+            dailyNarrative: narrativeContext?.dailyNarrative || null,
+            weeklyNarrative: narrativeContext?.weeklyNarrative || null,
+            monthlyNarrative: narrativeContext?.monthlyNarrative || null,
+            recentDigest: narrativeContext?.recentDigest || null,
+          };
+        }
+      } catch {}
+
+      const debugDump = {
+        currentActivity: contextDataForDump?.currentActivity || null,
+        emergingStories: contextDataForDump?.emergingStories || [],
+        timelineLoreFull: Array.isArray(contextDataForDump?.timelineLore) ? contextDataForDump.timelineLore : [],
+        narratives: {
+          daily: contextDataForDump?.dailyNarrative || null,
+          weekly: contextDataForDump?.weeklyNarrative || null,
+          monthly: contextDataForDump?.monthlyNarrative || null,
+        },
+        recentDigest: contextDataForDump?.recentDigest || null,
+        selfReflection: selfReflectionContext || null,
+        recentAgentPosts,
+        recentHomeFeed,
+        permanent: permanentMemories,
+        topics: topicsSummary,
+        replyContext: {
+          hasThreadContext: !!threadContext,
+          hasImageContext: !!imageContext,
+          hasNarrativeContext: !!narrativeContext,
+          hasUserProfile: !!userProfile,
+          hasProactiveInsight: !!proactiveInsight,
+          authorPubkey: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : null,
+        }
+      };
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
+      prompt = `${prompt}${debugHeader}${debugBody}`;
+    } catch {}
+    
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
     

@@ -2245,14 +2245,27 @@ Response (YES/NO):`;
       } catch {}
 
       // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
-      let _timelineLoreFull = [];
+      let _timelineLoreDump = [];
       try {
-        if (Array.isArray(contextData?.timelineLore)) _timelineLoreFull = contextData.timelineLore;
+        if (Array.isArray(contextData?.timelineLore)) _timelineLoreDump = contextData.timelineLore;
         else if (this.contextAccumulator?.getTimelineLore) {
           const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreFull = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+          _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
         }
       } catch {}
+
+      // If still no lore, try narrativeMemory cache
+      try {
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        }
+      } catch {}
+      
+      // Log if timeline lore is unavailable after all fallbacks
+      if (_timelineLoreDump.length === 0) {
+        try { this.logger?.debug?.('[NOSTR][POST] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+      }
 
       // Pull the most recent timeline narrative (if any) from compact permanent memories
       let _timelineNarrative = null;
@@ -2263,10 +2276,22 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // Compact permanent memories: reduce heavy self-reflection history
+      const permanentForDump = (() => {
+        try {
+          if (!permanentMemories || typeof permanentMemories !== 'object') return permanentMemories;
+          const copy = { ...permanentMemories };
+          if (Array.isArray(copy.selfReflectionHistory)) {
+            copy.selfReflectionHistory = { count: copy.selfReflectionHistory.length };
+          }
+          return copy;
+        } catch { return permanentMemories; }
+      })();
+
       const debugDump = {
         currentActivity: contextData?.currentActivity || null,
         emergingStories: contextData?.emergingStories || [],
-        timelineLoreFull: _timelineLoreFull,
+        timelineLoreFull: _timelineLoreDump,
         narratives: {
           daily: contextData?.dailyNarrative || null,
           weekly: contextData?.weeklyNarrative || null,
@@ -2274,10 +2299,10 @@ Response (YES/NO):`;
           timeline: _timelineNarrative,
         },
         recentDigest: contextData?.recentDigest || null,
-        selfReflection: reflectionInsights || null,
+        selfReflection: reflectionInsights ? String(reflectionInsights).slice(0, 200) : null,
         recentAgentPosts,
         recentHomeFeed,
-        permanent: permanentMemories,
+        permanent: permanentForDump,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
@@ -2696,23 +2721,64 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // Ensure timeline lore appears: prefer context, fall back to accumulator then narrative memory
+      let _timelineLoreDump = [];
+      try {
+        if (Array.isArray(contextData?.timelineLore)) _timelineLoreDump = contextData.timelineLore;
+        else if (this.contextAccumulator?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+        }
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        }
+      } catch {}
+      
+      // Log if timeline lore is unavailable after all fallbacks
+      if (_timelineLoreDump.length === 0) {
+        try { this.logger?.debug?.('[NOSTR][AWARENESS] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+      }
+
+      // Pull the most recent timeline narrative (if any) from compact permanent memories
+      let _timelineNarrativeAw = null;
+      try {
+        const narr = Array.isArray(permanentMemories?.narratives) ? permanentMemories.narratives : [];
+        for (let i = narr.length - 1; i >= 0; i--) {
+          if (narr[i]?.type === 'timeline') { _timelineNarrativeAw = narr[i]; break; }
+        }
+      } catch {}
+
+      // Compact permanent memories: shrink heavy arrays
+      const permanentForAwDump = (() => {
+        try {
+          if (!permanentMemories || typeof permanentMemories !== 'object') return permanentMemories;
+          const copy = { ...permanentMemories };
+          if (Array.isArray(copy.selfReflectionHistory)) {
+            copy.selfReflectionHistory = { count: copy.selfReflectionHistory.length };
+          }
+          return copy;
+        } catch { return permanentMemories; }
+      })();
+
       const debugDump = {
         currentActivity: contextData?.currentActivity || null,
         emergingStories: contextData?.emergingStories || [],
-        timelineLoreFull: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore : [],
+        timelineLoreFull: _timelineLoreDump,
         narratives: {
           daily: contextData?.dailyNarrative || null,
           weekly: contextData?.weeklyNarrative || null,
           monthly: contextData?.monthlyNarrative || null,
+          timeline: _timelineNarrativeAw,
         },
         // Include the recent digest object directly (if available)
         recentDigest: contextData?.recentDigest || null,
         // Include the latest self-reflection insights (compact summary)
-        selfReflection: reflectionInsights || null,
+        selfReflection: reflectionInsights ? String(reflectionInsights).slice(0, 200) : null,
         recentAgentPosts,
         recentHomeFeed,
         userProfiles,
-        permanent: permanentMemories,
+        permanent: permanentForAwDump,
         topics: topicsSummary,
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
@@ -3458,12 +3524,12 @@ Response (YES/NO):`;
       } catch {}
 
       // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
-      let _timelineLoreFullR = [];
+      let _timelineLoreDump = [];
       try {
-        if (Array.isArray(contextDataForDump?.timelineLore)) _timelineLoreFullR = contextDataForDump.timelineLore;
+        if (Array.isArray(contextDataForDump?.timelineLore)) _timelineLoreDump = contextDataForDump.timelineLore;
         else if (this.contextAccumulator?.getTimelineLore) {
           const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreFullR = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+          _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
         }
       } catch {}
 
@@ -3476,10 +3542,35 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // If still no lore, try narrativeMemory cache
+      try {
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        }
+      } catch {}
+      
+      // Log if timeline lore is unavailable after all fallbacks
+      if (_timelineLoreDump.length === 0) {
+        try { this.logger?.debug?.('[NOSTR][REPLY] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+      }
+
+      // Compact permanent memories for dump
+      const permanentForReplyDump = (() => {
+        try {
+          if (!permanentMemories || typeof permanentMemories !== 'object') return permanentMemories;
+          const copy = { ...permanentMemories };
+          if (Array.isArray(copy.selfReflectionHistory)) {
+            copy.selfReflectionHistory = { count: copy.selfReflectionHistory.length };
+          }
+          return copy;
+        } catch { return permanentMemories; }
+      })();
+
       const debugDump = {
         currentActivity: contextDataForDump?.currentActivity || null,
         emergingStories: contextDataForDump?.emergingStories || [],
-        timelineLoreFull: _timelineLoreFullR,
+        timelineLoreFull: _timelineLoreDump,
         narratives: {
           daily: contextDataForDump?.dailyNarrative || null,
           weekly: contextDataForDump?.weeklyNarrative || null,
@@ -3487,10 +3578,10 @@ Response (YES/NO):`;
           timeline: _timelineNarrativeR,
         },
         recentDigest: contextDataForDump?.recentDigest || null,
-        selfReflection: selfReflectionContext || null,
+        selfReflection: selfReflectionContext ? String(selfReflectionContext).slice(0, 200) : null,
         recentAgentPosts,
         recentHomeFeed,
-        permanent: permanentMemories,
+        permanent: permanentForReplyDump,
         topics: topicsSummary,
         replyContext: {
           hasThreadContext: !!threadContext,

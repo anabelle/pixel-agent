@@ -1849,7 +1849,7 @@ Response (YES/NO):`;
 
   _getSmallModelType() { return (ModelType && (ModelType.TEXT_SMALL || ModelType.SMALL || ModelType.LARGE)) || 'TEXT_SMALL'; }
   _getLargeModelType() { return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE'; }
-  _buildPostPrompt(contextData = null, reflection = null) { return buildPostPrompt(this.runtime.character, contextData, reflection); }
+  _buildPostPrompt(contextData = null, reflection = null, options = null) { return buildPostPrompt(this.runtime.character, contextData, reflection, options); }
   _buildAwarenessPrompt(contextData = null, reflection = null, topic = null, loreContinuity = null) { return buildAwarenessPostPrompt(this.runtime.character, contextData, reflection, topic, loreContinuity); }
   _buildDailyDigestPostPrompt(report) { return buildDailyDigestPostPrompt(this.runtime.character, report); }
   _buildReplyPrompt(evt, recent, threadContext = null, imageContext = null, narrativeContext = null, userProfile = null, authorPostsSection = null, proactiveInsight = null, reflectionInsights = null, userHistorySection = null, globalTimelineSection = null, timelineLoreSection = null, loreContinuity = null) {
@@ -1863,7 +1863,16 @@ Response (YES/NO):`;
   _extractTextFromModelResult(result) { try { return extractTextFromModelResult(result); } catch { return ''; } }
   _sanitizeWhitelist(text) { return sanitizeWhitelist(text); }
 
-  async generatePostTextLLM(useContext = true) {
+  async generatePostTextLLM(options = true) {
+    let useContext = true;
+    let isScheduled = false;
+    if (typeof options === 'boolean') {
+      useContext = options;
+    } else if (options && typeof options === 'object') {
+      if (options.useContext !== undefined) useContext = !!options.useContext;
+      if (options.isScheduled !== undefined) isScheduled = !!options.isScheduled;
+    }
+    
     // NEW: Gather accumulated context if available and enabled
     let contextData = null;
     if (useContext && this.contextAccumulator && this.contextAccumulator.enabled) {
@@ -1953,7 +1962,7 @@ Response (YES/NO):`;
       }
     }
     
-    let prompt = this._buildPostPrompt(contextData, reflectionInsights);
+  let prompt = this._buildPostPrompt(contextData, reflectionInsights, { isScheduled });
     
     // Append memory dump similar to awareness prompt
     try {
@@ -2163,7 +2172,7 @@ Response (YES/NO):`;
         permanent: permanentMemories,
         topics: topicsSummary,
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}
@@ -2598,7 +2607,7 @@ Response (YES/NO):`;
         permanent: permanentMemories,
         topics: topicsSummary,
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}
@@ -2768,7 +2777,7 @@ Response (YES/NO):`;
           permanent: permanentMemories,
           topics: topicsSummary,
         };
-        const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+        const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
         const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
         const fullPrompt = `${prompt}${debugHeader}${debugBody}`;
 
@@ -3364,7 +3373,7 @@ Response (YES/NO):`;
           authorPubkey: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : null,
         }
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use only for awareness):`;
+      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}
@@ -3476,7 +3485,7 @@ Response (YES/NO):`;
     let text = content?.trim?.();
     if (!text) { 
       // NEW: Try context-aware post generation first
-      text = await this.generatePostTextLLM(isScheduledPost); 
+  text = await this.generatePostTextLLM({ useContext: true, isScheduled: isScheduledPost }); 
       if (!text) text = this.pickPostText(); 
     }
     text = text || 'hello, nostr';

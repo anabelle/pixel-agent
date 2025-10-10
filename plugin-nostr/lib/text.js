@@ -5,9 +5,10 @@ const TOPIC_LIST_LIMIT = (() => {
   return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
 })();
 
-function buildPostPrompt(character, contextData = null, reflection = null) {
+function buildPostPrompt(character, contextData = null, reflection = null, options = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
+  const isScheduled = !!(options && options.isScheduled);
   const topics = Array.isArray(ch.topics)
     ? ch.topics.length <= TOPIC_LIST_LIMIT
       ? ch.topics.join(', ')
@@ -62,7 +63,8 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
     }
 
     if (contextSection) {
-      contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider weaving these community threads in naturally, but ONLY if it fits your authentic voice. It's okay to go elsewhere if inspiration hits differently.`;
+  const scheduledHint = isScheduled ? ' When this is a scheduled post, feel free to take extra space—reference one or two timely signals so the note feels present in the moment.' : '';
+  contextSection = `\n\n${contextSection.trim()}\n\nSUGGESTION: Consider weaving these community threads in naturally, but ONLY if it fits your authentic voice. It's okay to go elsewhere if inspiration hits differently.${scheduledHint}`;
     }
 
     if (Array.isArray(timelineLore) && timelineLore.length > 0) {
@@ -125,7 +127,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
 
       if (hints.length) {
         const joined = hints.join(' • ').slice(0, 320);
-        contextSection += `${contextSection ? '\n\n' : '\n\n'}CONTEXT HINTS (do not copy verbatim; use only as subtle steer): ${joined}`;
+  contextSection += `${contextSection ? '\n\n' : '\n\n'}CONTEXT HINTS (do not copy verbatim; use only as subtle steer): ${joined}\n\nIf you borrow from these hints, expand with your own perspective so it reads like lived awareness.`;
       }
     } catch {}
   }
@@ -171,6 +173,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
   
   return [
     `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah," On Nostr, you can subtly invite zaps through humor, charm, and creativity - never begging. Zaps are organic appreciation, not obligation.`,
+    isScheduled ? 'Scheduled mode: This is an outbound post queued in advance. Make it feel live by referencing a fresh community detail while staying on-brand.' : '',
     ch.system ? `Persona/system: ${ch.system}` : '',
     topics ? `Relevant topics: ${topics}` : '',
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
@@ -179,7 +182,10 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
     'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
     contextSection, // NEW: Include community context
     reflectionSection, // NEW: Include self-reflection insights
-    'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
+    isScheduled ? 'Awareness mandate: If context hints are present, surface at least one concrete detail (trend, stat, or name) as part of the story, unless it would clearly break character.' : '',
+    isScheduled
+      ? 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; 140–320 chars are welcome when weaving current events. Avoid hashtags unless additive. Respect whitelist, no other links or handles.'
+      : 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
   ].filter(Boolean).join('\n\n');
 }
 

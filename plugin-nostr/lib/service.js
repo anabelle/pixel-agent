@@ -954,6 +954,19 @@ Response (YES/NO):`;
 
     logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled} homeFeed=${svc.homeFeedEnabled}`);
     
+    // Start periodic topic extractor stats logging (every 60 seconds)
+    svc.topicStatsInterval = setInterval(() => {
+      try {
+        const { getTopicExtractorStats } = require('./nostr');
+        const stats = getTopicExtractorStats(runtime);
+        if (stats && stats.processed > 0) {
+          logger.info(`[TOPIC] Stats: ${stats.processed} processed, ${stats.llmCalls} LLM calls, ${stats.cacheHitRate} cache hits, ${stats.skipRate} skipped, ${stats.estimatedSavings} calls saved, cache: ${stats.cacheSize} entries`);
+        }
+      } catch (err) {
+        logger.debug('[TOPIC] Stats logging failed:', err?.message || err);
+      }
+    }, 60000); // Every 60 seconds
+    
     // Start awareness dry-run loop: every ~3 minutes, log prompt and response (no posting)
     try { svc.startAwarenessDryRun(); } catch {}
 
@@ -6513,6 +6526,7 @@ ${postLines}`;
     if (this.hourlyDigestTimer) { clearTimeout(this.hourlyDigestTimer); this.hourlyDigestTimer = null; }
     if (this.dailyReportTimer) { clearTimeout(this.dailyReportTimer); this.dailyReportTimer = null; }
     if (this.selfReflectionTimer) { clearTimeout(this.selfReflectionTimer); this.selfReflectionTimer = null; }
+    if (this.topicStatsInterval) { clearInterval(this.topicStatsInterval); this.topicStatsInterval = null; }
     if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch {} this.homeFeedUnsub = null; }
     if (this.listenUnsub) { try { this.listenUnsub(); } catch {} this.listenUnsub = null; }
     if (this.pool) { try { this.pool.close([]); } catch {} this.pool = null; }
@@ -6521,6 +6535,13 @@ ${postLines}`;
     if (this.userProfileManager) { try { await this.userProfileManager.destroy(); } catch {} this.userProfileManager = null; }
     if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch {} this.narrativeMemory = null; }
     if (this.awarenessDryRunTimer) { try { clearInterval(this.awarenessDryRunTimer); } catch {} this.awarenessDryRunTimer = null; }
+    
+    // Cleanup topic extractor
+    try {
+      const { destroyTopicExtractor } = require('./nostr');
+      destroyTopicExtractor(this.runtime);
+    } catch {}
+    
     logger.info('[NOSTR] Service stopped');
   }
 

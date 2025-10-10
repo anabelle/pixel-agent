@@ -156,6 +156,35 @@ function _extractFallbackTopics(content, maxTopics = EXTRACTED_TOPICS_LIMIT) {
   return results;
 }
 
+// Per-runtime topic extractor instances for batching/caching
+const _topicExtractors = new Map();
+
+function _getTopicExtractor(runtime) {
+  const key = runtime?.agentId || 'default';
+  
+  if (!_topicExtractors.has(key)) {
+    const { TopicExtractor } = require('./topicExtractor');
+    _topicExtractors.set(key, new TopicExtractor(runtime, runtime?.logger));
+  }
+  
+  return _topicExtractors.get(key);
+}
+
+function getTopicExtractorStats(runtime) {
+  const extractor = _topicExtractors.get(runtime?.agentId || 'default');
+  return extractor ? extractor.getStats() : null;
+}
+
+function destroyTopicExtractor(runtime) {
+  const key = runtime?.agentId || 'default';
+  const extractor = _topicExtractors.get(key);
+  
+  if (extractor) {
+    extractor.destroy();
+    _topicExtractors.delete(key);
+  }
+}
+
 async function extractTopicsFromEvent(event, runtime) {
   if (!event || !event.content) return [];
 
@@ -163,141 +192,25 @@ async function extractTopicsFromEvent(event, runtime) {
   const debugLog = typeof runtimeLogger?.debug === 'function'
     ? runtimeLogger.debug.bind(runtimeLogger)
     : null;
-  const warnLog = typeof runtimeLogger?.warn === 'function'
-    ? runtimeLogger.warn.bind(runtimeLogger)
-    : null;
 
   debugLog?.(`[NOSTR] Extracting topics for ${event.id?.slice(0, 8) || 'unknown'}`);
-  const content = event.content.toLowerCase();
-  const topics = [];
-  let llmCleanedTopics = [];
 
-  // Helper: sanitize a single topic string from LLM or hashtags
-  const sanitizeTopic = (t) => {
-    if (!t || typeof t !== 'string') return '';
-    let s = t
-      .trim()
-      // strip leading list bullets/quotes/arrows
-      .replace(/^[-–—•*>"]+\s*/g, '')
-      // remove URLs and nostr: handles
-      .replace(/https?:\/\/\S+/gi, ' ')
-      .replace(/nostr:[a-z0-9]+\b/gi, ' ')
-      // collapse punctuation noise to spaces
-      .replace(/[\p{Ps}\p{Pe}\p{Pi}\p{Pf}\p{Po}\p{S}]+/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
-    // keep multi-word entities; final lightweight guardrails
-    if (!s || s.length < 2 || s.length > 100) return '';
-    // ignore pure numbers
-    if (/^\d+$/.test(s)) return '';
-    return s;
-  };
-
-  // Extract hashtags first (apply same ignore rules)
-  const hashtags = content.match(/#\w+/g) || [];
-  const hashtagTopics = hashtags
-    .map((h) => sanitizeTopic(h.slice(1)))
-    .filter((t) => t && !FORBIDDEN_TOPIC_WORDS.has(t) && !TIMELINE_LORE_IGNORED_TERMS.has(t));
-  if (hashtagTopics.length && debugLog) {
-    debugLog(`[NOSTR] Hashtag topics for ${event.id?.slice(0, 8)}: [${hashtagTopics.join(', ')}]`);
-  }
-  topics.push(...hashtagTopics);
-
-   // Use LLM to extract additional topics
-   if (runtime?.useModel) {
-     try {
-          const truncatedContent = event.content.slice(0, 800);
-     const prompt = `Extract main topics from this post. Give up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
-
-Rules:
-- Use ONLY topics actually mentioned or clearly implied
-- Prefer: proper names, specific projects, events, tools, concepts, places
-- Avoid: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news
-- For people/events/places: use their actual names
-- Never respond with: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
-- If post has hashtags/entities: use those as topics
-- Short posts: pick most meaningful topic (not generic)
-- No real words/hashtags? Respond 'none'
-- Output: topics separated by commas, max ${EXTRACTED_TOPICS_LIMIT}
-
-<POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
-
-       const llmMaxTokens = Math.min(200, Math.max(60, EXTRACTED_TOPICS_LIMIT * 8));
-       const response = await runtime.useModel('TEXT_SMALL', {
-         prompt,
-         maxTokens: llmMaxTokens,
-         temperature: 0.3
-       });
-
-        const responseText = typeof response === 'string'
-          ? response
-          : (response?.text ?? '');
-
-        if (responseText) {
-          // Trim outer whitespace/newlines first, then lowercase
-          const responseTrimmed = String(responseText).trim();
-
-          // Handle "none" style responses for posts with no clear topics
-          if (responseTrimmed.toLowerCase() !== 'none') {
-            // Split on commas OR newlines to handle different model output formats
-            const rawTopics = responseTrimmed
-              .split(/[\,\n]+/)
-              .map((t) => t.trim())
-              .filter((t) => t && t.length < 500);
-
-            const cleanedTopics = rawTopics
-              .map((t) => sanitizeTopic(t))
-              .filter(Boolean)
-              // remove obvious noise after sanitize
-              .filter((t) => t !== 'general' && t !== 'various' && t !== 'discussion' && t !== 'none')
-              .filter((t) => !/^(https?:\/\/|www\.)/i.test(t))
-              .filter((t) => !FORBIDDEN_TOPIC_WORDS.has(t))
-              .filter((t) => !TIMELINE_LORE_IGNORED_TERMS.has(t))
-              // drop nostr bech32 identifiers that slipped through
-              .filter((t) => !/\b(nprofile1|npub1|nevent1|naddr1|note1)[a-z0-9]+/i.test(t));
-
-            if (debugLog) {
-              debugLog(`[NOSTR] LLM raw topics for ${event.id?.slice(0, 8)}: [${rawTopics.join(' | ')}]`);
-              debugLog(`[NOSTR] LLM cleaned topics for ${event.id?.slice(0, 8)}: [${cleanedTopics.join(', ')}]`);
-            }
-
-            // Prefer LLM topics explicitly
-            llmCleanedTopics = cleanedTopics.slice(0, EXTRACTED_TOPICS_LIMIT);
-          }
-        }
-    } catch (error) {
-      // Fallback to empty if LLM fails
-      const message = error?.message || String(error);
-      if (warnLog) {
-        warnLog(`[NOSTR] LLM topic extraction failed: ${message}`);
-      } else if (debugLog) {
-        debugLog(`[NOSTR] LLM topic extraction failed: ${message}`);
-      }
+  try {
+    const extractor = _getTopicExtractor(runtime);
+    const topics = await extractor.extractTopics(event);
+    
+    if (debugLog) {
+      debugLog(`[NOSTR] Final topics for ${event.id?.slice(0, 8)}: [${topics.join(', ')}]`);
     }
+    
+    return topics;
+  } catch (error) {
+    const message = error?.message || String(error);
+    debugLog?.(`[NOSTR] Topic extraction failed: ${message}`);
+    
+    // Fallback to fast extraction
+    return _extractFallbackTopics(event.content, EXTRACTED_TOPICS_LIMIT);
   }
-
-  // Merge hashtags + LLM topics, then dedupe and cap
-  const merged = [...topics, ...llmCleanedTopics];
-  let uniqueTopics = Array.from(new Set(merged)).filter(Boolean);
-  if (uniqueTopics.length > EXTRACTED_TOPICS_LIMIT) uniqueTopics.length = EXTRACTED_TOPICS_LIMIT;
-
-  if (!uniqueTopics.length) {
-    // Log if we had LLM topics but they were filtered out by merging/dedupe stage
-    if (llmCleanedTopics.length > 0 && debugLog) {
-      debugLog(`[NOSTR] Warning: LLM provided topics but none survived merge/filter for ${event.id?.slice(0, 8)}: [${llmCleanedTopics.join(', ')}]`);
-    }
-    const fallbackTopics = _extractFallbackTopics(event.content, EXTRACTED_TOPICS_LIMIT);
-    if (fallbackTopics.length) {
-      debugLog?.(`[NOSTR] Topic fallback used for ${event.id?.slice(0, 8) || 'unknown'} -> ${fallbackTopics.join(', ')}`);
-      uniqueTopics.push(...fallbackTopics.slice(0, EXTRACTED_TOPICS_LIMIT));
-    }
-  }
-
-  if (debugLog) {
-    debugLog(`[NOSTR] Final topics for ${event.id?.slice(0, 8)}: [${uniqueTopics.join(', ')}]`);
-  }
-  return uniqueTopics;
 }
 
 function isSelfAuthor(evt, selfPkHex) {
@@ -455,10 +368,13 @@ function _getSecpOptional() {
 module.exports = {
   getConversationIdFromEvent,
   extractTopicsFromEvent,
+  getTopicExtractorStats,
+  destroyTopicExtractor,
   isSelfAuthor,
   decryptDirectMessage,
   decryptNIP04Manual,
   encryptNIP04Manual,
   TIMELINE_LORE_IGNORED_TERMS,
   FORBIDDEN_TOPIC_WORDS,
+  EXTRACTED_TOPICS_LIMIT,
 };

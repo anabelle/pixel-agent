@@ -58,17 +58,19 @@ class TopicExtractor {
     return new Promise((resolve) => {
       this.pendingBatch.push({ event, resolve });
       
-      // Clear existing timer
-      if (this.batchTimer) {
-        clearTimeout(this.batchTimer);
-      }
-      
-      // Process batch when full OR after timeout
+      // Process batch when full OR start timer if not already running
       if (this.pendingBatch.length >= this.batchSize) {
+        // Batch is full - process immediately
+        if (this.batchTimer) {
+          clearTimeout(this.batchTimer);
+          this.batchTimer = null;
+        }
         this._processBatch();
-      } else {
+      } else if (!this.batchTimer && !this._isProcessing) {
+        // Start timer only if one isn't already running
         this.batchTimer = setTimeout(() => this._processBatch(), this.batchWaitMs);
       }
+      // If timer is already running, just let it continue - new event added to pending batch
     });
   }
 

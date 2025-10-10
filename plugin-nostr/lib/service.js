@@ -6505,9 +6505,16 @@ ${postLines}`;
   _extractJsonObject(raw) {
     if (!raw || typeof raw !== 'string') return null;
     const attempt = (input) => {
+      if (!input || typeof input !== 'string') return null;
       try {
         return JSON.parse(input);
       } catch {
+        if (typeof this._repairJsonString === 'function') {
+          const repaired = this._repairJsonString(input);
+          if (repaired && repaired !== input) {
+            try { return JSON.parse(repaired); } catch {}
+          }
+        }
         return null;
       }
     };
@@ -6544,6 +6551,28 @@ ${postLines}`;
     }
 
     return null;
+  }
+
+  _repairJsonString(str) {
+    if (!str || typeof str !== 'string') return null;
+    let repaired = str;
+
+    // Normalize different quote styles to double quotes where safe
+    repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (match, inner) => {
+      if (inner.includes('"')) return match; // avoid breaking JSON that mixes quotes
+      return `"${inner.replace(/"/g, '\\"')}"`;
+    });
+
+    // Quote bare keys (e.g. tags: [] -> "tags": [])
+    repaired = repaired.replace(/([,{\s])([A-Za-z0-9_]+)\s*:/g, (match, prefix, key) => {
+      if (/"$/.test(prefix)) return match;
+      return `${prefix}"${key}":`;
+    });
+
+    // Remove trailing commas before closing braces/brackets
+    repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+    return repaired;
   }
 
   _normalizeTimelineLoreDigest(parsed, rankedTags = []) {

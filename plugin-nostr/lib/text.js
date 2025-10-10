@@ -1,12 +1,13 @@
 // Text-related helpers: prompt builders and sanitization
 
+const TOPIC_LIST_LIMIT = (() => {
+  const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
+  return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
+})();
+
 function buildPostPrompt(character, contextData = null, reflection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
-  const TOPIC_LIST_LIMIT = (() => {
-    const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
-    return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
-  })();
   const topics = Array.isArray(ch.topics)
     ? ch.topics.length <= TOPIC_LIST_LIMIT
       ? ch.topics.join(', ')

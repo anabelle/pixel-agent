@@ -7,8 +7,8 @@ class TopicExtractor {
     this.logger = logger || console;
     
     // Batching config
-    this.batchSize = parseInt(process.env.TOPIC_BATCH_SIZE, 10) || 5;
-    this.batchWaitMs = parseInt(process.env.TOPIC_BATCH_WAIT_MS, 10) || 100;
+    this.batchSize = parseInt(process.env.TOPIC_BATCH_SIZE, 10) || 8; // Wait for 8 events
+    this.batchWaitMs = parseInt(process.env.TOPIC_BATCH_WAIT_MS, 10) || Infinity; // No timeout by default
     this.pendingBatch = [];
     this.batchTimer = null;
     this._isProcessing = false; // Guard against concurrent batch processing
@@ -54,11 +54,11 @@ class TopicExtractor {
       return cached.topics;
     }
     
-    // Add to batch and wait
+    // Add to batch and wait for 8 events
     return new Promise((resolve) => {
       this.pendingBatch.push({ event, resolve });
       
-      // Process batch when full OR start timer if not already running
+      // Process batch ONLY when full (8 events accumulated)
       if (this.pendingBatch.length >= this.batchSize) {
         // Batch is full - process immediately
         if (this.batchTimer) {
@@ -66,11 +66,12 @@ class TopicExtractor {
           this.batchTimer = null;
         }
         this._processBatch();
-      } else if (!this.batchTimer && !this._isProcessing) {
-        // Start timer only if one isn't already running
+      } else if (this.batchWaitMs !== Infinity && !this.batchTimer && !this._isProcessing) {
+        // Optional timeout fallback (only if TOPIC_BATCH_WAIT_MS is set)
+        // By default (Infinity), will wait indefinitely for full batch
         this.batchTimer = setTimeout(() => this._processBatch(), this.batchWaitMs);
       }
-      // If timer is already running, just let it continue - new event added to pending batch
+      // Otherwise, just accumulate - waiting for more events to reach batch size
     });
   }
 
@@ -422,6 +423,14 @@ Rules:
     if (this.batchTimer) clearTimeout(this.batchTimer);
     if (this.cleanupInterval) clearInterval(this.cleanupInterval);
     this.cache.clear();
+  }
+
+  // Force process remaining events in pending batch (for graceful shutdown)
+  async flush() {
+    if (this.pendingBatch.length > 0) {
+      this.logger?.debug?.(`[TOPIC] Flushing ${this.pendingBatch.length} pending events`);
+      await this._processBatch();
+    }
   }
 }
 

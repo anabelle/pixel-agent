@@ -6539,10 +6539,10 @@ ${postLines}`;
     if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch {} this.narrativeMemory = null; }
     if (this.awarenessDryRunTimer) { try { clearInterval(this.awarenessDryRunTimer); } catch {} this.awarenessDryRunTimer = null; }
     
-    // Cleanup topic extractor
+    // Cleanup topic extractor (flush pending events before destroying)
     try {
       const { destroyTopicExtractor } = require('./nostr');
-      destroyTopicExtractor(this.runtime);
+      await destroyTopicExtractor(this.runtime);
     } catch {}
     
     logger.info('[NOSTR] Service stopped');

@@ -6131,53 +6131,24 @@ CONTENT:
         );
       }
 
-      const prompt = `YOU ARE A TIMELINE ANALYST. Your ONLY job is to summarize what's in the posts below.
+      const prompt = `Summarize what these Nostr posts discuss. Focus on specific developments.
 
-⚠️ CRITICAL: IGNORE ALL OTHER CONTEXT
-- Do NOT use any knowledge about agents, characters, or personas
-- Do NOT reference any information not explicitly in the posts
-- Do NOT assume relationships or storylines beyond what posts show
-- ONLY analyze the exact content provided in the POSTS section below
+EXTRACT:
+✅ Specific people, places, events, projects, concrete developments
+❌ Generic terms: bitcoin, nostr, crypto, blockchain, technology, community, discussion
 
-TASK: Create a factual summary of what these Nostr timeline posts discuss.
+IF POSTS MENTION AGENT/BOT:
+- Treat as regular topic, focus on other content
 
-EXTRACT FROM POSTS:
-✅ SPECIFIC people: "Donald Trump", "Jack Dorsey", "Pavel Durov", actual names/handles
-✅ SPECIFIC places: "El Salvador", "Gaza", "Nashville", actual locations  
-✅ SPECIFIC events: "Bitcoin Conference 2025", "BlockParty", named happenings
-✅ SPECIFIC projects: "Alby", "Strike", "Damus", "cashu", named tools/apps
-✅ CONCRETE developments: policy changes, launches, conflicts, announcements
-
-IGNORE COMPLETELY:
-❌ Generic terms: bitcoin, btc, nostr, crypto, lightning, blockchain, protocol, network, technology, community, discussion, development
-❌ Abstract concepts: freedom, decentralization, innovation, adoption, collaboration
-❌ Filler words: people, things, various, general, update, news
-
-IF POSTS MENTION AN AGENT/BOT:
-- Treat it as just another topic (not the main focus)
-- Don't build narrative around the agent's perspective
-- Focus on OTHER topics in those posts
-
-OUTPUT FORMAT (strict JSON, no markdown):
+OUTPUT JSON:
 {
-  "headline": "<=18 words stating what the timeline posts are about",
-  "narrative": "2-3 sentences describing ONLY what you read in the posts",
-  "insights": ["observable pattern from posts", "another pattern", "max 3 total"],
-  "watchlist": ["specific trackable item from posts", "another item", "max 3 total"],
-  "tags": ["concrete topic from posts", "another topic", "max 5 total"],
+  "headline": "<=18 words about what posts discuss",
+  "narrative": "3-5 sentences describing posts content",
+  "insights": ["pattern from posts", "another pattern", "max 3"],
+  "watchlist": ["trackable item from posts", "another", "max 3"],
+  "tags": ["concrete topic", "another", "max 5"],
   "priority": "high"|"medium"|"low",
-  "tone": "emotional tenor of the posts"
-}
-
-EXAMPLE (if posts discussed Trump and Antifa):
-{
-  "headline": "Trump Signals Foreign Terrorist Designation for Antifa",
-  "narrative": "Posts discuss Trump's announcement about designating Antifa as a foreign terrorist organization with sanctions. Multiple users sharing and reacting to this policy development.",
-  "insights": ["Political policy shift generating discussion", "International implications being debated"],
-  "watchlist": ["Trump executive orders", "Antifa designation"],
-  "tags": ["Donald Trump", "Antifa", "sanctions"],
-  "priority": "high",
-  "tone": "urgent, political"
+  "tone": "emotional tenor"
 }
 
 Tags from post metadata: ${rankedTags.join(', ') || 'none'}

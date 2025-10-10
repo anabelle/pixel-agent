@@ -315,7 +315,7 @@ class ContextAccumulator {
   async _extractTopicsWithLLM(content) {
     try {
   const truncatedContent = content.slice(0, 800);
-  const prompt = `What are the main topics in this post? Give 1-3 specific topics.
+      const prompt = `What are the main topics in this post? Give 1-3 specific topics.
 
 Rules:
 - ONLY use topics that are actually mentioned or clearly implied in the post

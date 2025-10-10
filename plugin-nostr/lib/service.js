@@ -1020,7 +1020,95 @@ Response (YES/NO):`;
         }, 8000);
       }
     } catch {}
+
+    // Optional: periodic memory stats logging for observability
+    try {
+      const memLogEnabled = String(runtime.getSetting('NOSTR_MEMORY_STATS_LOG_ENABLE') ?? 'false').toLowerCase() === 'true';
+      if (memLogEnabled) {
+        const intervalSec = Math.max(30, Math.min(3600, Number(runtime.getSetting('NOSTR_MEMORY_STATS_LOG_INTERVAL_SEC') ?? '120')));
+        svc.memoryStatsInterval = setInterval(() => {
+          try {
+            const stats = svc.getMemoryStats();
+            logger.info(`[NOSTR][MEM] rss=${stats.process.rss} heapUsed=${stats.process.heapUsed} handled=${stats.collections.handledEventIds} dailyEvents=${stats.contextAccumulator?.dailyEvents} hourlyDigests=${stats.contextAccumulator?.hourlyDigests} queue=${stats.postingQueue?.queueLength ?? 0}`);
+          } catch (e) {
+            logger.debug('[NOSTR][MEM] stats logging failed:', e?.message || e);
+          }
+        }, intervalSec * 1000);
+        logger.info(`[NOSTR] Memory stats logging enabled (every ${intervalSec}s)`);
+      }
+    } catch {}
     return svc;
+  }
+
+  /**
+   * Report memory/caches snapshot for troubleshooting. Safe to call anytime.
+   * Returns plain JSON with sizes and basic process memory usage.
+   */
+  getMemoryStats() {
+    const safeSize = (v) => {
+      try { if (v && typeof v.size === 'number') return v.size; } catch {}
+      try { if (Array.isArray(v)) return v.length; } catch {}
+      return 0;
+    };
+
+    const processMem = (() => {
+      try { return process.memoryUsage(); } catch { return {}; }
+    })();
+
+    const contextStats = (() => {
+      try { return this.contextAccumulator?.getStats?.(); } catch { return null; }
+    })();
+
+    const semanticStats = (() => {
+      try { return this.semanticAnalyzer?.getCacheStats?.(); } catch { return null; }
+    })();
+
+    const narrativeStats = (() => {
+      try { return this.narrativeMemory?.getStats?.(); } catch { return null; }
+    })();
+
+    const topicExtractorStats = (() => {
+      try { return require('./nostr').getTopicExtractorStats?.(this.runtime); } catch { return null; }
+    })();
+
+    const postingQueueStatus = (() => {
+      try { return this.postingQueue?.getStatus?.(); } catch { return null; }
+    })();
+
+    return {
+      process: {
+        rss: processMem.rss,
+        heapTotal: processMem.heapTotal,
+        heapUsed: processMem.heapUsed,
+        external: processMem.external,
+        arrayBuffers: processMem.arrayBuffers,
+      },
+      collections: {
+        handledEventIds: safeSize(this.handledEventIds),
+        lastReplyByUser: safeSize(this.lastReplyByUser),
+        pendingReplyTimers: safeSize(this.pendingReplyTimers),
+        zapCooldownByUser: safeSize(this.zapCooldownByUser),
+        homeFeedProcessedEvents: safeSize(this.homeFeedProcessedEvents),
+        homeFeedQualityTracked: safeSize(this.homeFeedQualityTracked),
+        timelineLoreBuffer: Array.isArray(this.timelineLoreBuffer) ? this.timelineLoreBuffer.length : 0,
+        homeFeedRecent: Array.isArray(this.homeFeedRecent) ? this.homeFeedRecent.length : 0,
+        userQualityScores: safeSize(this.userQualityScores),
+        userPostCounts: safeSize(this.userPostCounts),
+        userSocialMetrics: safeSize(this.userSocialMetrics),
+        mutedUsers: safeSize(this.mutedUsers),
+        authorRecentCache: safeSize(this.authorRecentCache),
+        pixelInFlight: safeSize(this._pixelInFlight),
+        pixelSeen: safeSize(this._pixelSeen),
+        userInteractionCount: safeSize(this.userInteractionCount),
+        followedUsers: safeSize(this.followedUsers),
+      },
+      postingQueue: postingQueueStatus || null,
+      contextAccumulator: contextStats || null,
+      semanticAnalyzer: semanticStats || null,
+      narrativeMemory: narrativeStats || null,
+      topicExtractor: topicExtractorStats || null,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   scheduleNextPost(minSec, maxSec) {
@@ -2156,14 +2244,34 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
+      let _timelineLoreFull = [];
+      try {
+        if (Array.isArray(contextData?.timelineLore)) _timelineLoreFull = contextData.timelineLore;
+        else if (this.contextAccumulator?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreFull = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+        }
+      } catch {}
+
+      // Pull the most recent timeline narrative (if any) from compact permanent memories
+      let _timelineNarrative = null;
+      try {
+        const narr = Array.isArray(permanentMemories?.narratives) ? permanentMemories.narratives : [];
+        for (let i = narr.length - 1; i >= 0; i--) {
+          if (narr[i]?.type === 'timeline') { _timelineNarrative = narr[i]; break; }
+        }
+      } catch {}
+
       const debugDump = {
         currentActivity: contextData?.currentActivity || null,
         emergingStories: contextData?.emergingStories || [],
-        timelineLoreFull: Array.isArray(contextData?.timelineLore) ? contextData.timelineLore : [],
+        timelineLoreFull: _timelineLoreFull,
         narratives: {
           daily: contextData?.dailyNarrative || null,
           weekly: contextData?.weeklyNarrative || null,
           monthly: contextData?.monthlyNarrative || null,
+          timeline: _timelineNarrative,
         },
         recentDigest: contextData?.recentDigest || null,
         selfReflection: reflectionInsights || null,
@@ -3349,14 +3457,34 @@ Response (YES/NO):`;
         }
       } catch {}
 
+      // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
+      let _timelineLoreFullR = [];
+      try {
+        if (Array.isArray(contextDataForDump?.timelineLore)) _timelineLoreFullR = contextDataForDump.timelineLore;
+        else if (this.contextAccumulator?.getTimelineLore) {
+          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+          _timelineLoreFullR = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+        }
+      } catch {}
+
+      // Pull the most recent timeline narrative (if any) from compact permanent memories
+      let _timelineNarrativeR = null;
+      try {
+        const narr = Array.isArray(permanentMemories?.narratives) ? permanentMemories.narratives : [];
+        for (let i = narr.length - 1; i >= 0; i--) {
+          if (narr[i]?.type === 'timeline') { _timelineNarrativeR = narr[i]; break; }
+        }
+      } catch {}
+
       const debugDump = {
         currentActivity: contextDataForDump?.currentActivity || null,
         emergingStories: contextDataForDump?.emergingStories || [],
-        timelineLoreFull: Array.isArray(contextDataForDump?.timelineLore) ? contextDataForDump.timelineLore : [],
+        timelineLoreFull: _timelineLoreFullR,
         narratives: {
           daily: contextDataForDump?.dailyNarrative || null,
           weekly: contextDataForDump?.weeklyNarrative || null,
           monthly: contextDataForDump?.monthlyNarrative || null,
+          timeline: _timelineNarrativeR,
         },
         recentDigest: contextDataForDump?.recentDigest || null,
         selfReflection: selfReflectionContext || null,
@@ -3384,37 +3512,26 @@ Response (YES/NO):`;
     // Log prompt details for debugging
     logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}, Has reflection: ${!!selfReflectionContext}`);
 
-    // Optional: structured context debug (no chain-of-thought)
+    // Optional: structured context meta (no chain-of-thought)
     try {
-      // Use existing context feature flags to control debug visibility; no new env vars
-      const debugCtx = (
-        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-      );
-      if (debugCtx) {
-        const meta = {
-          evt: { id: evt?.id ? String(evt.id).slice(0, 8) : undefined, kind: evt?.kind, author: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : undefined },
-          included: {
-            thread: !!threadContext,
-            image: !!imageContext,
-            userProfile: !!userProfile,
-            narrative: !!narrativeContext,
-            proactive: !!proactiveInsight,
-            reflection: !!selfReflectionContext,
-            userHistory: !!userHistorySection,
-            globalTimeline: !!globalTimelineSection,
-            timelineLore: !!timelineLoreSection,
-            loreContinuity: !!loreContinuity,
-          },
-          profile: userProfile ? {
-            topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
-            dominantSentiment: userProfile.dominantSentiment,
-            relationshipDepth: userProfile.relationshipDepth,
-          } : null,
-          narrativeSummary: narrativeContext?.summary ? String(narrativeContext.summary).slice(0, 160) : null,
-        };
-        logger.debug(`[NOSTR][DEBUG] Reply context meta: ${JSON.stringify(meta)}`);
-      }
+      const meta = {
+        context: {
+          hasThreadContext: !!threadContext,
+          hasImageContext: !!imageContext,
+          hasNarrativeContext: !!narrativeContext,
+          hasUserProfile: !!userProfile,
+          hasProactiveInsight: !!proactiveInsight,
+          timelineLore: !!timelineLoreSection,
+          loreContinuity: !!loreContinuity,
+        },
+        profile: userProfile ? {
+          topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
+          dominantSentiment: userProfile.dominantSentiment,
+          relationshipDepth: userProfile.relationshipDepth,
+        } : null,
+        narrativeSummary: narrativeContext?.summary ? String(narrativeContext.summary).slice(0, 160) : null,
+      };
+      logger.debug(`[NOSTR][DEBUG] Reply context meta: ${JSON.stringify(meta)}`);
     } catch {}
     
     // Retry mechanism: attempt up to 5 times with exponential backoff

@@ -5643,16 +5643,20 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
     
     // NEW: Build continuous context from home feed events
     // contextAccumulator.processEvent handles topic extraction internally
+    let extractedTopics = [];
     if (this.contextAccumulator && this.contextAccumulator.enabled) {
       const eventContext = await this.contextAccumulator.processEvent(evt, {
         allowTopicExtraction,
         skipGeneralFallback: !allowTopicExtraction
       });
       
+      // Get topics from eventContext for use in timeline lore and user interests
+      extractedTopics = eventContext?.topics || [];
+      
       // Update user topic interests from topics extracted by contextAccumulator
-      if (allowTopicExtraction && evt.pubkey && eventContext?.topics?.length > 0) {
+      if (allowTopicExtraction && evt.pubkey && extractedTopics.length > 0) {
         try {
-          for (const topic of eventContext.topics) {
+          for (const topic of extractedTopics) {
             await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
           }
         } catch (err) {

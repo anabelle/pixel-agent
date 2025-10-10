@@ -1,5 +1,12 @@
 // Nostr-specific parsing helpers
 
+// Configurable topic extraction limit (defaults to 15 to surface more than just top 3)
+const EXTRACTED_TOPICS_LIMIT = (() => {
+  const envVal = parseInt(process.env.EXTRACTED_TOPICS_LIMIT, 10);
+  if (Number.isFinite(envVal) && envVal > 0) return envVal;
+  return 15;
+})();
+
 function getConversationIdFromEvent(evt) {
   try {
     const eTags = Array.isArray(evt?.tags) ? evt.tags.filter((t) => t[0] === 'e') : [];
@@ -107,7 +114,7 @@ function _resetCandidateScores() {
   _candidateScores.clear();
 }
 
-function _extractFallbackTopics(content, maxTopics = 3) {
+function _extractFallbackTopics(content, maxTopics = EXTRACTED_TOPICS_LIMIT) {
   const singles = _cleanAndTokenizeText(content);
   if (!singles.length) return [];
 
@@ -201,7 +208,7 @@ async function extractTopicsFromEvent(event, runtime) {
    if (runtime?.useModel) {
      try {
           const truncatedContent = event.content.slice(0, 800);
-          const prompt = `What are the main topics in this post? Give 1-3 specific topics.
+     const prompt = `What are the main topics in this post? Give up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
 
 Rules:
 - ONLY use topics that are actually mentioned or clearly implied in the post
@@ -220,15 +227,16 @@ Rules:
 - If the post includes hashtags, named entities, or obvious subjects, use those as topics instead of 'none'
 - Never answer with 'none' when any real words, hashtags, or references are present—pick the best fitting topic
 - Respond with only the topics, one per line OR separated by commas (either format is fine)
-- Maximum 3 topics
+- Maximum ${EXTRACTED_TOPICS_LIMIT} topics
 - The post content is provided inside <POST_TO_ANALYZE> tags at the end.
 
 THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
 <POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
 
+       const llmMaxTokens = Math.min(200, Math.max(60, EXTRACTED_TOPICS_LIMIT * 8));
        const response = await runtime.useModel('TEXT_SMALL', {
          prompt,
-         maxTokens: 60,
+         maxTokens: llmMaxTokens,
          temperature: 0.3
        });
 
@@ -265,7 +273,7 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
             }
 
             // Prefer LLM topics explicitly
-            llmCleanedTopics = cleanedTopics.slice(0, 3);
+            llmCleanedTopics = cleanedTopics.slice(0, EXTRACTED_TOPICS_LIMIT);
           }
         }
     } catch (error) {
@@ -282,17 +290,17 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION
   // Merge hashtags + LLM topics, then dedupe and cap
   const merged = [...topics, ...llmCleanedTopics];
   let uniqueTopics = Array.from(new Set(merged)).filter(Boolean);
-  if (uniqueTopics.length > 3) uniqueTopics.length = 3;
+  if (uniqueTopics.length > EXTRACTED_TOPICS_LIMIT) uniqueTopics.length = EXTRACTED_TOPICS_LIMIT;
 
   if (!uniqueTopics.length) {
     // Log if we had LLM topics but they were filtered out by merging/dedupe stage
     if (llmCleanedTopics.length > 0 && debugLog) {
       debugLog(`[NOSTR] Warning: LLM provided topics but none survived merge/filter for ${event.id?.slice(0, 8)}: [${llmCleanedTopics.join(', ')}]`);
     }
-    const fallbackTopics = _extractFallbackTopics(event.content);
+    const fallbackTopics = _extractFallbackTopics(event.content, EXTRACTED_TOPICS_LIMIT);
     if (fallbackTopics.length) {
       debugLog?.(`[NOSTR] Topic fallback used for ${event.id?.slice(0, 8) || 'unknown'} -> ${fallbackTopics.join(', ')}`);
-      uniqueTopics.push(...fallbackTopics.slice(0, 3));
+      uniqueTopics.push(...fallbackTopics.slice(0, EXTRACTED_TOPICS_LIMIT));
     }
   }
 

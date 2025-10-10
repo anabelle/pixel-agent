@@ -5025,17 +5025,21 @@ Find a thread that connects this quote to their current vibe.`;
     let communityContextSection = '';
     if (this.contextAccumulator && this.contextAccumulator.enabled) {
       try {
-        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({ maxTopics: 3 }));
+        const TOPIC_LIST_LIMIT = (() => {
+          const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
+          return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
+        })();
+        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({ maxTopics: TOPIC_LIST_LIMIT }));
         const activity = this.getCurrentActivity();
         const parts = [];
         if (stories && stories.length) {
           const top = stories[0];
           parts.push(`Trending: "${top.topic}" (${top.mentions} mentions by ${top.users} users)`);
-          const also = stories.slice(1, 3).map((s) => s.topic);
+          const also = stories.slice(1, Math.min(4, TOPIC_LIST_LIMIT)).map((s) => s.topic);
           if (also.length) parts.push(`Also circulating: ${also.join(', ')}`);
         }
         if (activity && activity.events) {
-          const hot = (activity.topics || []).slice(0, 3).map((t) => t.topic).join(', ');
+          const hot = (activity.topics || []).slice(0, TOPIC_LIST_LIMIT).map((t) => t.topic).join(', ');
           parts.push(`Community activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot themes: ${hot}` : ''}`);
         }
         if (parts.length) {

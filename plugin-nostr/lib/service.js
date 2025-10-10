@@ -2994,7 +2994,7 @@ Response (YES/NO):`;
           recentHomeFeed,
           userProfiles: { focus: [], topEngaged: [] }, // skip heavy profile fetch in dry run
           permanent: permanentMemories,
-          topics: topicsSummary,
+          topics: topicsSummary,  // Keep at end to avoid log truncation
         };
         const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
         const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;

@@ -130,25 +130,23 @@ class TopicExtractor {
       return `${idx + 1}. ${content}${hashtags ? ` [Tags: ${hashtags}]` : ''}`;
     }).join('\n\n');
     
-    const prompt = `Extract main topics from these ${events.length} posts. For each post, list up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
+  const prompt = `You are TopicExtractor, a deterministic module that converts posts into comma-separated topic lists.
 
-Rules:
-- Use ONLY topics actually mentioned or clearly implied
-- Prefer: proper names, specific projects, events, tools, concepts, places
-- Avoid generic terms: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news
-- Never use: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
-- If post has hashtags: use those as topics
-- Short posts: pick most meaningful topic (not generic)
-- If no clear topics: respond 'none' for that post
+Input: ${events.length} posts.
+
+For each post output exactly one line with up to ${EXTRACTED_TOPICS_LIMIT} topics separated by commas. No numbering. No intro. No commentary. No trailing text after the ${events.length} lines.
+
+Topic rules:
+- Use only topics explicitly stated or unambiguously implied.
+- Prefer specific proper names, projects, events, tools, concepts, or places.
+- If the post has hashtags, include them as topics.
+- If there are no valid topics, output "none".
+
+Avoid generic fillers: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news.
+Never emit: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry.
 
 POSTS:
-${eventSummaries}
-
-OUTPUT FORMAT (respond with one line per post, in order):
-topic1, topic2, topic3
-topic1, topic2
-none
-(continue for all ${events.length} posts)`;
+${eventSummaries}`;
 
     try {
       const response = await this.runtime.useModel('TEXT_SMALL', {
@@ -217,17 +215,18 @@ none
       const hashtags = this._extractHashtags(event);
       const truncatedContent = event.content.slice(0, 800);
       
-      const prompt = `Extract main topics from this post. Give up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
+  const prompt = `You are TopicExtractor, a deterministic module that converts a post into a comma-separated topic list.
 
-Rules:
-- Use ONLY topics actually mentioned or clearly implied
-- Prefer: proper names, specific projects, events, tools, concepts, places
-- Avoid: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news
-- Never use: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
-- If post has hashtags: use those as topics
-- Output: topics separated by commas, max ${EXTRACTED_TOPICS_LIMIT}
+Output exactly one line with up to ${EXTRACTED_TOPICS_LIMIT} topics separated by commas. No intro. No commentary. If no valid topics exist, output "none".
 
-<POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
+Topic rules:
+- Use only topics explicitly stated or clearly implied.
+- Prefer specific proper names, projects, events, tools, concepts, or places.
+- Include hashtags when present.
+- Avoid generic fillers: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news.
+- Never emit: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry.
+
+<POST>${truncatedContent}</POST>`;
 
       const response = await this.runtime.useModel('TEXT_SMALL', {
         prompt,

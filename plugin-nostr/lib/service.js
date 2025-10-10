@@ -5642,26 +5642,25 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
     // Events should only be marked as processed in processHomeFeed() when we actually interact
     
     // NEW: Build continuous context from home feed events
+    // contextAccumulator.processEvent handles topic extraction internally
     if (this.contextAccumulator && this.contextAccumulator.enabled) {
-      await this.contextAccumulator.processEvent(evt, {
+      const eventContext = await this.contextAccumulator.processEvent(evt, {
         allowTopicExtraction,
         skipGeneralFallback: !allowTopicExtraction
       });
-    }
-    
-    // Update user topic interests from home feed
-    let extractedTopics = [];
-    if (allowTopicExtraction && evt.pubkey && evt.content) {
-      try {
-        extractedTopics = await extractTopicsFromEvent(evt, this.runtime);
-        for (const topic of extractedTopics) {
-          await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
+      
+      // Update user topic interests from topics extracted by contextAccumulator
+      if (allowTopicExtraction && evt.pubkey && eventContext?.topics?.length > 0) {
+        try {
+          for (const topic of eventContext.topics) {
+            await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
+          }
+        } catch (err) {
+          logger.debug('[NOSTR] Failed to record topic interests:', err.message);
         }
-      } catch (err) {
-        logger.debug('[NOSTR] Failed to record topic interests:', err.message);
+      } else if (!allowTopicExtraction) {
+        logger.debug('[NOSTR] Skipped user topic interest update (no full sentence)');
       }
-    } else if (!allowTopicExtraction) {
-      logger.debug('[NOSTR] Skipped user topic interest update (no full sentence)');
     }
     
     // Update user quality tracking

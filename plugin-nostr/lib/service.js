@@ -2174,6 +2174,10 @@ Response (YES/NO):`;
         logger.debug(`[NOSTR][DEBUG] Post prompt meta (len=${prompt.length}, model=${type}): ${JSON.stringify(meta)}`);
       }
     } catch {}
+    // TEST INSTRUMENTATION: Capture prompt for verification
+    if (typeof global !== 'undefined' && global.__TEST_PROMPT_CAPTURE__) {
+      global.__TEST_PROMPT_CAPTURE__.push({ method: 'generatePostTextLLM', prompt, type });
+    }
     const text = await generateWithModelOrFallback(
       this.runtime,
       type,
@@ -2591,6 +2595,10 @@ Response (YES/NO):`;
     } catch {}
     const type = this._getLargeModelType();
     const { generateWithModelOrFallback } = require('./generation');
+    // TEST INSTRUMENTATION: Capture prompt for verification
+    if (typeof global !== 'undefined' && global.__TEST_PROMPT_CAPTURE__) {
+      global.__TEST_PROMPT_CAPTURE__.push({ method: 'generateAwarenessPostTextLLM', prompt, type });
+    }
     const text = await generateWithModelOrFallback(
       this.runtime,
       type,

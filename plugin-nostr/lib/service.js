@@ -2009,6 +2009,44 @@ Response (YES/NO):`;
                 });
                 if (items.length) result.dailyReport = items;
               }
+              // Emerging stories (persisted by ContextAccumulator)
+              if (byType.has('emerging_story')) {
+                const items = pickLatest(byType.get('emerging_story'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const s = d.sentiment || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    topic: d.topic || null,
+                    mentions: typeof d.mentions === 'number' ? d.mentions : null,
+                    uniqueUsers: typeof d.uniqueUsers === 'number' ? d.uniqueUsers : null,
+                    sentiment: {
+                      positive: typeof s.positive === 'number' ? s.positive : 0,
+                      neutral: typeof s.neutral === 'number' ? s.neutral : 0,
+                      negative: typeof s.negative === 'number' ? s.negative : 0,
+                    }
+                  };
+                });
+                if (items.length) result.emergingStories = items;
+              }
+              // Emerging stories (persisted by ContextAccumulator)
+              if (byType.has('emerging_story')) {
+                const items = pickLatest(byType.get('emerging_story'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const s = d.sentiment || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    topic: d.topic || null,
+                    mentions: typeof d.mentions === 'number' ? d.mentions : null,
+                    uniqueUsers: typeof d.uniqueUsers === 'number' ? d.uniqueUsers : null,
+                    sentiment: {
+                      positive: typeof s.positive === 'number' ? s.positive : 0,
+                      neutral: typeof s.neutral === 'number' ? s.neutral : 0,
+                      negative: typeof s.negative === 'number' ? s.negative : 0,
+                    }
+                  };
+                });
+                if (items.length) result.emergingStories = items;
+              }
 
               const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
               const narratives = [];
@@ -2330,6 +2368,25 @@ Response (YES/NO):`;
                 });
                 if (items.length) result.dailyReport = items;
               }
+              // Emerging stories (persisted by ContextAccumulator)
+              if (byType.has('emerging_story')) {
+                const items = pickLatest(byType.get('emerging_story'), 3).map(m => {
+                  const d = m.content?.data || {};
+                  const s = d.sentiment || {};
+                  return {
+                    createdAtIso: safeIso(m.createdAt),
+                    topic: d.topic || null,
+                    mentions: typeof d.mentions === 'number' ? d.mentions : null,
+                    uniqueUsers: typeof d.uniqueUsers === 'number' ? d.uniqueUsers : null,
+                    sentiment: {
+                      positive: typeof s.positive === 'number' ? s.positive : 0,
+                      neutral: typeof s.neutral === 'number' ? s.neutral : 0,
+                      negative: typeof s.negative === 'number' ? s.negative : 0,
+                    }
+                  };
+                });
+                if (items.length) result.emergingStories = items;
+              }
 
               // Narrative entries
               const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
@@ -2634,6 +2691,11 @@ Response (YES/NO):`;
                 if (byType.has('daily_report')) {
                   const items = pickLatest(byType.get('daily_report'), 2).map(m => { const d = m.content?.data || {}; const summary = d.summary || {}; return { createdAtIso: safeIso(m.createdAt), date: d.date || null, events: summary.totalEvents || null, activeUsers: summary.activeUsers || null, topTopics: topTopicsCompact(summary.topTopics, 5) }; });
                   if (items.length) result.dailyReport = items;
+                }
+                // Emerging stories (persisted by ContextAccumulator)
+                if (byType.has('emerging_story')) {
+                  const items = pickLatest(byType.get('emerging_story'), 3).map(m => { const d = m.content?.data || {}; const s = d.sentiment || {}; return { createdAtIso: safeIso(m.createdAt), topic: d.topic || null, mentions: typeof d.mentions === 'number' ? d.mentions : null, uniqueUsers: typeof d.uniqueUsers === 'number' ? d.uniqueUsers : null, sentiment: { positive: typeof s.positive === 'number' ? s.positive : 0, neutral: typeof s.neutral === 'number' ? s.neutral : 0, negative: typeof s.negative === 'number' ? s.negative : 0 } }; });
+                  if (items.length) result.emergingStories = items;
                 }
                 const narrativeTypes = ['narrative_hourly','narrative_daily','narrative_weekly','narrative_monthly','narrative_timeline'];
                 const narratives = [];

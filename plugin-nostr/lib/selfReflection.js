@@ -1,4 +1,14 @@
 const { ensureNostrContextSystem, createMemorySafe } = require('./context');
+const { generateWithModelOrFallback } = require('./generation');
+const { extractTextFromModelResult } = require('./text');
+
+let ModelType;
+try {
+  const core = require('@elizaos/core');
+  ModelType = core.ModelType || core.ModelClass || { TEXT_SMALL: 'TEXT_SMALL', TEXT_LARGE: 'TEXT_LARGE' };
+} catch {
+  ModelType = { TEXT_SMALL: 'TEXT_SMALL', TEXT_LARGE: 'TEXT_LARGE' };
+}
 
 const DEFAULT_MAX_INTERACTIONS = 40;
 const DEFAULT_TEMPERATURE = 0.6;
@@ -64,22 +74,25 @@ class SelfReflectionEngine {
         : 24 * 14 // default: past two weeks
     });
 
-    if (!this.runtime || typeof this.runtime.generateText !== 'function') {
-      this.logger.warn('[SELF-REFLECTION] Runtime does not support generateText; skipping analysis');
-      return null;
-    }
-
     const prompt = this._buildPrompt(interactions, {
       contextSignals,
       previousReflections
     });
-    let response;
-
+    const modelType = this._getLargeModelType();
+    let response = '';
     try {
-      response = await this.runtime.generateText(prompt, {
-        temperature: this.temperature,
-        maxTokens: this.maxTokens
-      });
+      response = await generateWithModelOrFallback(
+        this.runtime,
+        modelType,
+        prompt,
+        { temperature: this.temperature, maxTokens: this.maxTokens },
+        (res) => extractTextFromModelResult(res),
+        (s) => s
+      );
+      if (!response || !String(response).trim()) {
+        this.logger.warn('[SELF-REFLECTION] Empty LLM response for reflection');
+        return null;
+      }
     } catch (err) {
       this.logger.warn('[SELF-REFLECTION] Failed to generate reflection:', err?.message || err);
       return null;
@@ -112,6 +125,10 @@ class SelfReflectionEngine {
     }
 
     return parsed;
+  }
+
+  _getLargeModelType() {
+    return (ModelType && (ModelType.TEXT_LARGE || ModelType.LARGE || ModelType.MEDIUM || ModelType.TEXT_SMALL)) || 'TEXT_LARGE';
   }
 
   async getRecentInteractions(limit = this.maxInteractions) {
@@ -991,6 +1008,8 @@ OUTPUT JSON ONLY:
 
     return parts.length ? parts.join(', ') : 'unknown';
   }
+
+  // Note: Heuristic analysis removed per requirement to rely on LLM like other integration points
 }
 
 module.exports = { SelfReflectionEngine };

@@ -68,19 +68,27 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
     }
 
     if (Array.isArray(timelineLore) && timelineLore.length > 0) {
-      const loreLines = timelineLore.slice(-2).map((entry) => {
+      const loreLines = timelineLore.slice(-5).map((entry) => {
         const headline = (entry?.headline || entry?.narrative || '').toString().trim();
-        const tone = entry?.tone ? ` • tone: ${entry.tone}` : '';
+        const insights = Array.isArray(entry?.insights) ? entry.insights.slice(0, 2).join(' • ') : '';
+        const tone = entry?.tone ? ` [${entry.tone}]` : '';
         const watchlist = Array.isArray(entry?.watchlist) && entry.watchlist.length
-          ? ` • watch: ${entry.watchlist.slice(0, 2).join(', ')}`
+          ? ` 🔍 ${entry.watchlist.slice(0, 3).join(', ')}`
           : '';
-        const summary = headline ? headline.slice(0, 160) : null;
-        return summary ? `- ${summary}${tone}${watchlist}` : null;
+        const tags = Array.isArray(entry?.tags) && entry.tags.length
+          ? ` #${entry.tags.slice(0, 3).join(' #')}`
+          : '';
+        
+        let summary = '';
+        if (headline) summary += headline.slice(0, 120);
+        if (insights) summary += (summary ? ' — ' : '') + insights.slice(0, 120);
+        
+        return summary ? `- ${summary}${tone}${tags}${watchlist}` : null;
       }).filter(Boolean);
 
       if (loreLines.length) {
-        const loreBlock = [`TIMELINE LORE SNAPSHOT:`, ...loreLines].join('\n');
-        contextSection += `${contextSection ? '\n\n' : '\n\n'}${loreBlock}\n\nREMEMBER: Treat lore as situational awareness—reference it only when it naturally strengthens your post.`;
+        const loreBlock = [`TIMELINE LORE (rich context from recent community narratives):`, ...loreLines].join('\n');
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}${loreBlock}\n\nUSE ACTIVELY: These lore entries contain valuable community signal. Reference them naturally when crafting posts to show awareness of the conversation arc.`;
       }
     }
     
@@ -738,13 +746,18 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
       else if (toneTrend.stable && toneTrend.tone) contextLines.push(`Mood steady: ${toneTrend.tone}`);
     }
 
-    // Timeline lore highlights
+    // Timeline lore highlights (expanded for awareness - this is golden context!)
     if (Array.isArray(timelineLore) && timelineLore.length) {
-      const loreLines = timelineLore.slice(-2)
-        .map((e) => (e?.headline || e?.narrative || ''))
+      const loreLines = timelineLore.slice(-5)
+        .map((e) => {
+          const headline = e?.headline || e?.narrative || '';
+          const insights = Array.isArray(e?.insights) ? ` [${e.insights.slice(0, 2).join('; ')}]` : '';
+          const watchlist = Array.isArray(e?.watchlist) && e.watchlist.length ? ` 🔍${e.watchlist.slice(0, 2).join(', ')}` : '';
+          return (headline + insights + watchlist).trim();
+        })
         .filter(Boolean)
-        .map((s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 140) + (String(s).length > 140 ? '…' : ''));
-      if (loreLines.length) contextLines.push(`lore: ${loreLines.map(x => `- ${x}`).join(' ')}`);
+        .map((s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 180) + (String(s).length > 180 ? '…' : ''));
+      if (loreLines.length) contextLines.push(`TIMELINE LORE: ${loreLines.map(x => `• ${x}`).join(' ')}`);
     }
 
     // Daily/hourly digest headline (supports object or legacy array shape)

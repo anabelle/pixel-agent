@@ -2061,7 +2061,7 @@ Response (YES/NO):`;
           topicsList.push(...longTopics);
         }
       } catch {}
-      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.min(100, topicsList.length));
       
       let recentAgentPosts = [];
       let recentHomeFeed = [];
@@ -2244,27 +2244,45 @@ Response (YES/NO):`;
         }
       } catch {}
 
-      // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
+      // Ensure timeline lore always present in dump (3-tier fallback chain)
       let _timelineLoreDump = [];
+      const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+      
       try {
-        if (Array.isArray(contextData?.timelineLore)) _timelineLoreDump = contextData.timelineLore;
+        // First: contextData already has lore gathered
+        if (Array.isArray(contextData?.timelineLore) && contextData.timelineLore.length > 0) {
+          _timelineLoreDump = contextData.timelineLore;
+        }
+        // Second: contextAccumulator.getTimelineLore()
         else if (this.contextAccumulator?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
           _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
         }
       } catch {}
 
-      // If still no lore, try narrativeMemory cache
+      // Third: narrativeMemory.getTimelineLore() or direct cache access
       try {
-        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0)) {
+          if (this.narrativeMemory?.getTimelineLore) {
+            _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+          }
+          // FINAL fallback: direct cache access if method returned empty
+          if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && Array.isArray(this.narrativeMemory?.timelineLore)) {
+            _timelineLoreDump = this.narrativeMemory.timelineLore.slice(-loreLimit);
+          }
         }
       } catch {}
       
-      // Log if timeline lore is unavailable after all fallbacks
+      // Enhanced diagnostics
       if (_timelineLoreDump.length === 0) {
-        try { this.logger?.debug?.('[NOSTR][POST] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+        try { 
+          const bufferSize = Array.isArray(this.timelineLoreBuffer) ? this.timelineLoreBuffer.length : 0;
+          const accumulatorEnabled = !!(this.contextAccumulator && this.contextAccumulator.enabled);
+          const accumulatorCache = (() => { try { return (this.contextAccumulator?.timelineLoreEntries || []).length; } catch { return 0; } })();
+          const narrativeCache = (() => { try { return (this.narrativeMemory?.timelineLore || []).length; } catch { return 0; } })();
+          this.logger?.debug?.(`[NOSTR][POST] Timeline lore unavailable (buffer=${bufferSize}, accumEnabled=${accumulatorEnabled}, accumCache=${accumulatorCache}, narCache=${narrativeCache})`); 
+        } catch {}
+      } else {
+        try { this.logger?.debug?.(`[NOSTR][POST] Timeline lore loaded: ${_timelineLoreDump.length} entries`); } catch {}
       }
 
       // Pull the most recent timeline narrative (if any) from compact permanent memories
@@ -2299,11 +2317,15 @@ Response (YES/NO):`;
           timeline: _timelineNarrative,
         },
         recentDigest: contextData?.recentDigest || null,
-        selfReflection: reflectionInsights ? String(reflectionInsights).slice(0, 200) : null,
+        selfReflection: reflectionInsights
+          ? (typeof reflectionInsights === 'string'
+              ? reflectionInsights.slice(0, 200)
+              : (() => { try { return JSON.stringify(reflectionInsights).slice(0, 800); } catch { return String(reflectionInsights).slice(0, 200); } })())
+          : null,
         recentAgentPosts,
         recentHomeFeed,
         permanent: permanentForDump,
-        topics: topicsSummary,
+        topics: topicsSummary,  // Keep at end to avoid log truncation
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
@@ -2449,7 +2471,7 @@ Response (YES/NO):`;
     // Append a large memory debugging dump: full timeline lore, full narratives, and 100+ topics
     try {
       const topicsList = Array.isArray(contextData?.topTopicsLong) ? contextData.topTopicsLong : [];
-      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.min(100, topicsList.length));
       // Collect a few recent agent posts from memory (best-effort)
       let recentAgentPosts = [];
       let recentHomeFeed = [];
@@ -2721,23 +2743,42 @@ Response (YES/NO):`;
         }
       } catch {}
 
-      // Ensure timeline lore appears: prefer context, fall back to accumulator then narrative memory
+      // Ensure timeline lore appears: 3-tier fallback (context → accumulator → narrativeMemory)
       let _timelineLoreDump = [];
+      const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+      
       try {
-        if (Array.isArray(contextData?.timelineLore)) _timelineLoreDump = contextData.timelineLore;
-        else if (this.contextAccumulator?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
+        if (Array.isArray(contextData?.timelineLore) && contextData.timelineLore.length > 0) {
+          _timelineLoreDump = contextData.timelineLore;
         }
-        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        else if (this.contextAccumulator?.getTimelineLore) {
+          _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
         }
       } catch {}
       
-      // Log if timeline lore is unavailable after all fallbacks
+      try {
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0)) {
+          if (this.narrativeMemory?.getTimelineLore) {
+            _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+          }
+          // FINAL fallback: direct cache access
+          if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && Array.isArray(this.narrativeMemory?.timelineLore)) {
+            _timelineLoreDump = this.narrativeMemory.timelineLore.slice(-loreLimit);
+          }
+        }
+      } catch {}
+      
+      // Enhanced diagnostics
       if (_timelineLoreDump.length === 0) {
-        try { this.logger?.debug?.('[NOSTR][AWARENESS] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+        try {
+          const bufferSize = Array.isArray(this.timelineLoreBuffer) ? this.timelineLoreBuffer.length : 0;
+          const accumulatorEnabled = !!(this.contextAccumulator && this.contextAccumulator.enabled);
+          const accumulatorCache = (() => { try { return (this.contextAccumulator?.timelineLoreEntries || []).length; } catch { return 0; } })();
+          const narrativeCache = (() => { try { return (this.narrativeMemory?.timelineLore || []).length; } catch { return 0; } })();
+          this.logger?.debug?.(`[NOSTR][AWARENESS] Timeline lore unavailable (buffer=${bufferSize}, accumEnabled=${accumulatorEnabled}, accumCache=${accumulatorCache}, narCache=${narrativeCache})`);
+        } catch {}
+      } else {
+        try { this.logger?.debug?.(`[NOSTR][AWARENESS] Timeline lore loaded: ${_timelineLoreDump.length} entries`); } catch {}
       }
 
       // Pull the most recent timeline narrative (if any) from compact permanent memories
@@ -2774,12 +2815,16 @@ Response (YES/NO):`;
         // Include the recent digest object directly (if available)
         recentDigest: contextData?.recentDigest || null,
         // Include the latest self-reflection insights (compact summary)
-        selfReflection: reflectionInsights ? String(reflectionInsights).slice(0, 200) : null,
+        selfReflection: reflectionInsights
+          ? (typeof reflectionInsights === 'string'
+              ? reflectionInsights.slice(0, 200)
+              : (() => { try { return JSON.stringify(reflectionInsights).slice(0, 800); } catch { return String(reflectionInsights).slice(0, 200); } })())
+          : null,
         recentAgentPosts,
         recentHomeFeed,
         userProfiles,
         permanent: permanentForAwDump,
-        topics: topicsSummary,
+        topics: topicsSummary,  // Keep at end to avoid log truncation
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
@@ -3360,7 +3405,7 @@ Response (YES/NO):`;
           topicsList.push(...longTopics);
         }
       } catch {}
-      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.max(100, topicsList.length));
+      const topicsSummary = topicsList.map(t => ({ topic: t?.topic || String(t), count: t?.count ?? null })).slice(0, Math.min(100, topicsList.length));
       
       let recentAgentPosts = [];
       let recentHomeFeed = [];
@@ -3523,12 +3568,15 @@ Response (YES/NO):`;
         }
       } catch {}
 
-      // Ensure timeline lore always present in dump (fallback to contextAccumulator if not already gathered)
+      // Ensure timeline lore always present in dump (3-tier fallback)
       let _timelineLoreDump = [];
+      const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
+      
       try {
-        if (Array.isArray(contextDataForDump?.timelineLore)) _timelineLoreDump = contextDataForDump.timelineLore;
+        if (Array.isArray(contextDataForDump?.timelineLore) && contextDataForDump.timelineLore.length > 0) {
+          _timelineLoreDump = contextDataForDump.timelineLore;
+        }
         else if (this.contextAccumulator?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
           _timelineLoreDump = this.contextAccumulator.getTimelineLore(loreLimit) || [];
         }
       } catch {}
@@ -3542,17 +3590,30 @@ Response (YES/NO):`;
         }
       } catch {}
 
-      // If still no lore, try narrativeMemory cache
+      // Third fallback: narrativeMemory cache
       try {
-        if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && this.narrativeMemory?.getTimelineLore) {
-          const loreLimit = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 20);
-          _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+        if ((!_timelineLoreDump || _timelineLoreDump.length === 0)) {
+          if (this.narrativeMemory?.getTimelineLore) {
+            _timelineLoreDump = this.narrativeMemory.getTimelineLore(loreLimit) || [];
+          }
+          // FINAL fallback: direct cache access
+          if ((!_timelineLoreDump || _timelineLoreDump.length === 0) && Array.isArray(this.narrativeMemory?.timelineLore)) {
+            _timelineLoreDump = this.narrativeMemory.timelineLore.slice(-loreLimit);
+          }
         }
       } catch {}
       
-      // Log if timeline lore is unavailable after all fallbacks
+      // Enhanced diagnostics
       if (_timelineLoreDump.length === 0) {
-        try { this.logger?.debug?.('[NOSTR][REPLY] Timeline lore unavailable for dump (all sources empty)'); } catch {}
+        try {
+          const bufferSize = Array.isArray(this.timelineLoreBuffer) ? this.timelineLoreBuffer.length : 0;
+          const accumulatorEnabled = !!(this.contextAccumulator && this.contextAccumulator.enabled);
+          const accumulatorCache = (() => { try { return (this.contextAccumulator?.timelineLoreEntries || []).length; } catch { return 0; } })();
+          const narrativeCache = (() => { try { return (this.narrativeMemory?.timelineLore || []).length; } catch { return 0; } })();
+          this.logger?.debug?.(`[NOSTR][REPLY] Timeline lore unavailable (buffer=${bufferSize}, accumEnabled=${accumulatorEnabled}, accumCache=${accumulatorCache}, narCache=${narrativeCache})`);
+        } catch {}
+      } else {
+        try { this.logger?.debug?.(`[NOSTR][REPLY] Timeline lore loaded: ${_timelineLoreDump.length} entries`); } catch {}
       }
 
       // Compact permanent memories for dump
@@ -3578,11 +3639,14 @@ Response (YES/NO):`;
           timeline: _timelineNarrativeR,
         },
         recentDigest: contextDataForDump?.recentDigest || null,
-        selfReflection: selfReflectionContext ? String(selfReflectionContext).slice(0, 200) : null,
+        selfReflection: selfReflectionContext
+          ? (typeof selfReflectionContext === 'string'
+              ? selfReflectionContext.slice(0, 200)
+              : (() => { try { return JSON.stringify(selfReflectionContext).slice(0, 800); } catch { return String(selfReflectionContext).slice(0, 200); } })())
+          : null,
         recentAgentPosts,
         recentHomeFeed,
         permanent: permanentForReplyDump,
-        topics: topicsSummary,
         replyContext: {
           hasThreadContext: !!threadContext,
           hasImageContext: !!imageContext,
@@ -3590,7 +3654,8 @@ Response (YES/NO):`;
           hasUserProfile: !!userProfile,
           hasProactiveInsight: !!proactiveInsight,
           authorPubkey: evt?.pubkey ? String(evt.pubkey).slice(0, 8) : null,
-        }
+        },
+        topics: topicsSummary,  // Moved to end to avoid log truncation
       };
       const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;

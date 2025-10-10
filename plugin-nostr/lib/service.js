@@ -1975,8 +1975,8 @@ Response (YES/NO):`;
         let timelineLore = null;
         let toneTrend = null;
         try {
-          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 2);
-          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 2;
+          const loreLimitSetting = Number(this.runtime?.getSetting?.('CTX_TIMELINE_LORE_PROMPT_LIMIT') ?? process?.env?.CTX_TIMELINE_LORE_PROMPT_LIMIT ?? 8);
+          const limit = Number.isFinite(loreLimitSetting) && loreLimitSetting > 0 ? loreLimitSetting : 8;
           const loreEntries = this.contextAccumulator.getTimelineLore(limit);
           if (Array.isArray(loreEntries) && loreEntries.length) {
             timelineLore = loreEntries.slice(-limit);

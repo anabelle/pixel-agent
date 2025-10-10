@@ -60,6 +60,11 @@ class ContextAccumulator {
       options?.timelineLoreLimit ?? process.env.CONTEXT_TIMELINE_LORE_LIMIT,
       60
     );
+    // Display/config limits for topic lists in logs/prompts
+    this.displayTopTopicsLimit = parsePositiveInt(
+      options?.displayTopTopicsLimit ?? process.env.PROMPT_TOPICS_LIMIT,
+      15
+    );
     
     // Feature flags
     this.enabled = true;
@@ -833,7 +838,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       }
     }
     
-    this.logger.info(`[CONTEXT] 📊 HOURLY DIGEST (${summary.hourLabel}): ${digest.eventCount} events, ${digest.users.size} users, top topics: ${topTopics.slice(0, 3).map(t => t.topic).join(', ')}`);
+  this.logger.info(`[CONTEXT] 📊 HOURLY DIGEST (${summary.hourLabel}): ${digest.eventCount} events, ${digest.users.size} users, top topics: ${topTopics.slice(0, this.displayTopTopicsLimit).map(t => t.topic).join(', ')}`);
     
     // Store to memory
     await this._storeDigestToMemory(summary);
@@ -898,7 +903,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         .map(([author, data]) => ({
           author,
           posts: data.posts,
-          topics: Array.from(data.topics).slice(0, 3),
+          topics: Array.from(data.topics).slice(0, this.displayTopTopicsLimit),
           sentiment: this._dominantSentiment(data.sentiments)
         }));
 
@@ -908,7 +913,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       const uniqueTopicsCount = topicEntries.length;
       const sortedTopics = topicEntries.sort((a, b) => b[1] - a[1]);
       const topTopicsForMetrics = sortedTopics.slice(0, 5);
-      const top3Sum = sortedTopics.slice(0, 3).reduce((s, [, c]) => s + c, 0);
+  const top3Sum = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).reduce((s, [, c]) => s + c, 0);
       const concentrationTop3 = totalTopicMentions > 0 ? (top3Sum / totalTopicMentions) : 0;
       const hhi = totalTopicMentions > 0
         ? sortedTopics.reduce((s, [, c]) => {
@@ -927,7 +932,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
 
       // Build per-topic sample snippets (focus on top 3 topics)
       const perTopicSamples = (() => {
-        const top3Topics = sortedTopics.slice(0, 3).map(([t]) => t);
+  const top3Topics = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).map(([t]) => t);
         const buckets = new Map(top3Topics.map(t => [t, []]));
         for (const e of recentEvents) {
           if (!Array.isArray(e.topics)) continue;
@@ -1231,7 +1236,7 @@ TODAY'S DATA:
 - Sentiment: ${report.summary.overallSentiment.positive} positive, ${report.summary.overallSentiment.neutral} neutral, ${report.summary.overallSentiment.negative} negative
 
 TOP TOPICS (${topTopics.length}):
-${topTopics.slice(0, 10).map(t => `- ${t.topic}: ${t.count} mentions`).join('\n')}
+${topTopics.slice(0, this.displayTopTopicsLimit).map(t => `- ${t.topic}: ${t.count} mentions`).join('\n')}
 
 EMERGING STORIES:
 ${report.summary.emergingStories.length > 0 ? report.summary.emergingStories.map(s => `- ${s.topic}: ${s.mentions} mentions from ${s.users} users (${s.sentiment})`).join('\n') : 'None detected'}

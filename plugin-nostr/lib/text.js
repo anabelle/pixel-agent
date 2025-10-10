@@ -3,10 +3,14 @@
 function buildPostPrompt(character, contextData = null, reflection = null) {
   const ch = character || {};
   const name = ch.name || 'Agent';
+  const TOPIC_LIST_LIMIT = (() => {
+    const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
+    return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
+  })();
   const topics = Array.isArray(ch.topics)
-    ? ch.topics.length <= 12
+    ? ch.topics.length <= TOPIC_LIST_LIMIT
       ? ch.topics.join(', ')
-      : ch.topics.sort(() => 0.5 - Math.random()).slice(0, 12).join(', ')
+      : ch.topics.sort(() => 0.5 - Math.random()).slice(0, TOPIC_LIST_LIMIT).join(', ')
     : '';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
   const examples = Array.isArray(ch.postExamples)
@@ -50,8 +54,8 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
     }
 
     if (currentActivity && Number.isFinite(currentActivity.events) && currentActivity.events > 0) {
-      const { events, users, topics = [] } = currentActivity;
-      const hotTopics = topics.slice(0, 3).map(t => t.topic).join(', ');
+  const { events, users, topics = [] } = currentActivity;
+  const hotTopics = topics.slice(0, TOPIC_LIST_LIMIT).map(t => t.topic).join(', ');
       const qualifier = events >= 15 ? 'Current vibe' : events >= 5 ? 'Slow build' : 'Quiet hum';
       contextSection += `${qualifier}: ${events} posts from ${users} users${hotTopics ? ` • Hot: ${hotTopics}` : ''}. `;
     }
@@ -92,7 +96,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
       const hints = [];
       // Top topics by name only
       if (Array.isArray(topTopics) && topTopics.length) {
-        const names = topTopics.slice(0, 5).map(t => t?.topic || String(t)).filter(Boolean);
+        const names = topTopics.slice(0, TOPIC_LIST_LIMIT).map(t => t?.topic || String(t)).filter(Boolean);
         if (names.length) hints.push(`topics: ${names.join(', ')}`);
       }
       // Recent hour digest snapshot
@@ -100,7 +104,7 @@ function buildPostPrompt(character, contextData = null, reflection = null) {
       if (digest?.metrics?.events) {
         const ev = digest.metrics.events;
         const us = digest.metrics.activeUsers;
-        const tt = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, 2).map(t => t.topic).join(', ') : '';
+  const tt = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, Math.max(2, Math.min(5, TOPIC_LIST_LIMIT))).map(t => t.topic).join(', ') : '';
         hints.push(`hour: ${ev} posts${us ? `/${us} users` : ''}${tt ? ` • ${tt}` : ''}`);
       }
       // Tone trend concise label
@@ -251,7 +255,7 @@ TRENDING NOW: "${topStory.topic}" - ${topStory.mentions} mentions from ${topStor
     if (narrativeContext.historicalInsights) {
       const insights = narrativeContext.historicalInsights;
       if (insights.topicChanges?.emerging && insights.topicChanges.emerging.length > 0) {
-        narrativeContextSection += `\n\nNEW TOPICS EMERGING: ${insights.topicChanges.emerging.slice(0, 3).join(', ')}`;
+  narrativeContextSection += `\n\nNEW TOPICS EMERGING: ${insights.topicChanges.emerging.slice(0, TOPIC_LIST_LIMIT).join(', ')}`;
       }
       if (insights.eventTrend && Math.abs(insights.eventTrend.change) > 30) {
         narrativeContextSection += `\n\nACTIVITY ALERT: ${insights.eventTrend.change > 0 ? '↑' : '↓'} ${Math.abs(insights.eventTrend.change)}% vs usual`;
@@ -410,7 +414,7 @@ GUIDE: Weave these improvements into your tone and structure. Never mention that
   let replyContextHints = '';
   try {
     const hints = [];
-    // Emerging story topics
+  // Emerging story topics
     if (narrativeContext?.emergingStories?.length) {
       const names = narrativeContext.emergingStories.slice(0, 3).map(s => s.topic).filter(Boolean);
       if (names.length) hints.push(`topics: ${names.join(', ')}`);
@@ -569,7 +573,7 @@ function buildDailyDigestPostPrompt(character, report) {
   const narrative = report?.narrative || {};
 
   const topTopics = Array.isArray(summary.topTopics)
-    ? summary.topTopics.slice(0, 5).map((t) => `${t.topic} (${t.count})`).join(' • ')
+    ? summary.topTopics.slice(0, TOPIC_LIST_LIMIT).map((t) => `${t.topic} (${t.count})`).join(' • ')
     : '';
   const emergingStories = Array.isArray(summary.emergingStories)
     ? summary.emergingStories.slice(0, 3).map((s) => `${s.topic} (${s.mentions})`).join(' • ')
@@ -709,7 +713,7 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
       if (s?.topic) contextLines.push(`Whispers: ${s.topic}`);
     }
     if (Array.isArray(topTopics) && topTopics.length) {
-      const tnames = topTopics.slice(0, 3).map(t => (typeof t === 'string' ? t : t?.topic)).filter(Boolean);
+  const tnames = topTopics.slice(0, TOPIC_LIST_LIMIT).map(t => (typeof t === 'string' ? t : t?.topic)).filter(Boolean);
       if (tnames.length) contextLines.push(`Topics now: ${tnames.join(' • ')}`);
       const sample = topTopics.find(t => t?.sample?.content);
       if (sample && sample.sample?.content) {

@@ -175,11 +175,13 @@ function getTopicExtractorStats(runtime) {
   return extractor ? extractor.getStats() : null;
 }
 
-function destroyTopicExtractor(runtime) {
+async function destroyTopicExtractor(runtime) {
   const key = runtime?.agentId || 'default';
   const extractor = _topicExtractors.get(key);
   
   if (extractor) {
+    // Flush any pending events before destroying
+    await extractor.flush();
     extractor.destroy();
     _topicExtractors.delete(key);
   }

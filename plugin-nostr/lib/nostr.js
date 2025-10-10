@@ -208,29 +208,19 @@ async function extractTopicsFromEvent(event, runtime) {
    if (runtime?.useModel) {
      try {
           const truncatedContent = event.content.slice(0, 800);
-     const prompt = `What are the main topics in this post? Give up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
+     const prompt = `Extract main topics from this post. Give up to ${EXTRACTED_TOPICS_LIMIT} specific topics.
 
 Rules:
-- ONLY use topics that are actually mentioned or clearly implied in the post
-- Do NOT invent or add topics that aren't in the post
-- NEVER include these words: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
-- Be specific, not general - focus on CONCRETE topics: specific people, places, events, projects, tools, or concepts
-- PREFER: proper names (e.g., "Jack Dorsey", "El Salvador"), specific projects (e.g., "Alby", "Damus"), concrete events (e.g., "Bitcoin Conference 2025"), specific technologies (e.g., "cashu", "fedimint")
-- AVOID overly generic terms: bitcoin, btc, nostr, crypto, cryptocurrency, blockchain, lightning, protocol, network, technology, community, discussion
-- If about a person, use their name or handle
-- If about a place, use the location name
-- If about an event, use the event name
-- If about a specific project/product/tool, use that name
-- No words like "general", "discussion", "various", "update", "news"
-- Only respond with 'none' if the post truly contains no meaningful words or context (e.g., empty or just symbols)
-- For short greetings or brief statements, choose the closest meaningful topic (not generic terms)
-- If the post includes hashtags, named entities, or obvious subjects, use those as topics instead of 'none'
-- Never answer with 'none' when any real words, hashtags, or references are present—pick the best fitting topic
-- Respond with only the topics, one per line OR separated by commas (either format is fine)
-- Maximum ${EXTRACTED_TOPICS_LIMIT} topics
-- The post content is provided inside <POST_TO_ANALYZE> tags at the end.
+- Use ONLY topics actually mentioned or clearly implied
+- Prefer: proper names, specific projects, events, tools, concepts, places
+- Avoid: bitcoin, btc, nostr, crypto, blockchain, lightning, technology, community, discussion, general, various, update, news
+- For people/events/places: use their actual names
+- Never respond with: pixel, art, lnpixels, vps, freedom, creativity, survival, collaborative, douglas, adams, pratchett, terry
+- If post has hashtags/entities: use those as topics
+- Short posts: pick most meaningful topic (not generic)
+- No real words/hashtags? Respond 'none'
+- Output: topics separated by commas, max ${EXTRACTED_TOPICS_LIMIT}
 
-THE POST TO ANALYZE IS THIS AND ONLY THIS TEXT. DO NOT USE ANY OTHER INFORMATION.
 <POST_TO_ANALYZE>${truncatedContent}</POST_TO_ANALYZE>`;
 
        const llmMaxTokens = Math.min(200, Math.max(60, EXTRACTED_TOPICS_LIMIT * 8));

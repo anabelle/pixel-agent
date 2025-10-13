@@ -5458,6 +5458,11 @@ Response (YES/NO):`;
           onevent: (evt) => {
             this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
+            // Filter out muted users at the earliest stage
+            if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) {
+              logger.debug(`[NOSTR] Skipping muted user event ${evt.pubkey?.slice(0, 8) || 'unknown'}`);
+              return;
+            }
             // Real-time event handling for quality tracking only
             this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
           },

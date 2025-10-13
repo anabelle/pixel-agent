@@ -47,6 +47,16 @@ class NarrativeMemory {
 
     this._systemContext = null;
     this._systemContextPromise = null;
+
+    // Adaptive Storyline Tracking (Phase 2)
+    this.adaptiveStorylinesEnabled = String(runtime?.getSetting?.('ADAPTIVE_STORYLINES') ?? 'false').toLowerCase() === 'true';
+    if (this.adaptiveStorylinesEnabled) {
+      const { StorylineTracker } = require('./storylineTracker');
+      this.storylineTracker = new StorylineTracker({
+        runtime,
+        logger
+      });
+    }
   }
 
   async _getSystemContext() {
@@ -149,6 +159,23 @@ class NarrativeMemory {
       timestamp: entry.timestamp || Date.now(),
       type: 'timeline'
     };
+
+    // PHASE 2: Add storyline context if available
+    if (this.adaptiveStorylinesEnabled && entry.tags && Array.isArray(entry.tags)) {
+      const storylineContexts = [];
+      for (const tag of entry.tags) {
+        const context = this.getStorylineContext(tag);
+        if (context) {
+          storylineContexts.push({
+            topic: tag,
+            ...context
+          });
+        }
+      }
+      if (storylineContexts.length > 0) {
+        record.storylineContext = storylineContexts;
+      }
+    }
 
     this.timelineLore.push(record);
     if (this.timelineLore.length > this.maxTimelineLoreCache) {
@@ -926,7 +953,7 @@ OUTPUT JSON:
   }
 
   getStats() {
-    return {
+    const baseStats = {
       hourlyNarratives: this.hourlyNarratives.length,
       dailyNarratives: this.dailyNarratives.length,
       weeklyNarratives: this.weeklyNarratives.length,
@@ -942,6 +969,23 @@ OUTPUT JSON:
         ? new Date(this.dailyNarratives[this.dailyNarratives.length - 1].timestamp).toISOString().split('T')[0]
         : null
     };
+
+    // Add storyline stats if enabled
+    if (this.adaptiveStorylinesEnabled && this.storylineTracker) {
+      const storylineStats = this.storylineTracker.getStats();
+      baseStats.adaptiveStorylines = {
+        enabled: true,
+        activeStorylines: storylineStats.activeStorylines,
+        topicModels: storylineStats.topicModels,
+        llmCacheSize: storylineStats.llmCacheSize,
+        llmCallsThisHour: storylineStats.llmCallsThisHour,
+        totalLearnedPatterns: storylineStats.totalLearnedPatterns
+      };
+    } else {
+      baseStats.adaptiveStorylines = { enabled: false };
+    }
+
+    return baseStats;
   }
 
   /**
@@ -1358,61 +1402,268 @@ OUTPUT JSON:
   }
 
   /**
-   * Remove expired watchlist items (24h timeout)
+   * PHASE 2: Analyze post for storyline progression (adaptive storylines)
+   * @param {string} content - Post content
+   * @param {Array<string>} topics - Extracted topics
+   * @param {number} timestamp - Post timestamp
+   * @param {Object} meta - Additional metadata
+   * @returns {Array} Storyline events
    */
-  _pruneExpiredWatchlist() {
-    const now = Date.now();
-    const expired = [];
-    
-    for (const [item, metadata] of this.activeWatchlist.entries()) {
-      if (now - metadata.addedAt > this.watchlistExpiryMs) {
-        expired.push(item);
-        this.activeWatchlist.delete(item);
-      }
+  async analyzePostForStoryline(content, topics, timestamp = Date.now(), meta = {}) {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return [];
     }
-    
-    if (expired.length) {
-      this.logger?.debug?.(`[WATCHLIST] Pruned ${expired.length} expired items`);
+
+    try {
+      return await this.storylineTracker.analyzePost(content, topics, timestamp, meta);
+    } catch (err) {
+      this.logger.debug('[NARRATIVE-MEMORY] Storyline analysis failed:', err?.message || err);
+      return [];
     }
-    
-    return expired.length;
   }
 
   /**
-   * Topic cluster APIs for evolution tracking
+   * PHASE 2: Get storyline context for a topic
+   * @param {string} topic - Topic to get context for
+   * @returns {Object|null} Enhanced storyline context or null
    */
-  getTopicCluster(topic) {
-    const key = String(topic || '').toLowerCase();
-    const existing = this.topicClusters.get(key);
-    if (existing) return existing;
-    const cluster = { subtopics: new Set(), timeline: [], currentPhase: null };
-    this.topicClusters.set(key, cluster);
-    return cluster;
+  getStorylineContext(topic) {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return null;
+    }
+
+    // Find active storylines for this topic
+    const topicKey = String(topic || '').toLowerCase().trim();
+    const storylines = Array.from(this.storylineTracker.activeStorylines.values())
+      .filter(s => s.topic === topicKey)
+      .sort((a, b) => b.lastUpdated - a.lastUpdated);
+
+    if (storylines.length === 0) return null;
+
+    const primary = storylines[0];
+
+    // Determine storyline type based on current phase
+    const storylineType = this._determineStorylineType(primary.currentPhase);
+
+    // Get progression patterns for context
+    const progressionPatterns = this.storylineTracker.progressionPatterns || {};
+    const expectedPhases = progressionPatterns[storylineType] || [];
+
+    // Calculate progression metrics
+    const currentPhaseIndex = expectedPhases.indexOf(primary.currentPhase);
+    const progressionRate = primary.history.length > 1 ?
+      (Date.now() - primary.history[0].timestamp) / (primary.history.length - 1) : 0;
+
+    // Enhanced context for LLM consumption
+    return {
+      storylineId: primary.id,
+      topic: primary.topic,
+      storylineType, // 'regulatory', 'technical', 'market', 'community'
+      currentPhase: primary.currentPhase,
+      phaseProgress: currentPhaseIndex >= 0 ? `${currentPhaseIndex + 1}/${expectedPhases.length}` : 'unknown',
+      expectedNextPhases: expectedPhases.slice(currentPhaseIndex + 1, currentPhaseIndex + 3),
+      confidence: primary.confidence,
+      progressionType: this._classifyProgressionType(primary), // 'progression' or 'emergence'
+      historyLength: primary.history.length,
+      lastUpdated: primary.lastUpdated,
+      ageHours: Math.round((Date.now() - primary.history[0].timestamp) / (1000 * 60 * 60)),
+      progressionRateMs: Math.round(progressionRate), // milliseconds between phase changes
+      recentProgression: primary.history.slice(-5).map(h => ({
+        phase: h.phase,
+        timestamp: h.timestamp,
+        confidence: h.confidence,
+        source: h.source || 'unknown',
+        timeAgo: Math.round((Date.now() - h.timestamp) / (1000 * 60 * 60)) // hours ago
+      })),
+      patternInfo: this._getPatternContext(primary, storylineType),
+      context: {
+        isActive: (Date.now() - primary.lastUpdated) < (7 * 24 * 60 * 60 * 1000), // active within 7 days
+        hasMultiplePhases: primary.history.length > 2,
+        confidenceTrend: this._calculateConfidenceTrend(primary.history),
+        typicalDuration: this._estimateTypicalDuration(storylineType)
+      }
+    };
   }
 
-  recordTopicAngle(topic, subtopic, snippet, timestamp = Date.now()) {
-    const key = String(topic || '').toLowerCase();
-    // Normalize subtopic to kebab-case for consistency
-    const label = String(subtopic || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9\s\-]/g, ' ')
-      .trim()
-      .replace(/\s+/g, '-')
-      .slice(0, 30);
-    if (!key || !label) return;
-    const cluster = this.getTopicCluster(key);
-    cluster.subtopics.add(label);
-    cluster.timeline.push({ subtopic: label, timestamp, snippet });
-    // Trim timeline to last N entries per topic to bound memory
-    if (cluster.timeline.length > this.maxTopicClusterEntries) {
-      cluster.timeline.splice(0, cluster.timeline.length - this.maxTopicClusterEntries);
+  /**
+   * PHASE 2: Get all active storylines
+   * @returns {Array} Active storylines summary
+   */
+  getActiveStorylines() {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return [];
+    }
+
+    return Array.from(this.storylineTracker.activeStorylines.values()).map(s => ({
+      id: s.id,
+      topic: s.topic,
+      currentPhase: s.currentPhase,
+      confidence: s.confidence,
+      historyLength: s.history.length,
+      lastUpdated: s.lastUpdated
+    }));
+  }
+
+  /**
+   * PHASE 2: Refresh storyline models (periodic maintenance)
+   */
+  refreshStorylineModels() {
+    if (this.adaptiveStorylinesEnabled && this.storylineTracker) {
+      this.storylineTracker.refreshModels();
     }
   }
 
-  setTopicPhase(topic, phase) {
-    const key = String(topic || '').toLowerCase();
-    const cluster = this.getTopicCluster(key);
-    cluster.currentPhase = phase || 'general';
+  /**
+   * Prune expired watchlist items
+   * @private
+   */
+  _pruneExpiredWatchlist() {
+    const now = Date.now();
+    const toRemove = [];
+
+    for (const [item, metadata] of this.activeWatchlist.entries()) {
+      if (now - metadata.addedAt > this.watchlistExpiryMs) {
+        toRemove.push(item);
+      }
+    }
+
+    for (const item of toRemove) {
+      this.activeWatchlist.delete(item);
+    }
+
+    if (toRemove.length > 0) {
+      this.logger?.debug?.(`[WATCHLIST] Pruned ${toRemove.length} expired items`);
+    }
+  }
+
+  /**
+   * Helper: Determine storyline type from current phase
+   * @private
+   */
+  _determineStorylineType(phase) {
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    for (const [type, phases] of Object.entries(patterns)) {
+      if (phases.includes(phase)) {
+        return type;
+      }
+    }
+    return 'unknown';
+  }
+
+  /**
+   * Helper: Classify whether storyline represents progression or emergence
+   * @private
+   */
+  _classifyProgressionType(storyline) {
+    if (!storyline.history || storyline.history.length < 2) {
+      return 'emergence'; // New storylines are emergence by definition
+    }
+
+    // Check if phases are progressing through expected sequence
+    const storylineType = this._determineStorylineType(storyline.currentPhase);
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    const expectedPhases = patterns[storylineType] || [];
+
+    if (expectedPhases.length === 0) {
+      return 'emergence'; // Unknown pattern = emergence
+    }
+
+    // Check recent history for sequential progression
+    const recentPhases = storyline.history.slice(-3).map(h => h.phase);
+    const currentIndex = expectedPhases.indexOf(storyline.currentPhase);
+
+    if (currentIndex <= 0) {
+      return 'emergence'; // At beginning or unknown phase
+    }
+
+    // Check if we progressed from a previous expected phase
+    const prevPhase = recentPhases[recentPhases.length - 2];
+    const prevIndex = expectedPhases.indexOf(prevPhase);
+
+    return (prevIndex >= 0 && currentIndex === prevIndex + 1) ? 'progression' : 'emergence';
+  }
+
+  /**
+   * Helper: Get pattern context for storyline
+   * @private
+   */
+  _getPatternContext(storyline, storylineType) {
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    const expectedPhases = patterns[storylineType] || [];
+
+    if (expectedPhases.length === 0) {
+      return { type: 'unknown', expectedPhases: [], currentPosition: 'unknown' };
+    }
+
+    const currentIndex = expectedPhases.indexOf(storyline.currentPhase);
+    const position = currentIndex >= 0 ?
+      `${currentIndex + 1}/${expectedPhases.length}` :
+      'unknown';
+
+    return {
+      type: storylineType,
+      expectedPhases,
+      currentPosition: position,
+      isSequential: this._isSequentialProgression(storyline, expectedPhases)
+    };
+  }
+
+  /**
+   * Helper: Check if storyline progression is sequential
+   * @private
+   */
+  _isSequentialProgression(storyline, expectedPhases) {
+    if (!storyline.history || storyline.history.length < 2) return false;
+
+    const recentPhases = storyline.history.slice(-4).map(h => h.phase);
+    let sequentialCount = 0;
+
+    for (let i = 1; i < recentPhases.length; i++) {
+      const prevIndex = expectedPhases.indexOf(recentPhases[i-1]);
+      const currIndex = expectedPhases.indexOf(recentPhases[i]);
+
+      if (prevIndex >= 0 && currIndex === prevIndex + 1) {
+        sequentialCount++;
+      }
+    }
+
+    return sequentialCount >= recentPhases.length - 1; // Most transitions are sequential
+  }
+
+  /**
+   * Helper: Calculate confidence trend from history
+   * @private
+   */
+  _calculateConfidenceTrend(history) {
+    if (!history || history.length < 2) return 'stable';
+
+    const recent = history.slice(-3);
+    const avgRecent = recent.reduce((sum, h) => sum + (h.confidence || 0), 0) / recent.length;
+    const avgOlder = history.length > 3 ?
+      history.slice(0, -3).reduce((sum, h) => sum + (h.confidence || 0), 0) / (history.length - 3) :
+      avgRecent;
+
+    const diff = avgRecent - avgOlder;
+    if (diff > 0.1) return 'increasing';
+    if (diff < -0.1) return 'decreasing';
+    return 'stable';
+  }
+
+  /**
+   * Helper: Estimate typical duration for storyline type
+   * @private
+   */
+  _estimateTypicalDuration(storylineType) {
+    // Rough estimates based on storyline type characteristics
+    const estimates = {
+      regulatory: { min: 24, max: 168, typical: 72 }, // hours
+      technical: { min: 12, max: 96, typical: 48 },
+      market: { min: 6, max: 72, typical: 24 },
+      community: { min: 24, max: 336, typical: 120 },
+      unknown: { min: 12, max: 168, typical: 48 }
+    };
+
+    return estimates[storylineType] || estimates.unknown;
   }
 }
 

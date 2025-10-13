@@ -106,10 +106,26 @@ class StorylineTrackerDebugger {
       ...options
     };
 
-    this.tracker = new StorylineTracker({
-      enableLLM: this.options.enableLLM,
-      logger: console
-    });
+    // Create a mock runtime object for debug mode
+    const mockRuntime = {
+      getSetting: (key) => {
+        if (key === 'NARRATIVE_LLM_ENABLE') return this.options.enableLLM ? 'true' : 'false';
+        if (key === 'NARRATIVE_LLM_MODEL') return 'gpt-3.5-turbo';
+        return null;
+      },
+      generateText: async (prompt, options) => {
+        // Mock LLM response for debugging
+        return JSON.stringify({
+          type: 'unknown',
+          phase: null,
+          confidence: 0.5,
+          rationale: 'Mock response',
+          pattern: 'unknown'
+        });
+      }
+    };
+    
+    this.tracker = new StorylineTracker(mockRuntime, console);
 
     this.results = [];
   }
@@ -144,7 +160,13 @@ class StorylineTrackerDebugger {
 
     try {
       const startTime = Date.now();
-      const result = await this.tracker.analyzePost(post);
+      const events = await this.tracker.analyzePost(
+        post.content,
+        [post.topic],
+        Date.now(),
+        { id: post.id }
+      );
+      const result = events[0] || { type: 'unknown', confidence: 0 };
       const duration = Date.now() - startTime;
 
       const analysis = {
@@ -154,11 +176,11 @@ class StorylineTrackerDebugger {
         expectedPhase: post.expectedPhase,
         expectedType: post.expectedType,
         detectedType: result.type,
-        detectedPhase: result.phase,
+        detectedPhase: result.newPhase || result.phase,
         confidence: result.confidence,
-        reasoning: result.reasoning,
+        reasoning: result.evidence?.llm?.rationale || '',
         processingTime: duration,
-        detectionMethod: result.detectionMethod,
+        detectionMethod: result.evidence?.llm ? 'llm' : 'rules',
         timestamp: new Date().toISOString()
       };
 
@@ -166,19 +188,19 @@ class StorylineTrackerDebugger {
 
       // Display results
       console.log(`✅ Result: ${result.type} (${result.confidence.toFixed(2)} confidence)`);
-      if (result.phase) {
-        console.log(`🏷️  Phase: ${result.phase}`);
+      if (result.newPhase) {
+        console.log(`🏷️  Phase: ${result.newPhase}`);
       }
       console.log(`⏱️  Processing: ${duration}ms`);
-      console.log(`🧠 Method: ${result.detectionMethod}`);
+      console.log(`🧠 Method: ${analysis.detectionMethod}`);
 
-      if (result.reasoning) {
-        console.log(`💭 Reasoning: ${result.reasoning}`);
+      if (analysis.reasoning) {
+        console.log(`💭 Reasoning: ${analysis.reasoning}`);
       }
 
       // Accuracy check
       const typeMatch = result.type === post.expectedType;
-      const phaseMatch = result.phase === post.expectedPhase || (!result.phase && !post.expectedPhase);
+      const phaseMatch = result.newPhase === post.expectedPhase || (!result.newPhase && !post.expectedPhase);
 
       console.log(`🎯 Accuracy: Type=${typeMatch ? '✅' : '❌'}, Phase=${phaseMatch ? '✅' : '❌'}`);
 
@@ -242,9 +264,11 @@ class StorylineTrackerDebugger {
     }
 
     console.log('\n🤖 Tracker Stats:');
-    console.log(`  LLM Calls: ${report.trackerStats.llmCalls}`);
-    console.log(`  Cache Hits: ${report.trackerStats.cacheHits}`);
+    console.log(`  LLM Calls (This Hour): ${report.trackerStats.llmCallsThisHour}`);
+    console.log(`  LLM Cache Size: ${report.trackerStats.llmCacheSize}`);
     console.log(`  Active Storylines: ${report.trackerStats.activeStorylines}`);
+    console.log(`  Topic Models: ${report.trackerStats.topicModels}`);
+    console.log(`  Total Learned Patterns: ${report.trackerStats.totalLearnedPatterns}`);
   }
 
   _calculateStats() {

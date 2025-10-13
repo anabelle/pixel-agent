@@ -18,7 +18,7 @@ class StorylineTracker {
         'rumor', 'speculation', 'confirmation', 'reaction', 'analysis', 'conclusion'
       ],
       community: [
-        'emergence', 'discussion', 'debate', 'consensus', 'action', 'result'
+        'emergence', 'conversation', 'debate', 'consensus', 'action', 'result'
       ]
     };
 
@@ -193,7 +193,7 @@ class StorylineTracker {
 
       // Community
       emergence: ['emerge', 'start', 'begin', 'new', 'appear', 'arise'],
-      discussion: ['discuss', 'talk', 'debate', 'conversation', 'chat', 'forum'],
+      conversation: ['discuss', 'talk', 'debate', 'conversation', 'chat', 'forum'],
       debate: ['debate', 'argue', 'dispute', 'controversy', 'conflict', 'divide'],
       consensus: ['agree', 'consensus', 'unite', 'settle', 'decide', 'resolve'],
       action: ['act', 'do', 'execute', 'perform', 'implement', 'take'],

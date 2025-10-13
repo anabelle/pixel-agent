@@ -45,6 +45,42 @@ describe('StorylineTracker', () => {
   });
 
   describe('Known Phase Detection', () => {
+  let tracker;
+  let mockRuntime;
+  let mockLogger;
+
+  beforeEach(() => {
+    mockLogger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    };
+
+    mockRuntime = {
+      getSetting: jest.fn((key) => {
+        const settings = {
+          'NOSTR_STORYLINE_LLM_ENABLED': 'true',
+          'NOSTR_STORYLINE_LLM_PROVIDER': 'openai',
+          'NOSTR_STORYLINE_CONFIDENCE_THRESHOLD': '0.5',
+          'NOSTR_STORYLINE_CACHE_TTL_MINUTES': '60'
+        };
+        return settings[key];
+      })
+    };
+
+    tracker = new StorylineTracker({
+      runtime: mockRuntime,
+      logger: mockLogger,
+      enableLLM: true
+    });
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('Known Phase Detection', () => {
     test('should detect regulatory phase progression', async () => {
       const post = {
         id: 'test-1',
@@ -52,12 +88,12 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'crypto-regulation');
+      const result = await tracker.analyzePost(post.content, ['crypto-regulation'], post.created_at * 1000);
 
-      expect(result.type).toBe('progression');
-      expect(result.phase).toBe('regulatory');
-      expect(result.confidence).toBeGreaterThan(0.7);
-      expect(result.detectionMethod).toBe('rules');
+      expect(result[0].type).toBe('progression');
+      expect(result[0].phase).toBe('regulatory');
+      expect(result[0].confidence).toBeGreaterThan(0.7);
+      expect(result[0].detectionMethod).toBe('rules');
     });
 
     test('should detect technical phase emergence', async () => {
@@ -67,11 +103,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'lightning-network');
+      const result = await tracker.analyzePost(post.content, ['lightning-network'], post.created_at * 1000);
 
-      expect(result.type).toBe('progression');
-      expect(result.phase).toBe('technical');
-      expect(result.confidence).toBeGreaterThan(0.6);
+      expect(result[0].type).toBe('progression');
+      expect(result[0].phase).toBe('technical');
+      expect(result[0].confidence).toBeGreaterThan(0.6);
     });
 
     test('should detect market phase progression', async () => {
@@ -81,11 +117,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'bitcoin-adoption');
+      const result = await tracker.analyzePost(post.content, ['bitcoin-adoption'], post.created_at * 1000);
 
-      expect(result.type).toBe('progression');
-      expect(result.phase).toBe('market');
-      expect(result.confidence).toBeGreaterThan(0.6);
+      expect(result[0].type).toBe('progression');
+      expect(result[0].phase).toBe('market');
+      expect(result[0].confidence).toBeGreaterThan(0.6);
     });
 
     test('should detect community phase emergence', async () => {
@@ -95,11 +131,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'open-source-growth');
+      const result = await tracker.analyzePost(post.content, ['open-source-growth'], post.created_at * 1000);
 
-      expect(result.type).toBe('emergence');
-      expect(result.phase).toBe('community');
-      expect(result.confidence).toBeGreaterThan(0.5);
+      expect(result[0].type).toBe('emergence');
+      expect(result[0].phase).toBe('community');
+      expect(result[0].confidence).toBeGreaterThan(0.5);
     });
   });
 
@@ -125,11 +161,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'zkp-smart-contracts');
+      const result = await tracker.analyzePost(post.content, ['zkp-smart-contracts'], post.created_at * 1000);
 
-      expect(result.type).toBe('emergence');
-      expect(result.phase).toBe('technical');
-      expect(result.confidence).toBeGreaterThan(0.4);
+      expect(result[0].type).toBe('emergence');
+      expect(result[0].phase).toBe('technical');
+      expect(result[0].confidence).toBeGreaterThan(0.4);
     });
   });
 
@@ -141,11 +177,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'random-topic');
+      const result = await tracker.analyzePost(post.content, ['random-topic'], post.created_at * 1000);
 
-      expect(result.type).toBe('unknown');
-      expect(result.phase).toBeNull();
-      expect(result.confidence).toBeLessThan(0.3);
+      expect(result[0].type).toBe('unknown');
+      expect(result[0].phase).toBeNull();
+      expect(result[0].confidence).toBeLessThan(0.3);
     });
 
     test('should return unknown for spam content', async () => {
@@ -155,10 +191,10 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'nft-scam');
+      const result = await tracker.analyzePost(post.content, ['nft-scam'], post.created_at * 1000);
 
-      expect(result.type).toBe('unknown');
-      expect(result.confidence).toBeLessThan(0.2);
+      expect(result[0].type).toBe('unknown');
+      expect(result[0].confidence).toBeLessThan(0.2);
     });
 
     test('should abstain from low-confidence detections', async () => {
@@ -168,10 +204,10 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'food-preferences');
+      const result = await tracker.analyzePost(post.content, ['food-preferences'], post.created_at * 1000);
 
-      expect(result.type).toBe('unknown');
-      expect(result.confidence).toBeLessThan(0.3);
+      expect(result[0].type).toBe('unknown');
+      expect(result[0].confidence).toBeLessThan(0.3);
     });
   });
 
@@ -191,12 +227,12 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'crypto-regulation');
+      const result = await tracker.analyzePost(post.content, ['crypto-regulation'], post.created_at * 1000);
 
-      expect(result.type).toBe('progression');
-      expect(result.phase).toBe('regulatory');
-      expect(result.confidence).toBeGreaterThan(0.7);
-      expect(result.detectionMethod).toBe('rules');
+      expect(result[0].type).toBe('progression');
+      expect(result[0].phase).toBe('regulatory');
+      expect(result[0].confidence).toBeGreaterThan(0.7);
+      expect(result[0].detectionMethod).toBe('rules');
     });
 
     test('should use LLM when rules have low confidence', async () => {
@@ -213,12 +249,12 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'blockchain-innovation');
+      const result = await tracker.analyzePost(post.content, ['blockchain-innovation'], post.created_at * 1000);
 
-      expect(result.type).toBe('emergence');
-      expect(result.phase).toBe('technical');
-      expect(result.confidence).toBe(0.8);
-      expect(result.detectionMethod).toBe('llm');
+      expect(result[0].type).toBe('emergence');
+      expect(result[0].phase).toBe('technical');
+      expect(result[0].confidence).toBe(0.8);
+      expect(result[0].detectionMethod).toBe('llm');
     });
   });
 
@@ -231,13 +267,13 @@ describe('StorylineTracker', () => {
       };
 
       // First call
-      const result1 = await tracker.analyzePost(post, 'bitcoin-regulation');
+      const result1 = await tracker.analyzePost(post.content, ['bitcoin-regulation'], post.created_at * 1000);
 
       // Second call with same content should use cache
-      const result2 = await tracker.analyzePost(post, 'bitcoin-regulation');
+      const result2 = await tracker.analyzePost(post.content, ['bitcoin-regulation'], post.created_at * 1000);
 
-      expect(result1.type).toBe(result2.type);
-      expect(result1.confidence).toBe(result2.confidence);
+      expect(result1[0].type).toBe(result2[0].type);
+      expect(result1[0].confidence).toBe(result2[0].confidence);
 
       // Check that LLM was only called once (cached on second call)
       const stats = tracker.getStats();
@@ -255,11 +291,11 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'blockchain-tech');
+      const result = await tracker.analyzePost(post.content, ['blockchain-tech'], post.created_at * 1000);
 
       // Should fall back to rules when rate limited
-      expect(result.detectionMethod).toBe('rules');
-      expect(result.confidence).toBeLessThan(0.8); // Lower confidence without LLM
+      expect(result[0].detectionMethod).toBe('rules');
+      expect(result[0].confidence).toBeLessThan(0.8); // Lower confidence without LLM
     });
 
     test('should handle cache expiration', async () => {
@@ -273,16 +309,16 @@ describe('StorylineTracker', () => {
       };
 
       // First call
-      await tracker.analyzePost(post, 'market-analysis');
+      await tracker.analyzePost(post.content, ['market-analysis'], post.created_at * 1000);
 
       // Wait for cache to expire
       await new Promise(resolve => setTimeout(resolve, 200));
 
       // Second call should not use cache
-      await tracker.analyzePost(post, 'market-analysis');
+      await tracker.analyzePost(post.content, ['market-analysis'], post.created_at * 1000);
 
       const stats = tracker.getStats();
-      // Cache should have expired, so fewer hits than expected
+      // Cache should have expired, so cache hits should not increase
       expect(stats.cacheHits).toBe(0);
     });
   });
@@ -297,19 +333,19 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'technical-development');
+      const result = await tracker.analyzePost(post.content, ['technical-development'], post.created_at * 1000);
 
       // Should fall back to rules
-      expect(result.detectionMethod).toBe('rules');
-      expect(result.type).toBeDefined();
-      expect(result.confidence).toBeDefined();
+      expect(result[0].detectionMethod).toBe('rules');
+      expect(result[0].type).toBeDefined();
+      expect(result[0].confidence).toBeDefined();
     });
 
     test('should handle invalid input', async () => {
-      const result = await tracker.analyzePost(null, 'test-topic');
+      const result = await tracker.analyzePost(null, ['test-topic']);
 
-      expect(result.type).toBe('unknown');
-      expect(result.confidence).toBe(0);
+      expect(result[0].type).toBe('unknown');
+      expect(result[0].confidence).toBe(0);
     });
 
     test('should handle empty content', async () => {
@@ -319,10 +355,10 @@ describe('StorylineTracker', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      const result = await tracker.analyzePost(post, 'empty-topic');
+      const result = await tracker.analyzePost(post.content, ['empty-topic'], post.created_at * 1000);
 
-      expect(result.type).toBe('unknown');
-      expect(result.confidence).toBe(0);
+      expect(result[0].type).toBe('unknown');
+      expect(result[0].confidence).toBe(0);
     });
   });
 
@@ -335,7 +371,7 @@ describe('StorylineTracker', () => {
       ];
 
       for (const post of posts) {
-        await tracker.analyzePost(post, 'test-topic');
+        await tracker.analyzePost(post.content, ['test-topic'], post.created_at * 1000);
       }
 
       const stats = tracker.getStats();

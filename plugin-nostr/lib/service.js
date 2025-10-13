@@ -1344,10 +1344,10 @@ Response (YES/NO):`;
     }
     
     // Topic Evolution: analyze subtopic/phase and apply contextual boosts
+    let primaryTopic = null;
     try {
       if (this.topicEvolution && this.topicEvolution.enabled && evt?.content) {
         // Extract topics and pick a primary one
-        let primaryTopic = null;
         try {
           const topics = await this._extractTopicsFromEvent(evt);
           if (Array.isArray(topics) && topics.length) {

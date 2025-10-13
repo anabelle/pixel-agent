@@ -52,7 +52,10 @@ class NarrativeMemory {
     this.adaptiveStorylinesEnabled = String(runtime?.getSetting?.('ADAPTIVE_STORYLINES') ?? 'false').toLowerCase() === 'true';
     if (this.adaptiveStorylinesEnabled) {
       const { StorylineTracker } = require('./storylineTracker');
-      this.storylineTracker = new StorylineTracker(runtime, logger);
+      this.storylineTracker = new StorylineTracker({
+        runtime,
+        logger
+      });
     }
   }
 

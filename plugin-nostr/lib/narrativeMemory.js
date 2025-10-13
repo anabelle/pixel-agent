@@ -212,12 +212,16 @@ class NarrativeMemory {
       ['high', 'medium', 'low'].includes(entry.priority)
     );
     
-    // Return compact summaries with key fields
+    // Return enhanced summaries with comprehensive context fields
     return digestEntries.map(entry => ({
       timestamp: entry.timestamp,
       headline: entry.headline,
       tags: entry.tags || [],
-      priority: entry.priority || 'medium'
+      priority: entry.priority || 'medium',
+      narrative: entry.narrative || '',
+      insights: entry.insights || [],
+      evolutionSignal: entry.evolutionSignal || '',
+      watchlist: entry.watchlist || []
     }));
   }
 

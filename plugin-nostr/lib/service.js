@@ -1344,10 +1344,10 @@ Response (YES/NO):`;
     }
     
     // Topic Evolution: analyze subtopic/phase and apply contextual boosts
+    let primaryTopic = null;
     try {
       if (this.topicEvolution && this.topicEvolution.enabled && evt?.content) {
         // Extract topics and pick a primary one
-        let primaryTopic = null;
         try {
           const topics = await this._extractTopicsFromEvent(evt);
           if (Array.isArray(topics) && topics.length) {
@@ -1387,6 +1387,30 @@ Response (YES/NO):`;
       }
     } catch (err) {
       this.logger?.debug?.('[NOSTR] Topic evolution scoring failed:', err?.message || err);
+    }
+
+    // NEW: Analyze post for storyline progression and apply confidence-calibrated boosts
+    try {
+      if (this.narrativeMemory?.storylineTracker && primaryTopic) {
+        const storylineResult = await this.narrativeMemory.analyzePostForStoryline(evt, primaryTopic);
+        if (storylineResult && storylineResult.type !== 'unknown') {
+          let storylineBoost = 0;
+          const confidence = storylineResult.confidence || 0;
+
+          if (storylineResult.type === 'progression' && confidence >= 0.9) {
+            storylineBoost = 0.8;
+          } else if (storylineResult.type === 'emergence' && confidence >= 0.7) {
+            storylineBoost = 0.6;
+          }
+
+          if (storylineBoost > 0) {
+            baseScore += storylineBoost;
+            this.logger?.debug?.(`[NOSTR] Storyline boost for ${evt.id?.slice?.(0, 8) || 'evt'}: +${storylineBoost.toFixed(2)} (${storylineResult.type}, confidence=${confidence.toFixed(2)}, topic="${primaryTopic}")`);
+          }
+        }
+      }
+    } catch (err) {
+      this.logger?.debug?.('[NOSTR] Storyline scoring failed:', err?.message || err);
     }
     
     return Math.max(0, Math.min(1, baseScore)); // Clamp to [0, 1]

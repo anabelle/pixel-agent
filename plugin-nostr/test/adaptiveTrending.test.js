@@ -1,5 +1,5 @@
-const { describe, it, expect, beforeEach, vi } = require('vitest');
-const { AdaptiveTrending } = require('../lib/adaptiveTrending');
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { AdaptiveTrending } from '../lib/adaptiveTrending.js';
 
 function makeEvt(content, pubkey, tsSec) {
   return { content, pubkey, created_at: tsSec };

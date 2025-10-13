@@ -1246,14 +1246,20 @@ ${signalLines}`;
 6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
 7. Surface actionable adjustments for tone, structure, or strategy across future interactions.
 
+CRITICAL: For each interaction, provide SPECIFIC behavioral changes:
+- Quote exact phrases from your replies that need improvement
+- Identify specific words or patterns to eliminate
+- Recommend exact wording alternatives for better engagement
+- Provide concrete examples of how to restructure responses
+
 OUTPUT JSON ONLY:
 {
-  "strengths": ["What you're doing well"],
-  "weaknesses": ["What needs improvement"],
-  "patterns": ["Behavior patterns detected"],
-  "recommendations": ["Specific actionable changes"],
-  "exampleGoodReply": "Quote your best reply",
-  "exampleBadReply": "Quote your weakest moment",
+  "strengths": ["Specific successful approaches to continue using"],
+  "weaknesses": ["Exact problematic phrases or patterns to eliminate", "More specific issues"],
+  "patterns": ["Repeated behaviors that need conscious breaking"],
+  "recommendations": ["Specific actionable changes with concrete examples", "Exact wording suggestions for improvement"],
+  "exampleGoodReply": "Quote your best reply verbatim",
+  "exampleBadReply": "Quote your weakest moment verbatim",
   "regressions": ["Where you slipped compared to prior reflections"],
   "improvements": ["Where you improved compared to prior reflections"]
 }`

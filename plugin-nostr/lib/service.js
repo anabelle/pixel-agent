@@ -3720,29 +3720,43 @@ Response (YES/NO):`;
     const { generateWithModelOrFallback } = require('./generation');
     
     // Log prompt details for debugging
-    logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}, Has reflection: ${!!selfReflectionContext}`);
-
-    // Optional: structured context meta (no chain-of-thought)
-    try {
-      const meta = {
-        context: {
-          hasThreadContext: !!threadContext,
-          hasImageContext: !!imageContext,
-          hasNarrativeContext: !!narrativeContext,
-          hasUserProfile: !!userProfile,
-          hasProactiveInsight: !!proactiveInsight,
-          timelineLore: !!timelineLoreSection,
-          loreContinuity: !!loreContinuity,
-        },
-        profile: userProfile ? {
-          topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
-          dominantSentiment: userProfile.dominantSentiment,
-          relationshipDepth: userProfile.relationshipDepth,
-        } : null,
-        narrativeSummary: narrativeContext?.summary ? String(narrativeContext.summary).slice(0, 160) : null,
-      };
-      logger.debug(`[NOSTR][DEBUG] Reply context meta: ${JSON.stringify(meta)}`);
-    } catch {}
+        const reflectionDetails = selfReflectionContext ? {
+          hasStrengths: Array.isArray(selfReflectionContext.strengths) && selfReflectionContext.strengths.length > 0,
+          hasWeaknesses: Array.isArray(selfReflectionContext.weaknesses) && selfReflectionContext.weaknesses.length > 0,
+          hasRecommendations: Array.isArray(selfReflectionContext.recommendations) && selfReflectionContext.recommendations.length > 0,
+          hasExamples: !!(selfReflectionContext.exampleGoodReply || selfReflectionContext.exampleBadReply),
+          timestamp: selfReflectionContext.generatedAtIso || 'unknown',
+          strengthsCount: Array.isArray(selfReflectionContext.strengths) ? selfReflectionContext.strengths.length : 0,
+          weaknessesCount: Array.isArray(selfReflectionContext.weaknesses) ? selfReflectionContext.weaknesses.length : 0,
+          recommendationsCount: Array.isArray(selfReflectionContext.recommendations) ? selfReflectionContext.recommendations.length : 0
+        } : null;
+        
+        logger.debug(`[NOSTR] Reply LLM generation - Type: ${type}, Prompt length: ${prompt.length}, Kind: ${evt?.kind || 'unknown'}, Has narrative: ${!!narrativeContext}, Has profile: ${!!userProfile}, Has reflection: ${!!selfReflectionContext}`);
+        if (reflectionDetails) {
+          logger.debug(`[NOSTR] Self-reflection context: ${reflectionDetails.strengthsCount} strengths, ${reflectionDetails.weaknessesCount} weaknesses, ${reflectionDetails.recommendationsCount} recommendations, timestamp: ${reflectionDetails.timestamp}`);
+        }
+    
+        // Optional: structured context meta (no chain-of-thought)
+        try {
+          const meta = {
+            context: {
+              hasThreadContext: !!threadContext,
+              hasImageContext: !!imageContext,
+              hasNarrativeContext: !!narrativeContext,
+              hasUserProfile: !!userProfile,
+              hasProactiveInsight: !!proactiveInsight,
+              timelineLore: !!timelineLoreSection,
+              loreContinuity: !!loreContinuity,
+            },
+            profile: userProfile ? {
+              topInterests: Array.isArray(userProfile.topInterests) ? userProfile.topInterests.slice(0, 3) : [],
+              dominantSentiment: userProfile.dominantSentiment,
+              relationshipDepth: userProfile.relationshipDepth,
+            } : null,
+            narrativeSummary: narrativeContext?.summary ? String(narrativeContext.summary).slice(0, 160) : null,
+          };
+          logger.debug(`[NOSTR][DEBUG] Reply context meta: ${JSON.stringify(meta)}`);
+        } catch {}
     
     // Retry mechanism: attempt up to 5 times with exponential backoff
     const maxRetries = 5;

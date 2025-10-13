@@ -80,4 +80,80 @@ describe('SelfReflectionEngine prompt construction', () => {
     expect(prompt).toContain('regressions');
     expect(prompt).toContain('improvements');
   });
+
+  it('includes longitudinal analysis section when provided', () => {
+    const engine = new SelfReflectionEngine(runtime, console, {});
+
+    const interactions = [
+      {
+        userMessage: 'test message',
+        yourReply: 'test reply',
+        engagement: 'avg=0.5',
+        conversation: [],
+        feedback: [],
+        signals: [],
+        metadata: { createdAtIso: '2025-10-05T10:00:00.000Z' }
+      }
+    ];
+
+    const longitudinalAnalysis = {
+      timespan: {
+        oldestReflection: '2025-07-01T00:00:00.000Z',
+        newestReflection: '2025-10-01T00:00:00.000Z',
+        totalReflections: 15
+      },
+      recurringIssues: [
+        {
+          issue: 'verbose replies',
+          occurrences: 5,
+          severity: 'ongoing',
+          periodsCovered: ['recent', 'oneWeekAgo', 'oneMonthAgo']
+        }
+      ],
+      persistentStrengths: [
+        {
+          strength: 'friendly tone',
+          occurrences: 8,
+          consistency: 'stable',
+          periodsCovered: ['recent', 'oneWeekAgo', 'oneMonthAgo', 'older']
+        }
+      ],
+      evolvingPatterns: [],
+      evolutionTrends: {
+        strengthsGained: ['concise opening'],
+        weaknessesResolved: ['slow response'],
+        newChallenges: ['emoji overuse'],
+        stagnantAreas: ['verbose replies']
+      },
+      periodBreakdown: {
+        recent: 3,
+        oneWeekAgo: 4,
+        oneMonthAgo: 5,
+        older: 3
+      }
+    };
+
+    const prompt = engine._buildPrompt(interactions, {
+      contextSignals: [],
+      previousReflections: [],
+      longitudinalAnalysis
+    });
+
+    expect(prompt).toContain('LONGITUDINAL ANALYSIS');
+    expect(prompt).toContain('15 reflections');
+    expect(prompt).toContain('RECURRING ISSUES');
+    expect(prompt).toContain('verbose replies');
+    expect(prompt).toContain('5x');
+    expect(prompt).toContain('PERSISTENT STRENGTHS');
+    expect(prompt).toContain('friendly tone');
+    expect(prompt).toContain('EVOLUTION TRENDS');
+    expect(prompt).toContain('Strengths gained');
+    expect(prompt).toContain('concise opening');
+    expect(prompt).toContain('Weaknesses resolved');
+    expect(prompt).toContain('slow response');
+    expect(prompt).toContain('New challenges');
+    expect(prompt).toContain('emoji overuse');
+    expect(prompt).toContain('Stagnant areas');
+    expect(prompt).toContain('long-term view');
+  });
 });

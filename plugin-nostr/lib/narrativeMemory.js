@@ -169,6 +169,29 @@ class NarrativeMemory {
     return sorted.slice(0, limit);
   }
 
+  /**
+   * Get recent digest summaries for context in new lore generation
+   * Returns compact summaries of recent digests to avoid repetition
+   * @param {number} lookback - Number of recent digests to return (default: 3)
+   * @returns {Array} Array of compact digest summaries
+   */
+  getRecentDigestSummaries(lookback = 3) {
+    if (!Number.isFinite(lookback) || lookback <= 0) {
+      lookback = 3;
+    }
+    
+    // Get the most recent timeline lore entries
+    const recent = this.timelineLore.slice(-lookback);
+    
+    // Return compact summaries with key fields
+    return recent.map(entry => ({
+      timestamp: entry.timestamp,
+      headline: entry.headline,
+      tags: entry.tags || [],
+      priority: entry.priority || 'medium'
+    }));
+  }
+
   async getHistoricalContext(timeframe = '24h') {
     // Provide historical context for narrative generation
     const now = Date.now();

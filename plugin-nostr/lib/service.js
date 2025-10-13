@@ -1801,11 +1801,13 @@ Response (YES/NO):`;
       }
       const qualityEvents = await this._filterByAuthorQuality(all, strictness);
 
-      const scoredWithPromises = await Promise.all(
+      const settled = await Promise.allSettled(
         qualityEvents.map(async (e) => ({ evt: e, score: await this._scoreEventForEngagement(e) }))
       );
-      const scored = scoredWithPromises
-        .filter(({ score }) => typeof score === 'number' && score > 0.1) // Lower threshold for initial filtering
+      const scored = settled
+        .filter(r => r.status === 'fulfilled' && typeof r.value?.score === 'number' && r.value.score > 0.1)
+        .map(r => r.value)
+        .sort((a, b) => b.score - a.score);
         .sort((a, b) => b.score - a.score);
 
       allScoredEvents = [...allScoredEvents, ...scored];

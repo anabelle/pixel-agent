@@ -1425,7 +1425,7 @@ OUTPUT JSON:
   /**
    * PHASE 2: Get storyline context for a topic
    * @param {string} topic - Topic to get context for
-   * @returns {Object|null} Storyline context or null
+   * @returns {Object|null} Enhanced storyline context or null
    */
   getStorylineContext(topic) {
     if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
@@ -1441,17 +1441,47 @@ OUTPUT JSON:
     if (storylines.length === 0) return null;
 
     const primary = storylines[0];
+
+    // Determine storyline type based on current phase
+    const storylineType = this._determineStorylineType(primary.currentPhase);
+
+    // Get progression patterns for context
+    const progressionPatterns = this.storylineTracker.progressionPatterns || {};
+    const expectedPhases = progressionPatterns[storylineType] || [];
+
+    // Calculate progression metrics
+    const currentPhaseIndex = expectedPhases.indexOf(primary.currentPhase);
+    const progressionRate = primary.history.length > 1 ?
+      (Date.now() - primary.history[0].timestamp) / (primary.history.length - 1) : 0;
+
+    // Enhanced context for LLM consumption
     return {
       storylineId: primary.id,
+      topic: primary.topic,
+      storylineType, // 'regulatory', 'technical', 'market', 'community'
       currentPhase: primary.currentPhase,
+      phaseProgress: currentPhaseIndex >= 0 ? `${currentPhaseIndex + 1}/${expectedPhases.length}` : 'unknown',
+      expectedNextPhases: expectedPhases.slice(currentPhaseIndex + 1, currentPhaseIndex + 3),
       confidence: primary.confidence,
+      progressionType: this._classifyProgressionType(primary), // 'progression' or 'emergence'
       historyLength: primary.history.length,
       lastUpdated: primary.lastUpdated,
-      progression: primary.history.slice(-3).map(h => ({
+      ageHours: Math.round((Date.now() - primary.history[0].timestamp) / (1000 * 60 * 60)),
+      progressionRateMs: Math.round(progressionRate), // milliseconds between phase changes
+      recentProgression: primary.history.slice(-5).map(h => ({
         phase: h.phase,
         timestamp: h.timestamp,
-        confidence: h.confidence
-      }))
+        confidence: h.confidence,
+        source: h.source || 'unknown',
+        timeAgo: Math.round((Date.now() - h.timestamp) / (1000 * 60 * 60)) // hours ago
+      })),
+      patternInfo: this._getPatternContext(primary, storylineType),
+      context: {
+        isActive: (Date.now() - primary.lastUpdated) < (7 * 24 * 60 * 60 * 1000), // active within 7 days
+        hasMultiplePhases: primary.history.length > 2,
+        confidenceTrend: this._calculateConfidenceTrend(primary.history),
+        typicalDuration: this._estimateTypicalDuration(storylineType)
+      }
     };
   }
 
@@ -1504,6 +1534,136 @@ OUTPUT JSON:
     if (toRemove.length > 0) {
       this.logger?.debug?.(`[WATCHLIST] Pruned ${toRemove.length} expired items`);
     }
+  }
+
+  /**
+   * Helper: Determine storyline type from current phase
+   * @private
+   */
+  _determineStorylineType(phase) {
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    for (const [type, phases] of Object.entries(patterns)) {
+      if (phases.includes(phase)) {
+        return type;
+      }
+    }
+    return 'unknown';
+  }
+
+  /**
+   * Helper: Classify whether storyline represents progression or emergence
+   * @private
+   */
+  _classifyProgressionType(storyline) {
+    if (!storyline.history || storyline.history.length < 2) {
+      return 'emergence'; // New storylines are emergence by definition
+    }
+
+    // Check if phases are progressing through expected sequence
+    const storylineType = this._determineStorylineType(storyline.currentPhase);
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    const expectedPhases = patterns[storylineType] || [];
+
+    if (expectedPhases.length === 0) {
+      return 'emergence'; // Unknown pattern = emergence
+    }
+
+    // Check recent history for sequential progression
+    const recentPhases = storyline.history.slice(-3).map(h => h.phase);
+    const currentIndex = expectedPhases.indexOf(storyline.currentPhase);
+
+    if (currentIndex <= 0) {
+      return 'emergence'; // At beginning or unknown phase
+    }
+
+    // Check if we progressed from a previous expected phase
+    const prevPhase = recentPhases[recentPhases.length - 2];
+    const prevIndex = expectedPhases.indexOf(prevPhase);
+
+    return (prevIndex >= 0 && currentIndex === prevIndex + 1) ? 'progression' : 'emergence';
+  }
+
+  /**
+   * Helper: Get pattern context for storyline
+   * @private
+   */
+  _getPatternContext(storyline, storylineType) {
+    const patterns = this.storylineTracker?.progressionPatterns || {};
+    const expectedPhases = patterns[storylineType] || [];
+
+    if (expectedPhases.length === 0) {
+      return { type: 'unknown', expectedPhases: [], currentPosition: 'unknown' };
+    }
+
+    const currentIndex = expectedPhases.indexOf(storyline.currentPhase);
+    const position = currentIndex >= 0 ?
+      `${currentIndex + 1}/${expectedPhases.length}` :
+      'unknown';
+
+    return {
+      type: storylineType,
+      expectedPhases,
+      currentPosition: position,
+      isSequential: this._isSequentialProgression(storyline, expectedPhases)
+    };
+  }
+
+  /**
+   * Helper: Check if storyline progression is sequential
+   * @private
+   */
+  _isSequentialProgression(storyline, expectedPhases) {
+    if (!storyline.history || storyline.history.length < 2) return false;
+
+    const recentPhases = storyline.history.slice(-4).map(h => h.phase);
+    let sequentialCount = 0;
+
+    for (let i = 1; i < recentPhases.length; i++) {
+      const prevIndex = expectedPhases.indexOf(recentPhases[i-1]);
+      const currIndex = expectedPhases.indexOf(recentPhases[i]);
+
+      if (prevIndex >= 0 && currIndex === prevIndex + 1) {
+        sequentialCount++;
+      }
+    }
+
+    return sequentialCount >= recentPhases.length - 1; // Most transitions are sequential
+  }
+
+  /**
+   * Helper: Calculate confidence trend from history
+   * @private
+   */
+  _calculateConfidenceTrend(history) {
+    if (!history || history.length < 2) return 'stable';
+
+    const recent = history.slice(-3);
+    const avgRecent = recent.reduce((sum, h) => sum + (h.confidence || 0), 0) / recent.length;
+    const avgOlder = history.length > 3 ?
+      history.slice(0, -3).reduce((sum, h) => sum + (h.confidence || 0), 0) / (history.length - 3) :
+      avgRecent;
+
+    const diff = avgRecent - avgOlder;
+    if (diff > 0.1) return 'increasing';
+    if (diff < -0.1) return 'decreasing';
+    return 'stable';
+  }
+
+  /**
+   * Helper: Estimate typical duration for storyline type
+   * @private
+   */
+  _estimateTypicalDuration(storylineType) {
+    // Rough estimates based on storyline type characteristics
+    const estimates = {
+      regulatory: { min: 24, max: 168, typical: 72 }, // hours
+      technical: { min: 12, max: 96, typical: 48 },
+      market: { min: 6, max: 72, typical: 24 },
+      community: { min: 24, max: 336, typical: 120 },
+      unknown: { min: 12, max: 168, typical: 48 }
+    };
+
+    return estimates[storylineType] || estimates.unknown;
   }
 }
 

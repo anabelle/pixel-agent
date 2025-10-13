@@ -53,7 +53,6 @@ class StorylineTracker {
 
     this.logger.info(`[STORYLINE-TRACKER] Initialized (LLM: ${this.llmEnabled ? 'ON' : 'OFF'})`);
   }
-}
 
   /**
    * Analyze a post for storyline progression or emergence
@@ -278,19 +277,41 @@ class StorylineTracker {
     const knownPatterns = Object.keys(this.progressionPatterns).join(', ');
     const learnedPhases = topicModel.patterns?.map(p => p.phase).join(', ') || 'none';
 
+    // Get active storylines for this topic
+    const activeStorylines = Array.from(this.activeStorylines.values())
+      .filter(s => s.topic === topicKey && (Date.now() - s.lastUpdated) < this.storylineTTL);
+
+    const storylineContext = activeStorylines.length > 0
+      ? activeStorylines.map(s => `Storyline "${s.id}": current phase "${s.currentPhase}", last updated ${Math.round((Date.now() - s.lastUpdated) / (1000 * 60 * 60))} hours ago, confidence ${s.confidence.toFixed(2)}`).join('; ')
+      : 'No active storylines for this topic';
+
     return `Analyze this post about "${topicKey}" and determine if it advances a storyline or starts a new one.
 
 POST: "${content.slice(0, 500)}"
 
 CONTEXT:
+- Storyline types: regulatory (laws/policies), technical (development), market (trading/adoption), community (social/governance)
+- Each storyline has phases that progress in sequence (e.g., regulatory: proposal → discussion → implementation)
 - Known progression patterns: ${knownPatterns}
 - Previously learned phases for this topic: ${learnedPhases}
 - Rule-based detection confidence: ${ruleResult.confidence.toFixed(2)}
+- ACTIVE STORYLINES: ${storylineContext}
 
-TASK: Classify the post's role in a storyline progression. Consider:
-1. Does this continue an existing storyline phase?
-2. Does this start a new storyline?
-3. What phase does this represent?
+TASK: Classify the post's role in storyline development. Consider:
+1. PROGRESSION: Does this continue an existing storyline by advancing to the next phase? (e.g., moving from "discussion" to "implementation")
+2. EMERGENCE: Does this start a completely new storyline about this topic? (e.g., first mention of a new regulatory development)
+3. What specific phase does this represent within its storyline type?
+
+CRITICAL DISTINCTIONS:
+- If there are active storylines, check if this post advances one of them to a logical next phase
+- If this represents a completely different development or new angle on the topic, it may be emergence
+- Consider timing: recent posts about the same development suggest progression, not emergence
+
+EXAMPLES:
+- "New SEC regulations approved" → emergence (starts new regulatory storyline)
+- "Community votes on the new regulation" → progression (continues existing regulatory storyline)
+- "Bitcoin ETF trading begins" → progression (advances market storyline to adoption phase)
+- "Another company launches NFT marketplace" → emergence (new development, different from existing NFT storylines)
 
 RESPONSE FORMAT (JSON):
 {

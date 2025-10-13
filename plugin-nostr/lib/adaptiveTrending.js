@@ -95,7 +95,7 @@ class AdaptiveTrending {
     // Also consider new authors appearing in recent window
     const recentAuthors = this._uniqueAuthorsInWindow(history, recentStart, now);
     const baselineAuthors = this._uniqueAuthorsInWindow(history, baselineStart, recentStart);
-    const authorFactor = recentAuthors > 0 ? clamp((recentAuthors - baselineAuthors / 4) / (recentAuthors + 1), 0, 1) : 0; // small boost
+    const authorFactor = recentAuthors > 0 ? clamp((recentAuthors - (baselineAuthors / 4)) / (recentAuthors + 1), 0, 1) : 0; // small boost
     return clamp(novelty * 0.8 + authorFactor * 0.2, 0, 1.5);
   }
 

@@ -124,7 +124,8 @@ Content (<=${MAX_CONTENT_FOR_PROMPT} chars): ${String(content || '').slice(0, MA
   _evolutionScore(cluster, subtopic) {
     if (!cluster) return 0.0;
     const tl = cluster.timeline || [];
-    const recent = tl.slice(-10);
+    // Exclude the just-recorded event to measure true recency fairly
+    const recent = tl.length > 0 ? tl.slice(0, -1).slice(-10) : [];
     const unique = new Set(recent.map(e => e.subtopic)).size;
     const diversity = Math.min(1, unique / 5); // cap at 5 distinct in recent
     // recency: if subtopic is among the last 3, small bump

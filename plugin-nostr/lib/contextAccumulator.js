@@ -1,5 +1,6 @@
 // Context Accumulator - Builds continuous understanding of Nostr activity
 const { extractTopicsFromEvent } = require('./nostr');
+const { AdaptiveTrending } = require('./adaptiveTrending');
 
 class ContextAccumulator {
   constructor(runtime, logger, options = {}) {
@@ -99,6 +100,15 @@ class ContextAccumulator {
     this._systemContext = null;
     this._systemContextPromise = null;
 
+    // Adaptive trending system
+    this.adaptiveTrending = new AdaptiveTrending(this.logger, {
+      baselineWindowHours: options.baselineWindowHours || 24,
+      velocityWindowMinutes: options.velocityWindowMinutes || 30,
+      noveltyWindowHours: options.noveltyWindowHours || 6,
+      trendingThreshold: options.trendingThreshold || 1.2
+    });
+    this.adaptiveTrendingEnabled = process.env.ADAPTIVE_TRENDING_ENABLED !== 'false'; // Enabled by default
+
     // Initialize real-time analysis intervals
     this.quarterHourInterval = null;
     this.rollingWindowInterval = null;
@@ -173,6 +183,11 @@ class ContextAccumulator {
       for (const topic of extracted.topics) {
         digest.topics.set(topic, (digest.topics.get(topic) || 0) + 1);
         this._updateTopicTimeline(topic, evt);
+
+        // Feed data to adaptive trending system
+        if (this.adaptiveTrendingEnabled) {
+          this._feedTopicToAdaptiveTrending(topic, evt, extracted);
+        }
       }
       
       // 4. Track sentiment
@@ -658,6 +673,46 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     if (timeline.length > this.maxTopicTimelineEvents) {
       timeline.shift();
     }
+  }
+
+  _feedTopicToAdaptiveTrending(topic, evt, extracted) {
+    if (!this.adaptiveTrending || topic === 'general') return;
+
+    try {
+      // Extract keywords from content for novelty detection
+      const keywords = this._extractKeywords(evt.content, extracted);
+      
+      // Get current hour's data for this topic
+      const currentHour = this._getCurrentHour();
+      const digest = this.hourlyDigests.get(currentHour);
+      const topicCount = digest?.topics.get(topic) || 0;
+      
+      // Get unique users discussing this topic
+      const timeline = this.topicTimelines.get(topic) || [];
+      const users = new Set(timeline.slice(-10).map(t => t.author));
+      
+      this.adaptiveTrending.recordActivity(topic, {
+        mentions: topicCount,
+        users,
+        keywords,
+        context: evt.content.slice(0, 100)
+      }, evt.created_at || Date.now());
+    } catch (err) {
+      this.logger?.debug?.('[CONTEXT] Failed to feed topic to adaptive trending:', err.message);
+    }
+  }
+
+  _extractKeywords(content, extracted) {
+    // Simple keyword extraction - get important words
+    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'is', 'was', 'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'these', 'those', 'it', 'its']);
+    
+    const words = content.toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !stopWords.has(w));
+    
+    // Return top 10 most meaningful words (deduplicated)
+    return [...new Set(words)].slice(0, 10);
   }
 
   async _detectEmergingStory(evt, extracted) {
@@ -1422,10 +1477,23 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       return { events: 0, users: 0, topics: [] };
     }
     
-    const topTopics = Array.from(digest.topics.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([topic, count]) => ({ topic, count }));
+    // Use adaptive trending if enabled, otherwise fall back to frequency
+    let topTopics;
+    if (this.adaptiveTrendingEnabled && this.adaptiveTrending) {
+      const trending = this.adaptiveTrending.getTrendingTopics(5);
+      topTopics = trending.map(t => ({
+        topic: t.topic,
+        count: digest.topics.get(t.topic) || 0,
+        score: t.score,
+        velocity: t.velocity,
+        novelty: t.novelty
+      }));
+    } else {
+      topTopics = Array.from(digest.topics.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([topic, count]) => ({ topic, count }));
+    }
     
     return {
       events: digest.eventCount,
@@ -1433,6 +1501,28 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       topics: topTopics,
       sentiment: digest.sentiment
     };
+  }
+
+  /**
+   * Get trending topics using adaptive scoring algorithm
+   * @param {object} options - Options for trending topics
+   * @param {number} options.limit - Maximum number of topics to return
+   * @param {number} options.minScore - Minimum trending score (default: 1.2)
+   * @returns {Array} Trending topics with adaptive scores
+   */
+  getAdaptiveTrendingTopics(options = {}) {
+    if (!this.adaptiveTrendingEnabled || !this.adaptiveTrending) {
+      // Fall back to frequency-based method
+      return this.getTopTopicsAcrossHours(options);
+    }
+
+    const limit = options.limit || 5;
+    const minScore = options.minScore || this.adaptiveTrending.trendingThreshold;
+
+    const trending = this.adaptiveTrending.getTrendingTopics(limit);
+    
+    // Filter by minimum score if specified
+    return trending.filter(t => t.score >= minScore);
   }
 
   getTopTopicsAcrossHours(options = {}) {

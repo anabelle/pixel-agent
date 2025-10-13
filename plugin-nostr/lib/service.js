@@ -1301,26 +1301,40 @@ Response (YES/NO):`;
     // Boost score if event relates to trending topics
     if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
-        const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions({
-          minUsers: Math.max(5, this.contextAccumulator?.emergingStoryContextMinUsers || 0)
-        }));
-        if (emergingStories.length > 0) {
+        // Try adaptive trending first, fall back to emerging stories
+        let trendingTopics = [];
+        if (this.contextAccumulator.getAdaptiveTrendingTopics) {
+          trendingTopics = this.contextAccumulator.getAdaptiveTrendingTopics({ limit: 5 });
+        }
+        
+        // Fall back to emerging stories if no adaptive trending
+        if (trendingTopics.length === 0) {
+          const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions({
+            minUsers: Math.max(5, this.contextAccumulator?.emergingStoryContextMinUsers || 0)
+          }));
+          trendingTopics = emergingStories;
+        }
+
+        if (trendingTopics.length > 0) {
           const contentLower = evt.content.toLowerCase();
-          const matchingStory = emergingStories.find((s, index) => {
-            const match = contentLower.includes(s.topic.toLowerCase());
+          const matchingTopic = trendingTopics.find((t, index) => {
+            const topicName = typeof t === 'string' ? t : (t?.topic || '');
+            const match = contentLower.includes(topicName.toLowerCase());
             if (match) {
-              // Boost score based on how hot the topic is (higher for top trending)
-              const boost = 0.3 - (index * 0.05); // 0.3 for #1, 0.25 for #2, etc.
+              // Boost based on trending intensity (adaptive score) or position
+              let boost = 0.3 - (index * 0.05); // Base: 0.3 for #1, 0.25 for #2, etc.
+              
+              // If using adaptive trending, boost more for high scores
+              if (t.score && t.score > 2.0) {
+                boost += 0.2; // Extra boost for highly trending topics
+              }
+              
+              baseScore += boost;
+              logger.debug(`[NOSTR] Boosted engagement score for ${evt.id.slice(0, 8)} by +${boost.toFixed(2)} (relates to trending topic "${topicName}"${t.score ? ` score=${t.score.toFixed(2)}` : ''})`);
               return true;
             }
             return false;
           });
-          
-          if (matchingStory) {
-            const boostAmount = 0.3 - (emergingStories.indexOf(matchingStory) * 0.05);
-            baseScore += boostAmount;
-            logger.debug(`[NOSTR] Boosted engagement score for ${evt.id.slice(0, 8)} by +${boostAmount.toFixed(2)} (relates to trending topic "${matchingStory.topic}")`);
-          }
         }
       } catch (err) {
         logger.debug('[NOSTR] Failed to apply context boost to score:', err.message);
@@ -1372,7 +1386,13 @@ Response (YES/NO):`;
           // Provide lightweight trending hints from context accumulator (best-effort)
           let hints = undefined;
           try {
-            if (this.contextAccumulator?.getTopTopicsAcrossHours) {
+            if (this.contextAccumulator?.getAdaptiveTrendingTopics) {
+              // Try adaptive trending first
+              const trending = this.contextAccumulator.getAdaptiveTrendingTopics({ limit: 5 }) || [];
+              const trendingNames = trending.map(x => (typeof x === 'string' ? x : (x?.topic || ''))).filter(Boolean);
+              if (trendingNames.length) hints = { trending: trendingNames };
+            } else if (this.contextAccumulator?.getTopTopicsAcrossHours) {
+              // Fall back to frequency-based
               const top = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 6, limit: 5, minMentions: 2 }) || [];
               const trending = top.map(x => (typeof x === 'string' ? x : (x?.topic || ''))).filter(Boolean);
               if (trending.length) hints = { trending };

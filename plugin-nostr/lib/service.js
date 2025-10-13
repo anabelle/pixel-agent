@@ -384,6 +384,19 @@ class NostrService {
     this.narrativeMemory = new NarrativeMemory(runtime, this.logger);
     this.logger.info(`[NOSTR] Narrative memory initialized`);
     
+    // Topic Evolution - small-LLM subtopic labeling + phase detection for contextual scoring
+    try {
+      const { TopicEvolution } = require('./topicEvolution');
+      this.topicEvolution = new TopicEvolution(runtime, this.logger, {
+        narrativeMemory: this.narrativeMemory,
+        semanticAnalyzer: this.semanticAnalyzer
+      });
+      this.logger.info(`[NOSTR] Topic evolution initialized (enabled: ${this.topicEvolution?.enabled ? 'ON' : 'OFF'})`);
+    } catch (err) {
+      this.topicEvolution = null;
+      this.logger?.debug?.('[NOSTR] Topic evolution init failed:', err?.message || err);
+    }
+    
     // Narrative Context Provider - Intelligent context selection for conversations
     this.narrativeContextProvider = new NarrativeContextProvider(
       this.narrativeMemory,
@@ -1282,7 +1295,7 @@ Response (YES/NO):`;
     }
   }
 
-  _scoreEventForEngagement(evt) { 
+  async _scoreEventForEngagement(evt) { 
     let baseScore = _scoreEventForEngagement(evt);
     
     // Boost score if event relates to trending topics
@@ -1314,7 +1327,7 @@ Response (YES/NO):`;
       }
     }
     
-    // Phase 4: Boost score if event matches active watchlist
+  // Phase 4: Boost score if event matches active watchlist
     if (this.narrativeMemory?.checkWatchlistMatch && evt?.content) {
       try {
         // Extract topics from event tags for matching
@@ -1336,6 +1349,52 @@ Response (YES/NO):`;
       } catch (err) {
         logger.debug('[NOSTR] Failed to apply watchlist boost to discovery score:', err?.message || err);
       }
+    }
+    
+    // Topic Evolution: analyze subtopic/phase and apply contextual boosts
+    try {
+      if (this.topicEvolution && this.topicEvolution.enabled && evt?.content) {
+        // Extract topics and pick a primary one
+        let primaryTopic = null;
+        try {
+          const topics = await this._extractTopicsFromEvent(evt);
+          if (Array.isArray(topics) && topics.length) {
+            primaryTopic = String(topics[0] || '').trim() || null;
+          }
+        } catch {}
+        // Fallback: topic tag
+        if (!primaryTopic && Array.isArray(evt?.tags)) {
+          const t = evt.tags.find(t => t && t[0] === 't' && t[1]);
+          if (t) primaryTopic = String(t[1]).trim();
+        }
+
+        if (primaryTopic) {
+          // Provide lightweight trending hints from context accumulator (best-effort)
+          let hints = undefined;
+          try {
+            if (this.contextAccumulator?.getTopTopicsAcrossHours) {
+              const top = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 6, limit: 5, minMentions: 2 }) || [];
+              const trending = top.map(x => (typeof x === 'string' ? x : (x?.topic || ''))).filter(Boolean);
+              if (trending.length) hints = { trending };
+            }
+          } catch {}
+
+          const analysis = await this.topicEvolution.analyze(primaryTopic, evt.content, hints || {});
+          if (analysis) {
+            let evoBoost = 0;
+            if (analysis.isNovelAngle) evoBoost += 0.4;
+            if (analysis.isPhaseChange) evoBoost += 0.6;
+            if ((analysis.evolutionScore || 0) > 0.7) evoBoost += 0.3;
+            if (evoBoost > 0) {
+              baseScore += evoBoost;
+              this.logger?.debug?.(`[NOSTR] Evolution boost for ${evt.id?.slice?.(0, 8) || 'evt'}: +${evoBoost.toFixed(2)} (topic="${primaryTopic}", subtopic="${analysis.subtopic}", phase=${analysis.phase}, score=${(analysis.evolutionScore||0).toFixed(2)})`);
+            }
+            try { evt.__topicEvolution = analysis; } catch {}
+          }
+        }
+      }
+    } catch (err) {
+      this.logger?.debug?.('[NOSTR] Topic evolution scoring failed:', err?.message || err);
     }
     
     return Math.max(0, Math.min(1, baseScore)); // Clamp to [0, 1]
@@ -1742,9 +1801,13 @@ Response (YES/NO):`;
       }
       const qualityEvents = await this._filterByAuthorQuality(all, strictness);
 
-      const scored = qualityEvents
-        .map((e) => ({ evt: e, score: this._scoreEventForEngagement(e) }))
-        .filter(({ score }) => score > 0.1) // Lower threshold for initial filtering
+      const settled = await Promise.allSettled(
+        qualityEvents.map(async (e) => ({ evt: e, score: await this._scoreEventForEngagement(e) }))
+      );
+      const scored = settled
+        .filter(r => r.status === 'fulfilled' && typeof r.value?.score === 'number' && r.value.score > 0.1)
+        .map(r => r.value)
+        .sort((a, b) => b.score - a.score);
         .sort((a, b) => b.score - a.score);
 
       allScoredEvents = [...allScoredEvents, ...scored];
@@ -4502,6 +4565,14 @@ Response (YES/NO):`;
             restored++;
           }
         }
+        // Legacy path: replies recorded without top-level inReplyTo; event id lives in content.data.eventId
+        if (memory.content?.source === 'nostr' && memory.content?.data?.eventId) {
+          const legacyEventId = memory.content.data.eventId;
+          if (legacyEventId && !this.handledEventIds.has(legacyEventId)) {
+            this.handledEventIds.add(legacyEventId);
+            restored++;
+          }
+        }
         // Also check if the memory ID contains the event ID (fallback)
         if (memory.id && memory.id.includes(':')) {
           const parts = memory.id.split(':');
@@ -6455,8 +6526,8 @@ CONTENT:
         boost += 0.4;
       }
     }
-    
-    return boost;
+    // Normalize floating point precision to one decimal to keep tests stable
+    return Math.round(boost * 10) / 10;
   }
 
   async _processTimelineLoreBuffer(force = false) {

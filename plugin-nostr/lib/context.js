@@ -146,17 +146,69 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
 
 async function saveInteractionMemory(runtime, createUniqueUuid, getConversationIdFromEvent, evt, kind, extra, logger) {
   const body = { platform: 'nostr', kind, eventId: evt?.id, author: evt?.pubkey, content: evt?.content, timestamp: Date.now(), ...extra };
-  if (typeof runtime.createMemory === 'function') {
+
+  // Compute context IDs
+  let roomId, id, entityId;
+  try {
+    roomId = createUniqueUuid(runtime, getConversationIdFromEvent(evt));
+  } catch {}
+  try {
+    id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
+  } catch {}
+  try {
+    entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
+  } catch {}
+
+  // Persist a top-level inReplyTo for replies so _restoreHandledEventIds can recover handled IDs across restarts
+  const isReplyKind = typeof kind === 'string' && kind.toLowerCase().includes('reply');
+  const content = {
+    type: 'social_interaction',
+    source: 'nostr',
+    // Important: this must be top-level (not inside data) because restore logic reads content.inReplyTo
+    ...(isReplyKind && evt?.id ? { inReplyTo: evt.id } : {}),
+    data: body,
+  };
+
+  // Use createMemorySafe with retries and duplicate tolerance
+  try {
+    if (id && entityId && roomId && typeof runtime?.createMemory === 'function') {
+      const { createMemorySafe } = require('./context');
+      const created = await createMemorySafe(
+        runtime,
+        {
+          id,
+          entityId,
+          roomId,
+          agentId: runtime.agentId,
+          content,
+          createdAt: Date.now(),
+        },
+        'messages',
+        3,
+        logger
+      );
+      return created;
+    }
+  } catch (e) {
+    logger?.debug?.('[NOSTR] saveInteractionMemory createMemorySafe failed, attempting direct create:', e?.message || e);
+  }
+
+  // Fallbacks
+  if (typeof runtime?.createMemory === 'function') {
     try {
-      const roomId = createUniqueUuid(runtime, getConversationIdFromEvent(evt));
-      const id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
-      const entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
-  return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content: { type: 'social_interaction', source: 'nostr', data: body, }, createdAt: Date.now(), }, 'messages');
-    } catch (e) { logger?.debug?.('[NOSTR] saveInteractionMemory fallback:', e?.message || e); }
+      return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content, createdAt: Date.now() }, 'messages');
+    } catch (e) {
+      logger?.debug?.('[NOSTR] saveInteractionMemory direct create failed:', e?.message || e);
+    }
   }
-  if (runtime.databaseAdapter && typeof runtime.databaseAdapter.createMemory === 'function') {
-    return await runtime.databaseAdapter.createMemory({ type: 'event', content: body, roomId: 'nostr', });
+  if (runtime?.databaseAdapter && typeof runtime.databaseAdapter.createMemory === 'function') {
+    try {
+      return await runtime.databaseAdapter.createMemory({ type: 'event', content: body, roomId: 'nostr' });
+    } catch (e) {
+      logger?.debug?.('[NOSTR] saveInteractionMemory adapter create failed:', e?.message || e);
+    }
   }
+  return false;
 }
 
 module.exports = { ensureNostrContext, ensureLNPixelsContext, ensureNostrContextSystem, createMemorySafe, saveInteractionMemory };

@@ -985,8 +985,8 @@ OUTPUT JSON:
     );
     const latestTagsArray = (recent.slice(-1)[0]?.tags || []).map(t => String(t || '').toLowerCase());
     const emergingNew = latestTagsArray.filter(t => !earlierTags.has(t));
-    const cooling = Array.from(earlierTags).filter(t => !latestTags.has(t));
-
+    const latestLowerSet = new Set(latestTagsArray);
+    const cooling = Array.from(earlierTags).filter(t => !latestLowerSet.has(t));
     // 6. Build human-readable summary
     const summary = this._buildContinuitySummary({
       recurringThemes,

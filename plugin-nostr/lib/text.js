@@ -175,7 +175,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
           stamp = new Date(reflection.generatedAt).toISOString();
         } catch {}
       }
-      reflectionSection = `\n\nSELF-REFLECTION${stamp ? ` (${stamp})` : ''}:\n${lines.join('\n')}\n\nAPPLY: Let these lessons guide tone and content subtly. Never mention that you're following a reflection.`;
+      reflectionSection = `\n\nSELF-REFLECTION${stamp ? ` (${stamp})` : ''}:\n${lines.join('\n')}\n\nCRITICAL BEHAVIORAL ADJUSTMENTS:\n- IMPLEMENT the identified improvements in your actual response\n- AVOID repeating the same mistakes mentioned in weaknesses\n- APPLY the recommendations to change how you structure your reply\n- LEVERAGE your strengths to make this response better than previous ones\n- STUDY the best reply example and emulate its successful approach\n- ELIMINATE patterns that led to poor outcomes in the example bad reply\n\nMANDATORY CHANGES:\n${weaknesses.length ? `• Fix: ${weaknesses.map(w => `Eliminate "${w}"`).join('; ')}` : '• No specific weaknesses to address'}\n${recommendations.length ? `• Apply: ${recommendations.map(r => `Implement "${r}"`).join('; ')}` : '• No specific recommendations to apply'}\n${patterns.length ? `• Break: ${patterns.map(p => `Stop "${p}"`).join('; ')}` : '• No patterns to break'}\n\nRESPONSIBILITY: Your self-reflection identified these issues - YOU MUST FIX THEM in this response.\nDo not just acknowledge these insights; actively demonstrate that you've learned from them.`;
     }
   }
   
@@ -422,7 +422,21 @@ USE: Treat these as the community's evolving plot points. Reference them only wh
 SELF-REFLECTION${stamp ? ` (${stamp})` : ''}:
 ${lines.join('\n')}
 
-GUIDE: Weave these improvements into your tone and structure. Never mention that you're following a reflection.`;
+CRITICAL BEHAVIORAL ADJUSTMENTS:
+- IMPLEMENT the identified improvements in your actual response
+- AVOID repeating the same mistakes mentioned in weaknesses
+- APPLY the recommendations to change how you structure your reply
+- LEVERAGE your strengths to make this response better than previous ones
+- STUDY the best reply example and emulate its successful approach
+- ELIMINATE patterns that led to poor outcomes in the example bad reply
+
+MANDATORY CHANGES:
+${weaknesses.length ? `• Fix: ${weaknesses.map(w => `Eliminate "${w}"`).join('; ')}` : '• No specific weaknesses to address'}
+${recommendations.length ? `• Apply: ${recommendations.map(r => `Implement "${r}"`).join('; ')}` : '• No specific recommendations to apply'}
+${patterns.length ? `• Break: ${patterns.map(p => `Stop "${p}"`).join('; ')}` : '• No patterns to break'}
+
+RESPONSIBILITY: Your self-reflection identified these issues - YOU MUST FIX THEM in this response.
+Do not just acknowledge these insights; actively demonstrate that you've learned from them.`;
     }
   }
 

@@ -105,14 +105,47 @@ class ContextAccumulator {
     this.rollingWindowInterval = null;
     this.trendDetectionInterval = null;
 
-    // Adaptive trending instance
+    // Adaptive trending instance (env-configurable)
+    const adaptMinScore = (() => {
+      const v = parseFloat(process.env.ADAPTIVE_TRENDING_MIN_SCORE);
+      if (Number.isFinite(v) && v > 0) return v;
+      if (Number.isFinite(options?.adaptiveMinScore)) return options.adaptiveMinScore;
+      return 1.2;
+    })();
+    const adaptRecentMs = (() => {
+      const mins = parsePositiveInt(process.env.ADAPTIVE_TRENDING_RECENT_MINUTES, null);
+      if (Number.isFinite(mins) && mins > 0) return mins * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveRecentMs)) return options.adaptiveRecentMs;
+      return 30 * 60 * 1000;
+    })();
+    const adaptPrevMs = (() => {
+      const mins = parsePositiveInt(process.env.ADAPTIVE_TRENDING_PREVIOUS_MINUTES, null);
+      if (Number.isFinite(mins) && mins > 0) return mins * 60 * 1000;
+      if (Number.isFinite(options?.adaptivePreviousMs)) return options.adaptivePreviousMs;
+      return 30 * 60 * 1000;
+    })();
+    const adaptBaselineMs = (() => {
+      const hrs = parsePositiveInt(process.env.ADAPTIVE_TRENDING_BASELINE_HOURS, null);
+      if (Number.isFinite(hrs) && hrs > 0) return hrs * 60 * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveBaselineMs)) return options.adaptiveBaselineMs;
+      return 24 * 60 * 60 * 1000;
+    })();
+    const adaptMaxHistoryMs = (() => {
+      const hrs = parsePositiveInt(process.env.ADAPTIVE_TRENDING_MAX_HISTORY_HOURS, null);
+      if (Number.isFinite(hrs) && hrs > 0) return hrs * 60 * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveMaxHistoryMs)) return options.adaptiveMaxHistoryMs;
+      return 36 * 60 * 60 * 1000;
+    })();
+
     this.adaptiveTrending = new AdaptiveTrending({
-      minScoreThreshold: Number.isFinite(options?.adaptiveMinScore) ? options.adaptiveMinScore : 1.2,
-      recentWindowMs: Number.isFinite(options?.adaptiveRecentMs) ? options.adaptiveRecentMs : 30 * 60 * 1000,
-      previousWindowMs: Number.isFinite(options?.adaptivePreviousMs) ? options.adaptivePreviousMs : 30 * 60 * 1000,
-      baselineWindowMs: Number.isFinite(options?.adaptiveBaselineMs) ? options.adaptiveBaselineMs : 24 * 60 * 60 * 1000,
-      maxHistoryMs: Number.isFinite(options?.adaptiveMaxHistoryMs) ? options.adaptiveMaxHistoryMs : 36 * 60 * 60 * 1000,
+      minScoreThreshold: adaptMinScore,
+      recentWindowMs: adaptRecentMs,
+      previousWindowMs: adaptPrevMs,
+      baselineWindowMs: adaptBaselineMs,
+      maxHistoryMs: adaptMaxHistoryMs,
     });
+    // For adaptive trending log deduplication
+    this._lastTrendingSignature = null;
 
     // Start real-time analysis if enabled
     if (this.realtimeAnalysisEnabled) {
@@ -1891,6 +1924,30 @@ OUTPUT JSON:
         recentUsers: recentUsers.size,
         previousUsers: previousUsers.size
       });
+
+      // Adaptive trending snapshot log when it changes to avoid log spam
+      try {
+        const adaptiveTop = this.getAdaptiveTrendingTopics(5) || [];
+        if (adaptiveTop.length > 0) {
+          const signature = adaptiveTop.map(t => `${t.topic}:${Math.round((t.score || 0) * 100)}`).join('|');
+          if (signature !== this._lastTrendingSignature) {
+            this._lastTrendingSignature = signature;
+            const pretty = adaptiveTop.map(t => {
+              const score = (t.score ?? 0).toFixed(2);
+              const vel = (t.velocity ?? 0).toFixed(2);
+              const nov = (t.novelty ?? 0).toFixed(2);
+              const dev = (t.development ?? 0).toFixed(2);
+              return `${t.topic} (score ${score}, vel ${vel}, nov ${nov}, dev ${dev})`;
+            }).join(' | ');
+            this.logger.info(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
+          }
+        } else if (this._lastTrendingSignature) {
+          // Reset signature when no trending topics
+          this._lastTrendingSignature = null;
+        }
+      } catch (e) {
+        this.logger.debug('[CONTEXT] Adaptive trending log failed:', e?.message || e);
+      }
     }
   }
 

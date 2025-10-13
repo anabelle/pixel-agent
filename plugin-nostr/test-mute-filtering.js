@@ -182,12 +182,12 @@ async function testConsistencyWithExistingFilters() {
 
 async function runAllTests() {
   console.log('🚀 Starting Mute List Filtering Test Suite\n');
-  console.log('=' .repeat(70));
+  console.log('='.repeat(70));
 
   await testMuteFilteringInRealtimeEvents();
   await testConsistencyWithExistingFilters();
 
-  console.log('\n' + '=' .repeat(70));
+  console.log('\n' + '='.repeat(70));
   console.log('✅ All mute filtering tests completed successfully!');
   console.log('\n💡 What was tested:');
   console.log('   - Muted users filtered at onevent stage (earliest possible)');

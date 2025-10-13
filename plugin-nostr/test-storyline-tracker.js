@@ -45,42 +45,6 @@ describe('StorylineTracker', () => {
   });
 
   describe('Known Phase Detection', () => {
-  let tracker;
-  let mockRuntime;
-  let mockLogger;
-
-  beforeEach(() => {
-    mockLogger = {
-      debug: jest.fn(),
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn()
-    };
-
-    mockRuntime = {
-      getSetting: jest.fn((key) => {
-        const settings = {
-          'NOSTR_STORYLINE_LLM_ENABLED': 'true',
-          'NOSTR_STORYLINE_LLM_PROVIDER': 'openai',
-          'NOSTR_STORYLINE_CONFIDENCE_THRESHOLD': '0.5',
-          'NOSTR_STORYLINE_CACHE_TTL_MINUTES': '60'
-        };
-        return settings[key];
-      })
-    };
-
-    tracker = new StorylineTracker({
-      runtime: mockRuntime,
-      logger: mockLogger,
-      enableLLM: true
-    });
-  });
-
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  describe('Known Phase Detection', () => {
     test('should detect regulatory phase progression', async () => {
       const post = {
         id: 'test-1',

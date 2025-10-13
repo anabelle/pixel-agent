@@ -74,9 +74,27 @@ class SelfReflectionEngine {
         : 24 * 14 // default: past two weeks
     });
 
+    // Fetch longitudinal analysis if enabled
+    let longitudinalAnalysis = null;
+    const enableLongitudinal = options.enableLongitudinal !== false; // enabled by default
+    if (enableLongitudinal) {
+      try {
+        longitudinalAnalysis = await this.analyzeLongitudinalPatterns({
+          limit: 20,
+          maxAgeDays: 90
+        });
+        if (longitudinalAnalysis) {
+          this.logger.debug(`[SELF-REFLECTION] Longitudinal analysis: ${longitudinalAnalysis.recurringIssues.length} recurring issues, ${longitudinalAnalysis.persistentStrengths.length} persistent strengths`);
+        }
+      } catch (err) {
+        this.logger.debug('[SELF-REFLECTION] Failed to generate longitudinal analysis:', err?.message || err);
+      }
+    }
+
     const prompt = this._buildPrompt(interactions, {
       contextSignals,
-      previousReflections
+      previousReflections,
+      longitudinalAnalysis
     });
     const modelType = this._getLargeModelType();
     let response = '';
@@ -109,7 +127,8 @@ class SelfReflectionEngine {
       prompt,
       interactions,
       contextSignals,
-      previousReflections
+      previousReflections,
+      longitudinalAnalysis
     });
 
     this.lastAnalysis = {
@@ -304,7 +323,21 @@ class SelfReflectionEngine {
                     regressions: this._toLimitedList(summary?.regressions || [], 4)
                   }))
                 : []
-            }
+            },
+            longitudinalAnalysis: payload.longitudinalAnalysis ? {
+              timespan: payload.longitudinalAnalysis.timespan,
+              recurringIssuesCount: payload.longitudinalAnalysis.recurringIssues?.length || 0,
+              persistentStrengthsCount: payload.longitudinalAnalysis.persistentStrengths?.length || 0,
+              recurringIssues: this._toLimitedList(
+                payload.longitudinalAnalysis.recurringIssues?.map(i => i.issue) || [],
+                5
+              ),
+              persistentStrengths: this._toLimitedList(
+                payload.longitudinalAnalysis.persistentStrengths?.map(s => s.strength) || [],
+                5
+              ),
+              evolutionTrends: payload.longitudinalAnalysis.evolutionTrends
+            } : null
           }
         },
         createdAt: Date.now()
@@ -477,6 +510,288 @@ class SelfReflectionEngine {
     }
 
     return summaries;
+  }
+
+  async getLongTermReflectionHistory(options = {}) {
+    if (!this.enabled || !this.runtime || typeof this.runtime.getMemories !== 'function') {
+      return [];
+    }
+
+    const limit = Math.max(1, Math.min(50, Number(options.limit) || 20));
+    const maxAgeMs = Number.isFinite(options.maxAgeDays)
+      ? options.maxAgeDays * 24 * 60 * 60 * 1000
+      : 90 * 24 * 60 * 60 * 1000; // default: 90 days
+
+    let memories = [];
+    try {
+      const context = await this._ensureSystemContext();
+      const roomId = context?.rooms?.selfReflection || this._createUuid('nostr-self-reflection');
+      if (!roomId) {
+        return [];
+      }
+
+      memories = await this.runtime.getMemories({
+        tableName: 'messages',
+        roomId,
+        count: Math.max(limit * 2, 100)
+      });
+    } catch (err) {
+      this.logger.debug('[SELF-REFLECTION] Failed to load long-term reflection history:', err?.message || err);
+      return [];
+    }
+
+    if (!Array.isArray(memories) || !memories.length) {
+      return [];
+    }
+
+    const now = Date.now();
+    const summaries = [];
+    for (const memory of memories) {
+      const data = memory?.content?.data;
+      const analysis = data?.analysis;
+      if (!analysis) {
+        continue;
+      }
+
+      const generatedIso = typeof data?.generatedAt === 'string' ? data.generatedAt : null;
+      const generatedAt = generatedIso ? Date.parse(generatedIso) : Number(memory?.createdAt) || null;
+      
+      if (!generatedAt || (now - generatedAt) > maxAgeMs) {
+        continue;
+      }
+
+      const summary = this._buildInsightsSummary(analysis, {
+        generatedAt,
+        generatedAtIso: generatedIso,
+        interactionsAnalyzed: data?.interactionsAnalyzed
+      });
+
+      if (summary) {
+        summary.memoryId = memory.id || null;
+        summaries.push(summary);
+      }
+
+      if (summaries.length >= limit) {
+        break;
+      }
+    }
+
+    return summaries;
+  }
+
+  async analyzeLongitudinalPatterns(options = {}) {
+    if (!this.enabled) {
+      return null;
+    }
+
+    const longTermHistory = await this.getLongTermReflectionHistory({
+      limit: Number(options.limit) || 20,
+      maxAgeDays: Number(options.maxAgeDays) || 90
+    });
+
+    if (!longTermHistory || longTermHistory.length < 2) {
+      this.logger.debug('[SELF-REFLECTION] Insufficient history for longitudinal analysis');
+      return null;
+    }
+
+    // Group reflections by time period
+    const now = Date.now();
+    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+    const oneMonth = 30 * 24 * 60 * 60 * 1000;
+
+    const periods = {
+      recent: [],      // Last week
+      oneWeekAgo: [],  // 1-2 weeks ago
+      oneMonthAgo: [], // 3-5 weeks ago
+      older: []        // Older than 5 weeks
+    };
+
+    for (const reflection of longTermHistory) {
+      if (!reflection.generatedAt) continue;
+      
+      const age = now - reflection.generatedAt;
+      if (age <= oneWeek) {
+        periods.recent.push(reflection);
+      } else if (age <= 2 * oneWeek) {
+        periods.oneWeekAgo.push(reflection);
+      } else if (age <= 5 * oneWeek) {
+        periods.oneMonthAgo.push(reflection);
+      } else {
+        periods.older.push(reflection);
+      }
+    }
+
+    // Extract all strengths, weaknesses, patterns across time
+    const allStrengths = new Map();
+    const allWeaknesses = new Map();
+    const allPatterns = new Map();
+
+    for (const period of Object.keys(periods)) {
+      for (const reflection of periods[period]) {
+        // Track strengths
+        for (const strength of reflection.strengths || []) {
+          const key = this._normalizeForComparison(strength);
+          if (!allStrengths.has(key)) {
+            allStrengths.set(key, { text: strength, periods: new Set(), count: 0 });
+          }
+          allStrengths.get(key).periods.add(period);
+          allStrengths.get(key).count++;
+        }
+
+        // Track weaknesses
+        for (const weakness of reflection.weaknesses || []) {
+          const key = this._normalizeForComparison(weakness);
+          if (!allWeaknesses.has(key)) {
+            allWeaknesses.set(key, { text: weakness, periods: new Set(), count: 0 });
+          }
+          allWeaknesses.get(key).periods.add(period);
+          allWeaknesses.get(key).count++;
+        }
+
+        // Track patterns
+        for (const pattern of reflection.patterns || []) {
+          const key = this._normalizeForComparison(pattern);
+          if (!allPatterns.has(key)) {
+            allPatterns.set(key, { text: pattern, periods: new Set(), count: 0 });
+          }
+          allPatterns.get(key).periods.add(period);
+          allPatterns.get(key).count++;
+        }
+      }
+    }
+
+    // Identify recurring issues (weaknesses that appear across multiple time periods)
+    const recurringIssues = [];
+    for (const [key, data] of allWeaknesses.entries()) {
+      if (data.periods.size >= 2 || data.count >= 3) {
+        recurringIssues.push({
+          issue: data.text,
+          occurrences: data.count,
+          periodsCovered: Array.from(data.periods),
+          severity: data.periods.has('recent') ? 'ongoing' : 'resolved'
+        });
+      }
+    }
+
+    // Identify persistent strengths (strengths that appear consistently over time)
+    const persistentStrengths = [];
+    for (const [key, data] of allStrengths.entries()) {
+      if (data.periods.size >= 2 || data.count >= 3) {
+        persistentStrengths.push({
+          strength: data.text,
+          occurrences: data.count,
+          periodsCovered: Array.from(data.periods),
+          consistency: data.periods.has('recent') && data.periods.has('older') ? 'stable' : 'emerging'
+        });
+      }
+    }
+
+    // Identify evolving patterns
+    const evolvingPatterns = [];
+    for (const [key, data] of allPatterns.entries()) {
+      if (data.periods.size >= 2) {
+        evolvingPatterns.push({
+          pattern: data.text,
+          occurrences: data.count,
+          periodsCovered: Array.from(data.periods)
+        });
+      }
+    }
+
+    // Detect evolution trends (comparing recent vs older periods)
+    const evolutionTrends = this._detectEvolutionTrends(periods);
+
+    return {
+      timespan: {
+        oldestReflection: longTermHistory[longTermHistory.length - 1]?.generatedAtIso,
+        newestReflection: longTermHistory[0]?.generatedAtIso,
+        totalReflections: longTermHistory.length
+      },
+      recurringIssues: recurringIssues.sort((a, b) => b.occurrences - a.occurrences).slice(0, 5),
+      persistentStrengths: persistentStrengths.sort((a, b) => b.occurrences - a.occurrences).slice(0, 5),
+      evolvingPatterns: evolvingPatterns.slice(0, 5),
+      evolutionTrends,
+      periodBreakdown: {
+        recent: periods.recent.length,
+        oneWeekAgo: periods.oneWeekAgo.length,
+        oneMonthAgo: periods.oneMonthAgo.length,
+        older: periods.older.length
+      }
+    };
+  }
+
+  _normalizeForComparison(text) {
+    if (!text || typeof text !== 'string') return '';
+    // Normalize to lowercase, remove extra spaces, and basic punctuation for comparison
+    return text.toLowerCase().replace(/[.,!?;:]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  _detectEvolutionTrends(periods) {
+    const trends = {
+      strengthsGained: [],
+      weaknessesResolved: [],
+      newChallenges: [],
+      stagnantAreas: []
+    };
+
+    // Compare recent period with older periods
+    const recentStrengths = new Set();
+    const recentWeaknesses = new Set();
+    const olderStrengths = new Set();
+    const olderWeaknesses = new Set();
+
+    for (const reflection of periods.recent) {
+      for (const strength of reflection.strengths || []) {
+        recentStrengths.add(this._normalizeForComparison(strength));
+      }
+      for (const weakness of reflection.weaknesses || []) {
+        recentWeaknesses.add(this._normalizeForComparison(weakness));
+      }
+    }
+
+    for (const reflection of [...periods.oneMonthAgo, ...periods.older]) {
+      for (const strength of reflection.strengths || []) {
+        olderStrengths.add(this._normalizeForComparison(strength));
+      }
+      for (const weakness of reflection.weaknesses || []) {
+        olderWeaknesses.add(this._normalizeForComparison(weakness));
+      }
+    }
+
+    // New strengths (appearing in recent but not in older)
+    for (const strength of recentStrengths) {
+      if (!olderStrengths.has(strength)) {
+        trends.strengthsGained.push(strength);
+      }
+    }
+
+    // Resolved weaknesses (appearing in older but not in recent)
+    for (const weakness of olderWeaknesses) {
+      if (!recentWeaknesses.has(weakness)) {
+        trends.weaknessesResolved.push(weakness);
+      }
+    }
+
+    // New challenges (appearing in recent but not in older)
+    for (const weakness of recentWeaknesses) {
+      if (!olderWeaknesses.has(weakness)) {
+        trends.newChallenges.push(weakness);
+      }
+    }
+
+    // Stagnant areas (weaknesses appearing in both recent and older)
+    for (const weakness of recentWeaknesses) {
+      if (olderWeaknesses.has(weakness)) {
+        trends.stagnantAreas.push(weakness);
+      }
+    }
+
+    return {
+      strengthsGained: trends.strengthsGained.slice(0, 3),
+      weaknessesResolved: trends.weaknessesResolved.slice(0, 3),
+      newChallenges: trends.newChallenges.slice(0, 3),
+      stagnantAreas: trends.stagnantAreas.slice(0, 3)
+    };
   }
 
   _toLimitedList(value, limit = 4) {
@@ -831,6 +1146,7 @@ class SelfReflectionEngine {
   _buildPrompt(interactions, extras = {}) {
     const contextSignals = Array.isArray(extras.contextSignals) ? extras.contextSignals : [];
     const previousReflections = Array.isArray(extras.previousReflections) ? extras.previousReflections : [];
+    const longitudinalAnalysis = extras.longitudinalAnalysis || null;
 
     const previousReflectionSection = previousReflections.length
       ? `RECENT SELF-REFLECTION INSIGHTS (most recent first):
@@ -848,6 +1164,28 @@ ${previousReflections
           .join('\n')}
 
 Compare current performance to these past learnings. Highlight improvements or regressions explicitly.`
+      : '';
+
+    const longitudinalSection = longitudinalAnalysis
+      ? `LONGITUDINAL ANALYSIS (${longitudinalAnalysis.timespan.totalReflections} reflections from ${longitudinalAnalysis.timespan.oldestReflection} to ${longitudinalAnalysis.timespan.newestReflection}):
+
+RECURRING ISSUES (patterns that persist across time periods):
+${longitudinalAnalysis.recurringIssues.length ? longitudinalAnalysis.recurringIssues.map((issue) => 
+  `- ${issue.issue} (${issue.occurrences}x, status: ${issue.severity}, periods: ${issue.periodsCovered.join(', ')})`
+).join('\n') : '- No recurring issues detected'}
+
+PERSISTENT STRENGTHS (consistent positive patterns):
+${longitudinalAnalysis.persistentStrengths.length ? longitudinalAnalysis.persistentStrengths.map((strength) => 
+  `- ${strength.strength} (${strength.occurrences}x, ${strength.consistency}, periods: ${strength.periodsCovered.join(', ')})`
+).join('\n') : '- No persistent strengths detected'}
+
+EVOLUTION TRENDS:
+- Strengths gained: ${longitudinalAnalysis.evolutionTrends.strengthsGained.length ? longitudinalAnalysis.evolutionTrends.strengthsGained.join('; ') : 'none detected'}
+- Weaknesses resolved: ${longitudinalAnalysis.evolutionTrends.weaknessesResolved.length ? longitudinalAnalysis.evolutionTrends.weaknessesResolved.join('; ') : 'none detected'}
+- New challenges: ${longitudinalAnalysis.evolutionTrends.newChallenges.length ? longitudinalAnalysis.evolutionTrends.newChallenges.join('; ') : 'none detected'}
+- Stagnant areas: ${longitudinalAnalysis.evolutionTrends.stagnantAreas.length ? longitudinalAnalysis.evolutionTrends.stagnantAreas.join('; ') : 'none detected'}
+
+Use this long-term view to assess whether current behavior aligns with your evolution trajectory or if you're reverting to old patterns.`
       : '';
 
     const globalSignalsSection = contextSignals.length
@@ -896,6 +1234,7 @@ ${signalLines}`;
     return [
       'You are Pixel reviewing your recent Nostr conversations. Use the full conversation slices, feedback, cross-memory signals, and prior self-reflection insights to evaluate your performance comprehensively.',
       previousReflectionSection,
+      longitudinalSection,
       globalSignalsSection,
       interactionsSection,
       `ANALYZE:
@@ -904,7 +1243,8 @@ ${signalLines}`;
 3. Are you balancing brevity with substance? Note instances of over-verbosity or curt replies.
 4. Call out any repeated phrases, tonal habits, or narrative crutches (good or bad).
 5. Compare against prior self-reflection recommendations: where did you improve or regress?
-6. Surface actionable adjustments for tone, structure, or strategy across future interactions.
+6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
+7. Surface actionable adjustments for tone, structure, or strategy across future interactions.
 
 OUTPUT JSON ONLY:
 {

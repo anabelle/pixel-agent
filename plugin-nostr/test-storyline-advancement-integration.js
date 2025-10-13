@@ -234,7 +234,7 @@ async function runStorylineAdvancementTest() {
   console.log('  ✓ Posts matching watchlist items get +0.5 score bonus');
   console.log('  ✓ Posts relating to emerging threads get +0.4 score bonus');
   console.log('  ✓ Batch preparation prioritizes storyline advancement');
-  console.log('  ✓ Continuity analysis influences candidate selection\\n');
+  console.log('  ✓ Continuity analysis influences candidate selection\n');
 }
 
 // Run the integration test

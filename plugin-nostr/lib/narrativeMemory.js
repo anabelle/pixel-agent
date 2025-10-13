@@ -956,6 +956,64 @@ OUTPUT JSON:
     };
   }
 
+  /**
+   * Check if content advances existing storylines for candidate prioritization
+   * Called during candidate evaluation to boost posts that advance recurring themes
+   * 
+   * @param {string} content - The post content to analyze
+   * @param {Array<string>} topics - Extracted topics from the post
+   * @returns {Object|null} - Storyline advancement metrics or null if no continuity data
+   */
+  checkStorylineAdvancement(content, topics) {
+    // Inline synchronous continuity check (analyzeLoreContinuity is async)
+    const lookbackCount = 5;
+    const recent = this.timelineLore.slice(-lookbackCount);
+    if (recent.length < 2) return null;
+    
+    // Calculate continuity inline
+    const tagFrequency = new Map();
+    recent.forEach(lore => {
+      (lore.tags || []).forEach(tag => {
+        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1);
+      });
+    });
+    const recurringThemes = Array.from(tagFrequency.entries())
+      .filter(([_, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag]) => tag);
+    
+    const watchlistItems = recent.slice(0, -1).flatMap(l => l.watchlist || []);
+    
+    const earlierTags = new Set(recent.slice(0, -1).flatMap(l => l.tags || []));
+    const latestTagsArray = recent.slice(-1)[0]?.tags || [];
+    const emergingThreads = latestTagsArray.filter(t => !earlierTags.has(t));
+    
+    const contentLower = content.toLowerCase();
+    const topicsLower = (topics || []).map(t => String(t).toLowerCase());
+    
+    // Check if content advances recurring themes
+    const advancesThemes = recurringThemes.some(theme =>
+      contentLower.includes(theme.toLowerCase()) ||
+      topicsLower.some(topic => topic.includes(theme.toLowerCase()))
+    );
+    
+    // Check if content relates to watchlist items
+    const watchlistHits = watchlistItems.filter(item =>
+      contentLower.includes(item.toLowerCase())
+    );
+    
+    // Check if content relates to emerging threads
+    const isEmergingThread = emergingThreads.some(thread =>
+      topicsLower.some(topic => topic.includes(thread.toLowerCase()))
+    );
+    
+    return {
+      advancesRecurringTheme: advancesThemes,
+      watchlistMatches: watchlistHits,
+      isEmergingThread: isEmergingThread
+    };
+  }
+
   _buildContinuitySummary(data) {
     const parts = [];
     

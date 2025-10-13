@@ -6390,6 +6390,9 @@ CONTENT:
       const { generateWithModelOrFallback } = require('./generation');
       const type = this._getSmallModelType();
 
+      // Get recent digest context to avoid repetition
+      const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(3) || [];
+      
       // Take most recent posts that fit in prompt (prioritize recency)
       const maxPostsInPrompt = Math.min(this.timelineLoreMaxPostsInPrompt, batch.length);
       const recentBatch = batch.slice(-maxPostsInPrompt);
@@ -6429,7 +6432,12 @@ CONTENT:
         );
       }
 
-      const prompt = `Summarize what these Nostr posts discuss. Focus on specific developments.
+      // Build context section if recent digests exist
+      const contextSection = recentContext.length ? 
+        `\nRECENT COVERAGE (avoid repeating these topics):\n${recentContext.map(c => 
+          `- ${c.headline} (${c.tags.join(', ')})`).join('\n')}\n` : '';
+
+      const prompt = `${contextSection}Analyze these NEW posts. Focus on developments NOT covered in recent summaries above.
 
 EXTRACT:
 ✅ Specific people, places, events, projects, concrete developments

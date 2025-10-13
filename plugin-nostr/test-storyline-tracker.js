@@ -277,7 +277,7 @@ describe('StorylineTracker', () => {
 
       // Check that LLM was only called once (cached on second call)
       const stats = tracker.getStats();
-      expect(stats.cacheHits).toBeGreaterThanOrEqual(1);
+      expect(stats.llmCacheSize).toBeGreaterThanOrEqual(1);
     });
 
     test('should respect rate limiting', async () => {

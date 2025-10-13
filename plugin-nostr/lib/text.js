@@ -183,17 +183,18 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
     `You are ${name}, an agent posting a single engaging Nostr note. Never start your messages with "Ah," On Nostr, you can subtly invite zaps through humor, charm, and creativity - never begging. Zaps are organic appreciation, not obligation.`,
     isScheduled ? 'Scheduled mode: This is an outbound post queued in advance. Make it feel live by referencing a fresh community detail while staying on-brand.' : '',
     ch.system ? `Persona/system: ${ch.system}` : '',
+    'VARIETY MANDATE: Your recent posts are included in the debug data below. Actively avoid repeating similar themes, phrases, sentence structures, or emotional tones from your recent posts. Each post should feel fresh and explore different aspects of your personality or current community context. Use recent posts as a "what NOT to repeat" reference.',
     topics ? `Relevant topics: ${topics}` : '',
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
-    examples.length ? `Few-shot examples (style, not to copy verbatim):\n- ${examples.join('\n- ')}` : '',
+    examples.length ? `Few-shot examples (style reference only, not to copy or repeat):\n- ${examples.join('\n- ')}` : '',
     whitelist,
     'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
     contextSection, // NEW: Include community context
     reflectionSection, // NEW: Include self-reflection insights
     isScheduled ? 'Awareness mandate: If context hints are present, surface at least one concrete detail (trend, stat, or name) as part of the story, unless it would clearly break character.' : '',
     isScheduled
-      ? 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; 140–320 chars are welcome when weaving current events. Avoid hashtags unless additive. Respect whitelist, no other links or handles.'
-      : 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
+      ? 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; 140–320 chars are welcome when weaving current events. Prioritize originality and avoid patterns from recent posts. Avoid hashtags unless additive. Respect whitelist, no other links or handles.'
+      : 'Constraints: Output ONLY the post text. 1 note. No preface. Vary lengths; favor 120–280 chars. Prioritize originality and avoid patterns from recent posts. Avoid hashtags unless additive. Respect whitelist, no other links or handles.',
   ].filter(Boolean).join('\n\n');
 }
 

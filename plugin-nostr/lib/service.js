@@ -2327,7 +2327,7 @@ Response (YES/NO):`;
         permanent: permanentForDump,
         topics: topicsSummary,  // Keep at end to avoid log truncation
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
+      const debugHeader = `\n\n---\nCONTEXT & ANTI-REPETITION DATA (use actively in your response):\n- Reference trends, stats, and community signals naturally\n- Use recentAgentPosts to avoid repeating themes, structures, or tones from your recent posts\n- Use recentHomeFeed and topics for fresh community context\n- Be creative and explore different aspects of your personality`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}
@@ -2826,7 +2826,7 @@ Response (YES/NO):`;
         permanent: permanentForAwDump,
         topics: topicsSummary,  // Keep at end to avoid log truncation
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
+      const debugHeader = `\n\n---\nCONTEXT & ANTI-REPETITION DATA (use actively in your response):\n- Reference trends, stats, and community signals naturally\n- Use recentAgentPosts to avoid repeating themes, structures, or tones from your recent posts\n- Use recentHomeFeed and topics for fresh community context\n- Be creative and explore different aspects of your personality`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}
@@ -2996,7 +2996,7 @@ Response (YES/NO):`;
           permanent: permanentMemories,
           topics: topicsSummary,  // Keep at end to avoid log truncation
         };
-        const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
+        const debugHeader = `\n\n---\nCONTEXT & ANTI-REPETITION DATA (use actively in your response):\n- Reference trends, stats, and community signals naturally\n- Use recentAgentPosts to avoid repeating themes, structures, or tones from your recent posts\n- Use recentHomeFeed and topics for fresh community context\n- Be creative and explore different aspects of your personality`;
         const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
         const fullPrompt = `${prompt}${debugHeader}${debugBody}`;
 
@@ -3657,7 +3657,7 @@ Response (YES/NO):`;
         },
         topics: topicsSummary,  // Moved to end to avoid log truncation
       };
-      const debugHeader = `\n\n---\nDEBUG MEMORY DUMP (include fully; do not quote verbatim, use this data actively in your response - reference trends, stats, and community signals naturally):`;
+      const debugHeader = `\n\n---\nCONTEXT & ANTI-REPETITION DATA (use actively in your response):\n- Reference trends, stats, and community signals naturally\n- Use recentAgentPosts to avoid repeating themes, structures, or tones from your recent posts\n- Use recentHomeFeed and topics for fresh community context\n- Be creative and explore different aspects of your personality`;
       const debugBody = `\n${JSON.stringify(debugDump, null, 2)}`;
       prompt = `${prompt}${debugHeader}${debugBody}`;
     } catch {}

@@ -25,7 +25,7 @@ async function runStorylineAdvancementTest() {
   
   const nm = new NarrativeMemory(null, noopLogger);
   
-  console.log('📋 Scenario: Building a storyline about Lightning Network development\\n');
+  console.log('📋 Scenario: Building a storyline about Lightning Network development\n');
   
   // Phase 1: Build storyline with recurring themes
   console.log('Phase 1: Creating recurring storyline across 3 digests...');

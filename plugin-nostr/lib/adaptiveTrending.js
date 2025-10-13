@@ -31,12 +31,26 @@ class AdaptiveTrending {
 
   recordTopicMention(topic, evt) {
     if (!topic) return;
-    const nowTs = evt?.created_at ? (typeof evt.created_at === 'number' ? evt.created_at * 1000 : evt.created_at) : Date.now();
+    // created_at may be seconds or milliseconds; detect by magnitude
+    const c = evt?.created_at;
+    let nowTs;
+    if (typeof c === 'number') {
+      nowTs = c < 1e12 ? c * 1000 : c;
+    } else if (typeof c === 'string') {
+      const n = Number(c);
+      nowTs = Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : Date.now();
+    } else {
+      nowTs = Date.now();
+    }
     const author = evt?.pubkey || 'unknown';
     const keywords = extractKeywords(evt?.content || '');
     if (!this.topicHistory.has(topic)) this.topicHistory.set(topic, []);
     const arr = this.topicHistory.get(topic);
     arr.push({ ts: nowTs, author, keywords });
+    // Maintain ascending order if an older event arrives late
+    if (arr.length >= 2 && arr[arr.length - 2].ts > arr[arr.length - 1].ts) {
+      arr.sort((a, b) => a.ts - b.ts);
+    }
     // Trim very old
     const cutoff = nowTs - this.maxHistoryMs;
     while (arr.length && arr[0].ts < cutoff) arr.shift();
@@ -139,7 +153,8 @@ class AdaptiveTrending {
       const { score, velocity, novelty, development } = this._calculateTrendScore(topic, history, now);
       if (score > this.minScoreThreshold) {
         // Intensity is a normalized mapping of score; cap for readability
-        const intensity = clamp((score - this.minScoreThreshold) / (2.5 - this.minScoreThreshold), 0, 1);
+        const denom = Math.max(2.5 - this.minScoreThreshold, 1e-6);
+        const intensity = clamp((score - this.minScoreThreshold) / denom, 0, 1);
         trending.push({ topic, score, velocity, novelty, development, intensity });
       }
     }

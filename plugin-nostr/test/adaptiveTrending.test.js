@@ -1,4 +1,4 @@
-const { describe, it, expect, beforeEach, vi } = globalThis;
+const { describe, it, expect, beforeEach, vi } = require('vitest');
 const { AdaptiveTrending } = require('../lib/adaptiveTrending');
 
 function makeEvt(content, pubkey, tsSec) {
@@ -15,8 +15,9 @@ describe('AdaptiveTrending', () => {
   it('does not mark always-discussed topics without development as trending', () => {
     const at = new AdaptiveTrending({ minScoreThreshold: 1.2 });
     const topic = 'bitcoin';
-    // Simulate steady baseline: 1 mention every 20 minutes for 24h
-    for (let h = 24 * 3; h >= 1; h--) {
+    // Simulate steady baseline: 1 mention every 20 minutes for BASELINE_HOURS
+    const BASELINE_HOURS = 72; // 3 days
+    for (let h = BASELINE_HOURS; h >= 1; h--) {
       const t = now - h * 20 * 60 * 1000;
       at.recordTopicMention(topic, makeEvt('bitcoin', 'u1', Math.floor(t / 1000)));
     }

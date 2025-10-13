@@ -6686,7 +6686,7 @@ EXTRACT SPECIFICS:
 IF POSTS MENTION AGENT/BOT:
 - Treat as regular topic, focus on other content
 
-OUTPUT REQUIREMENTS (JSON):
+OUTPUT MANDATORY REQUIREMENTS (JSON IS THE ONLY VALID RESPONSE):
 {
   "headline": "What PROGRESSED or EMERGED (<=18 words, not just 'X was discussed')",
   "narrative": "Focus on CHANGE, EVOLUTION, or NEW DEVELOPMENTS (3-5 sentences)",
@@ -6701,7 +6701,7 @@ OUTPUT REQUIREMENTS (JSON):
 Tags from post metadata: ${rankedTags.join(', ') || 'none'}
 
 POSTS TO ANALYZE (${recentBatch.length} posts):
-${postLines}`;
+${postLines} /// (REMEMBER TO OUTPUT JSON ONLY)`;
 
       const raw = await generateWithModelOrFallback(
         this.runtime,

@@ -47,6 +47,13 @@ class NarrativeMemory {
 
     this._systemContext = null;
     this._systemContextPromise = null;
+
+    // Adaptive Storyline Tracking (Phase 2)
+    this.adaptiveStorylinesEnabled = String(runtime?.getSetting?.('ADAPTIVE_STORYLINES') ?? 'false').toLowerCase() === 'true';
+    if (this.adaptiveStorylinesEnabled) {
+      const { StorylineTracker } = require('./storylineTracker');
+      this.storylineTracker = new StorylineTracker(runtime, logger);
+    }
   }
 
   async _getSystemContext() {
@@ -149,6 +156,23 @@ class NarrativeMemory {
       timestamp: entry.timestamp || Date.now(),
       type: 'timeline'
     };
+
+    // PHASE 2: Add storyline context if available
+    if (this.adaptiveStorylinesEnabled && entry.tags && Array.isArray(entry.tags)) {
+      const storylineContexts = [];
+      for (const tag of entry.tags) {
+        const context = this.getStorylineContext(tag);
+        if (context) {
+          storylineContexts.push({
+            topic: tag,
+            ...context
+          });
+        }
+      }
+      if (storylineContexts.length > 0) {
+        record.storylineContext = storylineContexts;
+      }
+    }
 
     this.timelineLore.push(record);
     if (this.timelineLore.length > this.maxTimelineLoreCache) {
@@ -926,7 +950,7 @@ OUTPUT JSON:
   }
 
   getStats() {
-    return {
+    const baseStats = {
       hourlyNarratives: this.hourlyNarratives.length,
       dailyNarratives: this.dailyNarratives.length,
       weeklyNarratives: this.weeklyNarratives.length,
@@ -942,6 +966,23 @@ OUTPUT JSON:
         ? new Date(this.dailyNarratives[this.dailyNarratives.length - 1].timestamp).toISOString().split('T')[0]
         : null
     };
+
+    // Add storyline stats if enabled
+    if (this.adaptiveStorylinesEnabled && this.storylineTracker) {
+      const storylineStats = this.storylineTracker.getStats();
+      baseStats.adaptiveStorylines = {
+        enabled: true,
+        activeStorylines: storylineStats.activeStorylines,
+        topicModels: storylineStats.topicModels,
+        llmCacheSize: storylineStats.llmCacheSize,
+        llmCallsThisHour: storylineStats.llmCallsThisHour,
+        totalLearnedPatterns: storylineStats.totalLearnedPatterns
+      };
+    } else {
+      baseStats.adaptiveStorylines = { enabled: false };
+    }
+
+    return baseStats;
   }
 
   /**
@@ -1358,61 +1399,108 @@ OUTPUT JSON:
   }
 
   /**
-   * Remove expired watchlist items (24h timeout)
+   * PHASE 2: Analyze post for storyline progression (adaptive storylines)
+   * @param {string} content - Post content
+   * @param {Array<string>} topics - Extracted topics
+   * @param {number} timestamp - Post timestamp
+   * @param {Object} meta - Additional metadata
+   * @returns {Array} Storyline events
    */
-  _pruneExpiredWatchlist() {
-    const now = Date.now();
-    const expired = [];
-    
-    for (const [item, metadata] of this.activeWatchlist.entries()) {
-      if (now - metadata.addedAt > this.watchlistExpiryMs) {
-        expired.push(item);
-        this.activeWatchlist.delete(item);
-      }
+  async analyzePostForStoryline(content, topics, timestamp = Date.now(), meta = {}) {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return [];
     }
-    
-    if (expired.length) {
-      this.logger?.debug?.(`[WATCHLIST] Pruned ${expired.length} expired items`);
+
+    try {
+      return await this.storylineTracker.analyzePost(content, topics, timestamp, meta);
+    } catch (err) {
+      this.logger.debug('[NARRATIVE-MEMORY] Storyline analysis failed:', err?.message || err);
+      return [];
     }
-    
-    return expired.length;
   }
 
   /**
-   * Topic cluster APIs for evolution tracking
+   * PHASE 2: Get storyline context for a topic
+   * @param {string} topic - Topic to get context for
+   * @returns {Object|null} Storyline context or null
    */
-  getTopicCluster(topic) {
-    const key = String(topic || '').toLowerCase();
-    const existing = this.topicClusters.get(key);
-    if (existing) return existing;
-    const cluster = { subtopics: new Set(), timeline: [], currentPhase: null };
-    this.topicClusters.set(key, cluster);
-    return cluster;
+  getStorylineContext(topic) {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return null;
+    }
+
+    // Find active storylines for this topic
+    const topicKey = String(topic || '').toLowerCase().trim();
+    const storylines = Array.from(this.storylineTracker.activeStorylines.values())
+      .filter(s => s.topic === topicKey)
+      .sort((a, b) => b.lastUpdated - a.lastUpdated);
+
+    if (storylines.length === 0) return null;
+
+    const primary = storylines[0];
+    return {
+      storylineId: primary.id,
+      currentPhase: primary.currentPhase,
+      confidence: primary.confidence,
+      historyLength: primary.history.length,
+      lastUpdated: primary.lastUpdated,
+      progression: primary.history.slice(-3).map(h => ({
+        phase: h.phase,
+        timestamp: h.timestamp,
+        confidence: h.confidence
+      }))
+    };
   }
 
-  recordTopicAngle(topic, subtopic, snippet, timestamp = Date.now()) {
-    const key = String(topic || '').toLowerCase();
-    // Normalize subtopic to kebab-case for consistency
-    const label = String(subtopic || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9\s\-]/g, ' ')
-      .trim()
-      .replace(/\s+/g, '-')
-      .slice(0, 30);
-    if (!key || !label) return;
-    const cluster = this.getTopicCluster(key);
-    cluster.subtopics.add(label);
-    cluster.timeline.push({ subtopic: label, timestamp, snippet });
-    // Trim timeline to last N entries per topic to bound memory
-    if (cluster.timeline.length > this.maxTopicClusterEntries) {
-      cluster.timeline.splice(0, cluster.timeline.length - this.maxTopicClusterEntries);
+  /**
+   * PHASE 2: Get all active storylines
+   * @returns {Array} Active storylines summary
+   */
+  getActiveStorylines() {
+    if (!this.adaptiveStorylinesEnabled || !this.storylineTracker) {
+      return [];
+    }
+
+    return Array.from(this.storylineTracker.activeStorylines.values()).map(s => ({
+      id: s.id,
+      topic: s.topic,
+      currentPhase: s.currentPhase,
+      confidence: s.confidence,
+      historyLength: s.history.length,
+      lastUpdated: s.lastUpdated
+    }));
+  }
+
+  /**
+   * PHASE 2: Refresh storyline models (periodic maintenance)
+   */
+  refreshStorylineModels() {
+    if (this.adaptiveStorylinesEnabled && this.storylineTracker) {
+      this.storylineTracker.refreshModels();
     }
   }
 
-  setTopicPhase(topic, phase) {
-    const key = String(topic || '').toLowerCase();
-    const cluster = this.getTopicCluster(key);
-    cluster.currentPhase = phase || 'general';
+  /**
+   * Prune expired watchlist items
+   * @private
+   */
+  _pruneExpiredWatchlist() {
+    const now = Date.now();
+    const toRemove = [];
+
+    for (const [item, metadata] of this.activeWatchlist.entries()) {
+      if (now - metadata.addedAt > this.watchlistExpiryMs) {
+        toRemove.push(item);
+      }
+    }
+
+    for (const item of toRemove) {
+      this.activeWatchlist.delete(item);
+    }
+
+    if (toRemove.length > 0) {
+      this.logger?.debug?.(`[WATCHLIST] Pruned ${toRemove.length} expired items`);
+    }
   }
 }
 

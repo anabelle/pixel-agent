@@ -60,9 +60,9 @@ describe('NarrativeMemory recent digest context', () => {
     expect(summaries[0]).toHaveProperty('priority');
     expect(summaries[0]).toHaveProperty('timestamp');
     
-    // Verify it doesn't include full narrative/insights (compact summary)
-    expect(summaries[0]).not.toHaveProperty('narrative');
-    expect(summaries[0]).not.toHaveProperty('insights');
+    // Verify it includes narrative context (updated for storyline integration)
+    expect(summaries[0]).toHaveProperty('narrative');
+    expect(summaries[0]).toHaveProperty('insights');
   });
 
   it('limits returned summaries to lookback count', async () => {
@@ -139,6 +139,6 @@ describe('NarrativeMemory recent digest context', () => {
     expect(summary.tags).toEqual(['tag1', 'tag2']);
     expect(summary.priority).toBe('high');
     expect(summary.timestamp).toBeGreaterThanOrEqual(now);
-    expect(Object.keys(summary).length).toBe(4); // Only 4 fields
+    expect(Object.keys(summary).length).toBe(8); // Updated: now includes storyline fields
   });
 });

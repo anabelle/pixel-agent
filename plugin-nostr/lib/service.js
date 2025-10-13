@@ -432,8 +432,8 @@ class NostrService {
     // Centralized posting queue for natural rate limiting
     const { PostingQueue } = require('./postingQueue');
     this.postingQueue = new PostingQueue({
-      minDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MIN_DELAY_BETWEEN_POSTS_MS') ?? '15000'), // 15s default
-      maxDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MAX_DELAY_BETWEEN_POSTS_MS') ?? '120000'), // 2min default
+      minDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MIN_DELAY_BETWEEN_POSTS_MS') ?? '900000'), // 15min default
+      maxDelayBetweenPosts: Number(runtime.getSetting('NOSTR_MAX_DELAY_BETWEEN_POSTS_MS') ?? '1800000'), // 30min default
       mentionPriorityBoost: Number(runtime.getSetting('NOSTR_MENTION_PRIORITY_BOOST_MS') ?? '5000'), // 5s faster for mentions
     });
     this.logger.info(`[NOSTR] Posting queue initialized: minDelay=${this.postingQueue.minDelayBetweenPosts}ms, maxDelay=${this.postingQueue.maxDelayBetweenPosts}ms`);

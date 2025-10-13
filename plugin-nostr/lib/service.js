@@ -4563,6 +4563,14 @@ Response (YES/NO):`;
             restored++;
           }
         }
+        // Legacy path: replies recorded without top-level inReplyTo; event id lives in content.data.eventId
+        if (memory.content?.source === 'nostr' && memory.content?.data?.eventId) {
+          const legacyEventId = memory.content.data.eventId;
+          if (legacyEventId && !this.handledEventIds.has(legacyEventId)) {
+            this.handledEventIds.add(legacyEventId);
+            restored++;
+          }
+        }
         // Also check if the memory ID contains the event ID (fallback)
         if (memory.id && memory.id.includes(':')) {
           const parts = memory.id.split(':');

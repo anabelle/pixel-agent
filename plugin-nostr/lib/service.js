@@ -6151,6 +6151,38 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       score += noveltyAdjustment;
     }
 
+    // Phase 5: Check storyline advancement (continuity analysis integration)
+    let storylineAdvancement = null;
+    try {
+      if (this.narrativeMemory?.checkStorylineAdvancement) {
+        storylineAdvancement = this.narrativeMemory.checkStorylineAdvancement(
+          normalizedContent, topics
+        );
+        if (storylineAdvancement) {
+          if (storylineAdvancement.advancesRecurringTheme) {
+            score += 0.3;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} advances recurring theme (+0.3)`
+            );
+          }
+          if (storylineAdvancement.watchlistMatches.length) {
+            score += 0.5;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} matches watchlist items: ${storylineAdvancement.watchlistMatches.join(', ')} (+0.5)`
+            );
+          }
+          if (storylineAdvancement.isEmergingThread) {
+            score += 0.4;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} relates to emerging thread (+0.4)`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Storyline advancement check failed:', err?.message);
+    }
+
     if (score < 1 && authorScore < 0.4) {
       return null;
     }
@@ -6170,12 +6202,27 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
     if (overexposedTopics.length > 0) {
       signals.push(`overexposed: ${overexposedTopics.slice(0, 2).join(', ')}`);
     }
+    // Add storyline advancement signals
+    if (storylineAdvancement) {
+      if (storylineAdvancement.advancesRecurringTheme) {
+        signals.push('advances recurring storyline');
+      }
+      if (storylineAdvancement.watchlistMatches.length > 0) {
+        signals.push(`continuity: ${storylineAdvancement.watchlistMatches.slice(0, 2).join(', ')}`);
+      }
+      if (storylineAdvancement.isEmergingThread) {
+        signals.push('emerging thread');
+      }
+    }
 
     const reasonParts = [];
     if (wordCount >= 40) reasonParts.push('long-form');
     if (trendingMatches.length) reasonParts.push('touches active themes');
     if (authorScore >= 0.7) reasonParts.push('trusted author');
     if (watchlistMatch) reasonParts.push(`predicted storyline (${watchlistMatch.matches.length} match${watchlistMatch.matches.length > 1 ? 'es' : ''})`);
+    if (storylineAdvancement && (storylineAdvancement.advancesRecurringTheme || storylineAdvancement.isEmergingThread)) {
+      reasonParts.push('advances storyline continuity');
+    }
     if (signals.length) reasonParts.push(signals.join('; '));
 
     return {
@@ -6186,6 +6233,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       topics,
       trendingMatches,
       watchlistMatches: watchlistMatch?.matches || [],
+      storylineAdvancement: storylineAdvancement || null,
       authorScore: Number(authorScore.toFixed(2)),
       signals,
       summary: null,
@@ -6337,13 +6385,55 @@ CONTENT:
       if (!unique.has(item.id)) unique.set(item.id, item);
     }
     const items = Array.from(unique.values());
+    
+    // Enhanced sorting: prioritize storyline advancement while maintaining temporal order
     items.sort((a, b) => {
+      // Calculate storyline priority boost
+      const aStorylineBoost = this._getStorylineBoost(a);
+      const bStorylineBoost = this._getStorylineBoost(b);
+      
+      // If one item has significantly better storyline advancement, prioritize it
+      const storylineDiff = bStorylineBoost - aStorylineBoost;
+      if (Math.abs(storylineDiff) >= 0.5) {
+        return storylineDiff; // Sort by storyline boost (descending)
+      }
+      
+      // Otherwise maintain temporal order
       const aTs = a.created_at ? a.created_at * 1000 : a.bufferedAt;
       const bTs = b.created_at ? b.created_at * 1000 : b.bufferedAt;
       return aTs - bTs;
     });
+    
     const maxItems = Math.max(3, limit);
     return items.slice(-maxItems);
+  }
+
+  /**
+   * Calculate storyline advancement boost for batch prioritization
+   * @private
+   */
+  _getStorylineBoost(item) {
+    if (!item || !item.metadata) return 0;
+    
+    const metadata = item.metadata;
+    let boost = 0;
+    
+    // Check for storyline advancement signals in metadata
+    if (metadata.signals && Array.isArray(metadata.signals)) {
+      const signals = metadata.signals.map(s => String(s).toLowerCase());
+      
+      if (signals.some(s => s.includes('advances recurring storyline'))) {
+        boost += 0.3;
+      }
+      if (signals.some(s => s.includes('continuity:'))) {
+        boost += 0.5;
+      }
+      if (signals.some(s => s.includes('emerging thread'))) {
+        boost += 0.4;
+      }
+    }
+    
+    return boost;
   }
 
   async _processTimelineLoreBuffer(force = false) {

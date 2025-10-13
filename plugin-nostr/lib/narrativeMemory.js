@@ -956,6 +956,44 @@ OUTPUT JSON:
     };
   }
 
+  /**
+   * Check if content advances existing storylines for candidate prioritization
+   * Called during candidate evaluation to boost posts that advance recurring themes
+   * 
+   * @param {string} content - The post content to analyze
+   * @param {Array<string>} topics - Extracted topics from the post
+   * @returns {Object|null} - Storyline advancement metrics or null if no continuity data
+   */
+  checkStorylineAdvancement(content, topics) {
+    const continuity = this.analyzeLoreContinuity(5);
+    if (!continuity) return null;
+    
+    const contentLower = content.toLowerCase();
+    const topicsLower = (topics || []).map(t => String(t).toLowerCase());
+    
+    // Check if content advances recurring themes
+    const advancesThemes = continuity.recurringThemes.some(theme =>
+      contentLower.includes(theme.toLowerCase()) ||
+      topicsLower.some(topic => topic.includes(theme.toLowerCase()))
+    );
+    
+    // Check if content relates to watchlist items
+    const watchlistHits = continuity.watchlistFollowUp.filter(item =>
+      contentLower.includes(item.toLowerCase())
+    );
+    
+    // Check if content relates to emerging threads
+    const isEmergingThread = continuity.emergingThreads.some(thread =>
+      topicsLower.some(topic => topic.includes(thread.toLowerCase()))
+    );
+    
+    return {
+      advancesRecurringTheme: advancesThemes,
+      watchlistMatches: watchlistHits,
+      isEmergingThread: isEmergingThread
+    };
+  }
+
   _buildContinuitySummary(data) {
     const parts = [];
     

@@ -6257,7 +6257,9 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       };
       
       // Get recent narrative context for evolution awareness
-      const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(3) || [];
+      const recentContext = (this.narrativeMemory && typeof this.narrativeMemory.getRecentDigestSummaries === 'function')
+        ? this.narrativeMemory.getRecentDigestSummaries(3)
+        : [];
       const contextSection = recentContext.length ? 
         `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c => 
           `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`

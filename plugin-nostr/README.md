@@ -192,6 +192,20 @@ Testing:
 - `test-memory.js` ,  Memory creation and persistence validation
 - `test-eliza-integration.js` ,  ElizaOS memory compatibility and query patterns
 
+## Testing
+
+Run tests from the plugin directory (not the monorepo root):
+
+```powershell
+cd .\plugin-nostr
+npm run test
+```
+
+Optional:
+
+- Watch mode (interactive): `npx vitest -c ./vitest.config.mjs`
+- Coverage: `npx vitest run --coverage -c ./vitest.config.mjs`
+
 Status: ✅ Production ready with comprehensive testing and memory integration
 
 ### Pixel purchase delegation usage

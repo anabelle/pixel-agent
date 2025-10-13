@@ -3,6 +3,11 @@
 // - Tracks per-topic clusters via NarrativeMemory (subtopics, timeline, current phase)
 // - Detects simple phase changes and computes an evolution score
 
+const crypto = require('crypto');
+
+// Max content length included in the subtopic labeling prompt
+const MAX_CONTENT_FOR_PROMPT = 300;
+
 class TopicEvolution {
   constructor(runtime, logger, options = {}) {
     this.runtime = runtime;
@@ -39,8 +44,9 @@ class TopicEvolution {
   _cacheKey(topic, content) {
     const t = String(topic || '').toLowerCase();
     const c = String(content || '').toLowerCase().slice(0, 200);
-    let hash = 0; for (let i = 0; i < c.length; i++) { hash = ((hash << 5) - hash) + c.charCodeAt(i); hash |= 0; }
-    return `${t}:${hash.toString(36)}`;
+    // Use a robust hash (sha256 truncated) to minimize cache key collisions
+    const digest = crypto.createHash('sha256').update(c).digest('hex').slice(0, 16);
+    return `${t}:${digest}`;
   }
 
   _getCache(key) {
@@ -72,11 +78,11 @@ class TopicEvolution {
     try {
       if (typeof this.runtime?.useModel === 'function') {
         const hintsStr = hints?.trending?.length ? `\nTrending: ${hints.trending.slice(0, 5).join(', ')}` : '';
-        const prompt = `You label a post's specific angle as a short kebab-case subtopic for the topic "${topic}".
+  const prompt = `You label a post's specific angle as a short kebab-case subtopic for the topic "${topic}".
 Return ONLY one token (<=30 chars). If unclear, return "${this._kebab(topic)}-general".
 Examples: "bitcoin price swings" -> "bitcoin-price", "nostr relay outages" -> "nostr-infrastructure".
 
-Content (<=300 chars): ${String(content || '').slice(0, 300)}${hintsStr}`;
+Content (<=${MAX_CONTENT_FOR_PROMPT} chars): ${String(content || '').slice(0, MAX_CONTENT_FOR_PROMPT)}${hintsStr}`;
         const res = await this.runtime.useModel('TEXT_SMALL', { prompt, maxTokens: 8, temperature: 0.1 });
         const text = typeof res === 'string' ? res : (res?.text ?? '');
         const token = this._kebab(text.split(/\s+/)[0] || text);

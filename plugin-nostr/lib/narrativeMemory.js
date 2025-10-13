@@ -18,7 +18,16 @@ class NarrativeMemory {
     this.sentimentTrends = new Map(); // date -> {positive, negative, neutral}
     this.engagementTrends = []; // {date, events, users, quality}
   // Topic evolution clusters (subtopics + phase)
-  this.topicClusters = new Map(); // topic -> { subtopics: Set<string>, timeline: Array<{ subtopic: string, timestamp: number, snippet?: string }>, currentPhase: string|null }
+  /**
+   * Maps a topic to its cluster data.
+   * Structure:
+   *   topic => {
+   *     subtopics: Set<string>, // Set of subtopic names
+   *     timeline: Array<{ subtopic: string, timestamp: number, snippet?: string }>, // History of subtopic changes
+   *     currentPhase: string|null // Current phase of the topic, or null
+   *   }
+   */
+  this.topicClusters = new Map();
     
     // Watchlist tracking (Phase 4)
     this.activeWatchlist = new Map(); // item -> {addedAt, source, digestId}
@@ -30,6 +39,9 @@ class NarrativeMemory {
     this.maxWeeklyCache = 52; // 52 weeks
   this.maxMonthlyCache = 24; // 24 months
   this.maxTimelineLoreCache = 120; // Recent timeline lore entries
+  // Max entries per topic cluster timeline (bounded memory)
+  const clusterMaxRaw = this.runtime?.getSetting?.('TOPIC_CLUSTER_MAX_ENTRIES') ?? process?.env?.TOPIC_CLUSTER_MAX_ENTRIES;
+  this.maxTopicClusterEntries = Number.isFinite(Number(clusterMaxRaw)) && Number(clusterMaxRaw) > 0 ? Number(clusterMaxRaw) : 500;
     
     this.initialized = false;
 
@@ -174,7 +186,7 @@ class NarrativeMemory {
   /**
    * Get recent digest summaries for context in new lore generation
    * Returns compact summaries of recent digests to avoid repetition
-   * @param {number} lookback - Number of recent digests to return (default: 3)
+  * @param {number} lookback - Number of recent digests to return (default: 3). Undefined => 3, null or <=0 => [], non-finite => 3.
    * @returns {Array} Array of compact digest summaries
    */
   getRecentDigestSummaries(lookback = 3) {
@@ -715,11 +727,15 @@ OUTPUT JSON:
 
     try {
       // Load hourly narratives (last 7 days)
-      const hourlyMems = await this.runtime.getMemories({
-        tableName: 'messages',
-        count: this.maxHourlyCache,
-        // Filter by content type if your adapter supports it
-      }).catch(() => []);
+      let hourlyMems = [];
+      try {
+        const res = this.runtime.getMemories({
+          tableName: 'messages',
+          count: this.maxHourlyCache,
+          // Filter by content type if your adapter supports it
+        });
+        hourlyMems = await Promise.resolve(res);
+      } catch { hourlyMems = []; }
       
       for (const mem of hourlyMems) {
         if (mem.content?.type === 'narrative_hourly' && mem.content?.data) {
@@ -734,10 +750,14 @@ OUTPUT JSON:
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
 
       // Load daily narratives (last 90 days)
-      const dailyMems = await this.runtime.getMemories({
-        tableName: 'messages',
-        count: this.maxDailyCache,
-      }).catch(() => []);
+      let dailyMems = [];
+      try {
+        const resDaily = this.runtime.getMemories({
+          tableName: 'messages',
+          count: this.maxDailyCache,
+        });
+        dailyMems = await Promise.resolve(resDaily);
+      } catch { dailyMems = []; }
       
       for (const mem of dailyMems) {
         if (mem.content?.type === 'narrative_daily' && mem.content?.data) {
@@ -752,10 +772,14 @@ OUTPUT JSON:
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
 
       // Load weekly narratives
-      const weeklyMems = await this.runtime.getMemories({
-        tableName: 'messages',
-        count: this.maxWeeklyCache,
-      }).catch(() => []);
+      let weeklyMems = [];
+      try {
+        const resWeekly = this.runtime.getMemories({
+          tableName: 'messages',
+          count: this.maxWeeklyCache,
+        });
+        weeklyMems = await Promise.resolve(resWeekly);
+      } catch { weeklyMems = []; }
       
       for (const mem of weeklyMems) {
         if (mem.content?.type === 'narrative_weekly' && mem.content?.data) {
@@ -770,10 +794,14 @@ OUTPUT JSON:
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
       // Load timeline lore entries
-      const timelineMems = await this.runtime.getMemories({
-        tableName: 'messages',
-        count: this.maxTimelineLoreCache,
-      }).catch(() => []);
+      let timelineMems = [];
+      try {
+        const resTimeline = this.runtime.getMemories({
+          tableName: 'messages',
+          count: this.maxTimelineLoreCache,
+        });
+        timelineMems = await Promise.resolve(resTimeline);
+      } catch { timelineMems = []; }
 
       for (const mem of timelineMems) {
         if (mem.content?.type === 'narrative_timeline' && mem.content?.data) {
@@ -1351,13 +1379,21 @@ OUTPUT JSON:
 
   recordTopicAngle(topic, subtopic, snippet, timestamp = Date.now()) {
     const key = String(topic || '').toLowerCase();
-    const label = String(subtopic || '').toLowerCase();
+    // Normalize subtopic to kebab-case for consistency
+    const label = String(subtopic || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s\-]/g, ' ')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 30);
     if (!key || !label) return;
     const cluster = this.getTopicCluster(key);
     cluster.subtopics.add(label);
     cluster.timeline.push({ subtopic: label, timestamp, snippet });
-    // Trim timeline to last 500 entries per topic to bound memory
-    if (cluster.timeline.length > 500) cluster.timeline.splice(0, cluster.timeline.length - 500);
+    // Trim timeline to last N entries per topic to bound memory
+    if (cluster.timeline.length > this.maxTopicClusterEntries) {
+      cluster.timeline.splice(0, cluster.timeline.length - this.maxTopicClusterEntries);
+    }
   }
 
   setTopicPhase(topic, phase) {

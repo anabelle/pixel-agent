@@ -1,17 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Load modules under test
-import path from 'path';
-import fs from 'fs';
-
-const topicEvolutionPath = path.resolve(__dirname, '../lib/topicEvolution.js');
-const narrativeMemoryPath = path.resolve(__dirname, '../lib/narrativeMemory.js');
-
-// Dynamic require to avoid TypeScript types
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { TopicEvolution } = require(topicEvolutionPath);
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { NarrativeMemory } = require(narrativeMemoryPath);
+import { TopicEvolution } from '../lib/topicEvolution.js';
+import { NarrativeMemory } from '../lib/narrativeMemory.js';
 
 function makeRuntime(overrides = {}) {
   const settings = new Map(Object.entries(overrides.settings || {}));

@@ -149,20 +149,33 @@ class NarrativeContextProvider {
       }
     }
 
-    // Topic evolution
+    // Topic evolution (skip if neutral/stable overall)
     if (context.topicEvolution) {
       const { topic, trend, dataPoints, currentPhase, topSubtopics } = context.topicEvolution;
-      if (trend && trend !== 'stable') {
-        const recentMentions = dataPoints.slice(-3).map(d => d.mentions).join('→');
-        parts.push(`${topic.toUpperCase()}: ${trend} (${recentMentions})`);
-      }
-      // Surface phase and top subtopics when available
-      if (currentPhase && currentPhase !== 'general') {
-        parts.push(`PHASE: ${currentPhase}`);
-      }
-      if (Array.isArray(topSubtopics) && topSubtopics.length > 0) {
-        const angles = topSubtopics.slice(0, 3).map(s => s.subtopic).join(', ');
-        if (angles) parts.push(`ANGLES: ${angles}`);
+      const isNeutralPhase = !currentPhase || currentPhase === 'general';
+      const isStableTrend = !trend || trend === 'stable';
+      const hasAngles = Array.isArray(topSubtopics) && topSubtopics.length > 0;
+      if (!(isNeutralPhase && isStableTrend && !hasAngles)) {
+        if (!isStableTrend) {
+          const recentMentions = dataPoints.slice(-3).map(d => d.mentions).join('→');
+          parts.push(`${topic.toUpperCase()}: ${trend} (${recentMentions})`);
+        }
+        if (!isNeutralPhase) {
+          parts.push(`PHASE: ${currentPhase}`);
+        }
+        if (hasAngles) {
+          const angles = topSubtopics
+            .slice(0, 3)
+            .map(s => String(s.subtopic || '')
+              .toLowerCase()
+              .replace(/[^a-z0-9\s\-]/g, ' ')
+              .trim()
+              .replace(/\s+/g, '-')
+              .slice(0, 30))
+            .filter(Boolean)
+            .join(', ');
+          if (angles) parts.push(`ANGLES: ${angles}`);
+        }
       }
     }
 

@@ -6315,8 +6315,8 @@ CONTENT:
         parsed.accept = parsed.accept !== false;
         parsed.score = heuristics.score;
         // Ensure evolution metadata is present
-        if (!parsed.evolutionType) parsed.evolutionType = null;
-        if (!parsed.noveltyScore) parsed.noveltyScore = 0.5;
+        if (parsed.evolutionType === undefined) parsed.evolutionType = null;
+        if (parsed.noveltyScore === undefined) parsed.noveltyScore = 0.5;
         return parsed;
       }
       return heuristics;

@@ -6255,20 +6255,40 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
         trendingMatches: heuristics.trendingMatches,
         signals: heuristics.signals
       };
-      const prompt = `You triage Nostr posts to decide if they belong in Pixel's \"timeline lore\" digest. The lore captures threads, shifts, or signals that matter to ongoing community narratives.
+      
+      // Get recent narrative context for evolution awareness
+      const recentContext = (this.narrativeMemory && typeof this.narrativeMemory.getRecentDigestSummaries === 'function')
+        ? this.narrativeMemory.getRecentDigestSummaries(3)
+        : [];
+      const contextSection = recentContext.length ? 
+        `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c => 
+          `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
+        ).join('\n')}\n\n` : '';
+      
+      const prompt = `${contextSection}NARRATIVE TRIAGE: This post needs evaluation for timeline lore inclusion.
 
-Consider the content and provided heuristics. ACCEPT only if the post brings:
-- fresh situational awareness (news, crisis, win, decision, actionable info),
-- a strong narrative beat (emotional turn, rallying cry, ongoing saga update), or
-- questions/coordination that require follow-up.
-Reject bland status updates, generic greetings, meme drops without context, or trivial small-talk.
+CONTEXT: You track evolving Bitcoin/Nostr community narratives. Accept only posts that advance, contradict, or introduce new elements to ongoing storylines.
 
-Return STRICT JSON:
+ACCEPT IF POST:
+- Introduces new information/perspective on covered topics
+- Shows progression in ongoing debates or developments
+- Contradicts or challenges previous community consensus
+- Announces concrete events, decisions, or milestones
+- Reveals emerging patterns or shifts in community focus
+
+REJECT IF POST:
+- Restates well-known facts or opinions
+- Generic commentary without new insights
+- Routine social interactions or pleasantries
+
+Return STRICT JSON with evolution-focused analysis:
 {
   "accept": true|false,
-  "summary": "<=32 words capturing the core",
-  "rationale": "<=20 words explaining the decision",
-  "tags": ["topic", ... up to 4],
+  "evolutionType": "progression"|"contradiction"|"emergence"|"milestone"|null,
+  "summary": "What specifically DEVELOPED or CHANGED (<=32 words)",
+  "rationale": "Why this advances the narrative (<=20 words)",
+  "noveltyScore": 0.0-1.0,
+  "tags": ["specific-development", "not-generic-topics", ... up to 4],
   "priority": "high"|"medium"|"low",
   "signals": ["signal", ... up to 4]
 }
@@ -6281,7 +6301,7 @@ CONTENT:
         this.runtime,
         type,
         prompt,
-        { maxTokens: 280, temperature: 0.3 },
+        { maxTokens: 320, temperature: 0.3 },
         (res) => this._extractTextFromModelResult(res),
         (s) => (typeof s === 'string' ? s.trim() : ''),
         () => null
@@ -6294,6 +6314,9 @@ CONTENT:
       if (parsed && typeof parsed === 'object') {
         parsed.accept = parsed.accept !== false;
         parsed.score = heuristics.score;
+        // Ensure evolution metadata is present
+        if (parsed.evolutionType === undefined) parsed.evolutionType = null;
+        if (parsed.noveltyScore === undefined) parsed.noveltyScore = 0.5;
         return parsed;
       }
       return heuristics;
@@ -6560,27 +6583,43 @@ CONTENT:
 
       // Build context section if recent digests exist
       const contextSection = recentContext.length ? 
-        `\nRECENT COVERAGE (avoid repeating these topics):\n${recentContext.map(c => 
-          `- ${c.headline} (${c.tags.join(', ')})`).join('\n')}\n` : '';
+        `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c => 
+          `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
+        ).join('\n')}\n\n` : '';
 
-      const prompt = `${contextSection}Analyze these NEW posts. Focus on developments NOT covered in recent summaries above.
+      const prompt = `${contextSection}ANALYSIS MISSION: You are tracking evolving narratives in the Nostr/Bitcoin community. Focus on DEVELOPMENT and PROGRESSION, not static topics.
 
-EXTRACT:
+PRIORITIZE:
+✅ New developments in ongoing storylines
+✅ Unexpected turns or contradictions to previous themes
+✅ Concrete events, decisions, or announcements
+✅ Community shifts in sentiment or focus
+✅ Technical breakthroughs or setbacks
+✅ Emerging debates or new participants
+
+DEPRIORITIZE:
+❌ Rehashing well-covered topics without new angles
+❌ Generic statements about bitcoin/nostr/freedom
+❌ Repetitive price speculation or technical explanations
+❌ Routine community interactions without significance
+
+EXTRACT SPECIFICS:
 ✅ Specific people, places, events, projects, concrete developments
 ❌ Generic terms: bitcoin, nostr, crypto, blockchain, technology, community, discussion
 
 IF POSTS MENTION AGENT/BOT:
 - Treat as regular topic, focus on other content
 
-OUTPUT JSON:
+OUTPUT REQUIREMENTS (JSON):
 {
-  "headline": "<=18 words about what posts discuss",
-  "narrative": "3-5 sentences describing posts content",
-  "insights": ["pattern from posts", "another pattern", "max 3"],
-  "watchlist": ["trackable item from posts", "another", "max 3"],
-  "tags": ["concrete topic", "another", "max 5"],
+  "headline": "What PROGRESSED or EMERGED (<=18 words, not just 'X was discussed')",
+  "narrative": "Focus on CHANGE, EVOLUTION, or NEW DEVELOPMENTS (3-5 sentences)",
+  "insights": ["Patterns showing MOVEMENT in community thinking/focus", "max 3"],
+  "watchlist": ["Concrete developments to track (not generic topics)", "max 3"],
+  "tags": ["specific-development", "another", "max 5"],
   "priority": "high"|"medium"|"low",
-  "tone": "emotional tenor"
+  "tone": "emotional tenor",
+  "evolutionSignal": "How this relates to ongoing storylines"
 }
 
 Tags from post metadata: ${rankedTags.join(', ') || 'none'}
@@ -6592,7 +6631,7 @@ ${postLines}`;
         this.runtime,
         type,
         prompt,
-        { maxTokens: 420, temperature: 0.45 },
+        { maxTokens: 480, temperature: 0.45 },
         (res) => this._extractTextFromModelResult(res),
         (s) => (typeof s === 'string' ? s.trim() : ''),
         () => null
@@ -6716,6 +6755,7 @@ ${postLines}`;
     const narrativeRaw = this._coerceLoreString(parsed.narrative);
     const priorityRaw = this._coerceLoreString(parsed.priority).toLowerCase();
     const toneRaw = this._coerceLoreString(parsed.tone);
+    const evolutionSignalRaw = this._coerceLoreString(parsed.evolutionSignal);
 
     const digest = {
       headline: this._truncateWords(headlineRaw || '', 18).slice(0, 140) || 'Community pulse update',
@@ -6724,7 +6764,8 @@ ${postLines}`;
       watchlist: this._coerceLoreStringArray(parsed.watchlist, 4).map((item) => item.slice(0, 180)),
       tags: this._coerceLoreStringArray(parsed.tags, 5).map((item) => item.slice(0, 40)),
       priority: ['high', 'medium', 'low'].includes(priorityRaw) ? priorityRaw : 'medium',
-      tone: toneRaw || 'balanced'
+      tone: toneRaw || 'balanced',
+      evolutionSignal: evolutionSignalRaw || null
     };
 
     if (!digest.tags.length && rankedTags.length) {

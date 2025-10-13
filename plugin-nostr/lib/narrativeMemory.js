@@ -17,6 +17,8 @@ class NarrativeMemory {
     this.topicTrends = new Map(); // topic -> {counts: [], timestamps: []}
     this.sentimentTrends = new Map(); // date -> {positive, negative, neutral}
     this.engagementTrends = []; // {date, events, users, quality}
+  // Topic evolution clusters (subtopics + phase)
+  this.topicClusters = new Map(); // topic -> { subtopics: Set<string>, timeline: Array<{ subtopic: string, timestamp: number, snippet?: string }>, currentPhase: string|null }
     
     // Watchlist tracking (Phase 4)
     this.activeWatchlist = new Map(); // item -> {addedAt, source, digestId}
@@ -176,12 +178,18 @@ class NarrativeMemory {
    * @returns {Array} Array of compact digest summaries
    */
   getRecentDigestSummaries(lookback = 3) {
-    if (!Number.isFinite(lookback) || lookback < 0) {
+    // Undefined -> default to 3; null or <=0 -> return empty; non-finite (except undefined) -> default to 3
+    if (lookback === undefined) {
+      lookback = 3;
+    } else if (lookback === null || (Number.isFinite(lookback) && lookback <= 0)) {
+      return [];
+    } else if (!Number.isFinite(lookback)) {
       lookback = 3;
     }
-    
-    // Get the most recent timeline lore entries
-    const recent = this.timelineLore.slice(-lookback);
+
+    // Get the most recent timeline lore entries (guard against -0 => 0 returning full array)
+    const count = Math.max(0, Math.floor(lookback));
+    const recent = count === 0 ? [] : this.timelineLore.slice(-count);
     
     // Return compact summaries with key fields
     return recent.map(entry => ({
@@ -264,11 +272,33 @@ class NarrativeMemory {
       narrative: n.narrative?.summary || n.summary?.summary || ''
     }));
 
+    // Include subtopic distribution and current phase from clusters
+    const key = String(topic || '').toLowerCase();
+    const cluster = this.topicClusters.get(key);
+    const subtopicCounts = new Map();
+    if (cluster && Array.isArray(cluster.timeline)) {
+      const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+      for (const item of cluster.timeline) {
+        if (!item || typeof item.timestamp !== 'number') continue;
+        if (item.timestamp >= cutoff) {
+          const s = String(item.subtopic || '').toLowerCase();
+          subtopicCounts.set(s, (subtopicCounts.get(s) || 0) + 1);
+        }
+      }
+    }
+
+    const subtopics = Array.from(subtopicCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([s, c]) => ({ subtopic: s, count: c }));
+
     return {
       topic,
       dataPoints: evolution,
       trend: this._calculateTrendDirection(evolution.map(e => e.mentions)),
-      summary: this._summarizeEvolution(evolution)
+      summary: this._summarizeEvolution(evolution),
+      currentPhase: cluster?.currentPhase || 'general',
+      topSubtopics: subtopics
     };
   }
 
@@ -862,7 +892,8 @@ OUTPUT JSON:
       monthlyNarratives: this.monthlyNarratives.length,
       timelineLore: this.timelineLore.length,
       trackedTopics: this.topicTrends.size,
-      engagementDataPoints: this.engagementTrends.length,
+  engagementDataPoints: this.engagementTrends.length,
+  topicClusters: this.topicClusters.size,
       oldestNarrative: this.dailyNarratives[0] 
         ? new Date(this.dailyNarratives[0].timestamp).toISOString().split('T')[0]
         : null,
@@ -884,7 +915,9 @@ OUTPUT JSON:
     const tagFrequency = new Map();
     recent.forEach(lore => {
       (lore.tags || []).forEach(tag => {
-        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1);
+        const key = String(tag || '').toLowerCase();
+        if (!key) return;
+        tagFrequency.set(key, (tagFrequency.get(key) || 0) + 1);
       });
     });
     const recurringThemes = Array.from(tagFrequency.entries())
@@ -917,8 +950,12 @@ OUTPUT JSON:
     const toneShift = tones.length >= 2 && tones[0] !== tones.slice(-1)[0];
 
     // 5. Identify emerging vs cooling storylines
-    const earlierTags = new Set(recent.slice(0, -1).flatMap(l => l.tags || []));
-    const latestTagsArray = recent.slice(-1)[0]?.tags || [];
+    const earlierTags = new Set(
+      recent
+        .slice(0, -1)
+        .flatMap(l => (l.tags || []).map(t => String(t || '').toLowerCase()))
+    );
+    const latestTagsArray = (recent.slice(-1)[0]?.tags || []).map(t => String(t || '').toLowerCase());
     const emergingNew = latestTagsArray.filter(t => !earlierTags.has(t));
     const cooling = Array.from(earlierTags).filter(t => !latestTags.has(t));
 
@@ -974,7 +1011,9 @@ OUTPUT JSON:
     const tagFrequency = new Map();
     recent.forEach(lore => {
       (lore.tags || []).forEach(tag => {
-        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1);
+        const key = String(tag || '').toLowerCase();
+        if (!key) return;
+        tagFrequency.set(key, (tagFrequency.get(key) || 0) + 1);
       });
     });
     const recurringThemes = Array.from(tagFrequency.entries())
@@ -984,12 +1023,16 @@ OUTPUT JSON:
     
     const watchlistItems = recent.slice(0, -1).flatMap(l => l.watchlist || []);
     
-    const earlierTags = new Set(recent.slice(0, -1).flatMap(l => l.tags || []));
-    const latestTagsArray = recent.slice(-1)[0]?.tags || [];
+    const earlierTags = new Set(
+      recent
+        .slice(0, -1)
+        .flatMap(l => (l.tags || []).map(t => String(t || '').toLowerCase()))
+    );
+    const latestTagsArray = (recent.slice(-1)[0]?.tags || []).map(t => String(t || '').toLowerCase());
     const emergingThreads = latestTagsArray.filter(t => !earlierTags.has(t));
     
-    const contentLower = content.toLowerCase();
-    const topicsLower = (topics || []).map(t => String(t).toLowerCase());
+  const contentLower = String(content || '').toLowerCase();
+  const topicsLower = (topics || []).map(t => String(t || '').toLowerCase());
     
     // Check if content advances recurring themes
     const advancesThemes = recurringThemes.some(theme =>
@@ -1292,6 +1335,35 @@ OUTPUT JSON:
     }
     
     return expired.length;
+  }
+
+  /**
+   * Topic cluster APIs for evolution tracking
+   */
+  getTopicCluster(topic) {
+    const key = String(topic || '').toLowerCase();
+    const existing = this.topicClusters.get(key);
+    if (existing) return existing;
+    const cluster = { subtopics: new Set(), timeline: [], currentPhase: null };
+    this.topicClusters.set(key, cluster);
+    return cluster;
+  }
+
+  recordTopicAngle(topic, subtopic, snippet, timestamp = Date.now()) {
+    const key = String(topic || '').toLowerCase();
+    const label = String(subtopic || '').toLowerCase();
+    if (!key || !label) return;
+    const cluster = this.getTopicCluster(key);
+    cluster.subtopics.add(label);
+    cluster.timeline.push({ subtopic: label, timestamp, snippet });
+    // Trim timeline to last 500 entries per topic to bound memory
+    if (cluster.timeline.length > 500) cluster.timeline.splice(0, cluster.timeline.length - 500);
+  }
+
+  setTopicPhase(topic, phase) {
+    const key = String(topic || '').toLowerCase();
+    const cluster = this.getTopicCluster(key);
+    cluster.currentPhase = phase || 'general';
   }
 }
 

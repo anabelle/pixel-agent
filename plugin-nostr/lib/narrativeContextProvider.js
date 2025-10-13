@@ -150,10 +150,20 @@ class NarrativeContextProvider {
     }
 
     // Topic evolution
-    if (context.topicEvolution && context.topicEvolution.trend !== 'stable') {
-      const { topic, trend, dataPoints } = context.topicEvolution;
-      const recentMentions = dataPoints.slice(-3).map(d => d.mentions).join('→');
-      parts.push(`${topic.toUpperCase()}: ${trend} (${recentMentions})`);
+    if (context.topicEvolution) {
+      const { topic, trend, dataPoints, currentPhase, topSubtopics } = context.topicEvolution;
+      if (trend && trend !== 'stable') {
+        const recentMentions = dataPoints.slice(-3).map(d => d.mentions).join('→');
+        parts.push(`${topic.toUpperCase()}: ${trend} (${recentMentions})`);
+      }
+      // Surface phase and top subtopics when available
+      if (currentPhase && currentPhase !== 'general') {
+        parts.push(`PHASE: ${currentPhase}`);
+      }
+      if (Array.isArray(topSubtopics) && topSubtopics.length > 0) {
+        const angles = topSubtopics.slice(0, 3).map(s => s.subtopic).join(', ');
+        if (angles) parts.push(`ANGLES: ${angles}`);
+      }
     }
 
     // Similar past moments

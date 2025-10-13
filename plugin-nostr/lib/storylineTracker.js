@@ -2,7 +2,16 @@
 // Implements hybrid detection logic combining rule-based heuristics with LLM-assisted classification
 
 class StorylineTracker {
-  constructor(runtime, logger) {
+  constructor(options = {}) {
+    const {
+      runtime,
+      logger,
+      enableLLM,
+      llmProvider,
+      cacheTTLMinutes,
+      rateLimitPerHour
+    } = options;
+
     this.runtime = runtime;
     this.logger = logger || console;
 
@@ -29,11 +38,11 @@ class StorylineTracker {
     this.activeStorylines = new Map(); // storylineId -> { id, topic, currentPhase, history: [], context: {}, confidence: number, lastUpdated: timestamp }
 
     // LLM fallback configuration
-    this.llmEnabled = String(runtime?.getSetting?.('NARRATIVE_LLM_ENABLE') ?? 'false').toLowerCase() === 'true';
-    this.llmModel = runtime?.getSetting?.('NARRATIVE_LLM_MODEL') ?? 'gpt-3.5-turbo';
+    this.llmEnabled = enableLLM ?? String(runtime?.getSetting?.('NARRATIVE_LLM_ENABLE') ?? 'false').toLowerCase() === 'true';
+    this.llmModel = llmProvider ?? runtime?.getSetting?.('NARRATIVE_LLM_MODEL') ?? 'gpt-3.5-turbo';
     this.llmCache = new Map(); // digest -> { result, timestamp }
-    this.llmCacheTTL = 24 * 60 * 60 * 1000; // 24 hours
-    this.llmRateLimit = 10; // calls per hour
+    this.llmCacheTTL = (cacheTTLMinutes ?? 24 * 60) * 60 * 1000; // default 24h
+    this.llmRateLimit = rateLimitPerHour ?? 10; // calls per hour
     this.llmCallHistory = []; // timestamps of recent calls
 
     // Configuration
@@ -44,6 +53,7 @@ class StorylineTracker {
 
     this.logger.info(`[STORYLINE-TRACKER] Initialized (LLM: ${this.llmEnabled ? 'ON' : 'OFF'})`);
   }
+}
 
   /**
    * Analyze a post for storyline progression or emergence

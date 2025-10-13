@@ -1,5 +1,6 @@
 // Context Accumulator - Builds continuous understanding of Nostr activity
 const { extractTopicsFromEvent } = require('./nostr');
+const { AdaptiveTrending } = require('./adaptiveTrending');
 
 class ContextAccumulator {
   constructor(runtime, logger, options = {}) {
@@ -104,6 +105,15 @@ class ContextAccumulator {
     this.rollingWindowInterval = null;
     this.trendDetectionInterval = null;
 
+    // Adaptive trending instance
+    this.adaptiveTrending = new AdaptiveTrending({
+      minScoreThreshold: Number.isFinite(options?.adaptiveMinScore) ? options.adaptiveMinScore : 1.2,
+      recentWindowMs: Number.isFinite(options?.adaptiveRecentMs) ? options.adaptiveRecentMs : 30 * 60 * 1000,
+      previousWindowMs: Number.isFinite(options?.adaptivePreviousMs) ? options.adaptivePreviousMs : 30 * 60 * 1000,
+      baselineWindowMs: Number.isFinite(options?.adaptiveBaselineMs) ? options.adaptiveBaselineMs : 24 * 60 * 60 * 1000,
+      maxHistoryMs: Number.isFinite(options?.adaptiveMaxHistoryMs) ? options.adaptiveMaxHistoryMs : 36 * 60 * 60 * 1000,
+    });
+
     // Start real-time analysis if enabled
     if (this.realtimeAnalysisEnabled) {
       setTimeout(() => this.startRealtimeAnalysis(), 10000); // Start after 10 seconds
@@ -173,6 +183,8 @@ class ContextAccumulator {
       for (const topic of extracted.topics) {
         digest.topics.set(topic, (digest.topics.get(topic) || 0) + 1);
         this._updateTopicTimeline(topic, evt);
+        // Adaptive trending topic history
+        try { this.adaptiveTrending.recordTopicMention(topic, evt); } catch {}
       }
       
       // 4. Track sentiment
@@ -1426,12 +1438,17 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([topic, count]) => ({ topic, count }));
+
+    // Provide adaptive trending alongside raw counts
+    let trending = [];
+    try { trending = this.getAdaptiveTrendingTopics(5); } catch {}
     
     return {
       events: digest.eventCount,
       users: digest.users.size,
       topics: topTopics,
-      sentiment: digest.sentiment
+      sentiment: digest.sentiment,
+      trending
     };
   }
 
@@ -1960,7 +1977,8 @@ OUTPUT JSON:
       emergingStories: this.emergingStories.size,
       topicTimelines: this.topicTimelines.size,
       dailyEvents: this.dailyEvents.length,
-      currentActivity: this.getCurrentActivity(),
+  currentActivity: this.getCurrentActivity(),
+  adaptiveTrendingEnabled: !!this.adaptiveTrending,
       config: {
         maxHourlyDigests: this.maxHourlyDigests,
         maxTopicTimelineEvents: this.maxTopicTimelineEvents,
@@ -1979,3 +1997,9 @@ OUTPUT JSON:
 }
 
 module.exports = { ContextAccumulator };
+
+// Extend prototype with helper for adaptive trending
+ContextAccumulator.prototype.getAdaptiveTrendingTopics = function(limit = 5) {
+  if (!this.adaptiveTrending) return [];
+  return this.adaptiveTrending.getTrendingTopics(limit);
+};

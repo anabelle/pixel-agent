@@ -186,7 +186,7 @@ class NarrativeMemory {
   /**
    * Get recent digest summaries for context in new lore generation
    * Returns compact summaries of recent digests to avoid repetition
-  * @param {number} lookback - Number of recent digests to return (default: 3). Undefined => 3, null or <=0 => [], non-finite => 3.
+   * @param {number} lookback - Number of recent digests to return (default: 3). Undefined => 3, null or <=0 => [], non-finite => 3.
    * @returns {Array} Array of compact digest summaries
    */
   getRecentDigestSummaries(lookback = 3) {
@@ -203,8 +203,17 @@ class NarrativeMemory {
     const count = Math.max(0, Math.floor(lookback));
     const recent = count === 0 ? [] : this.timelineLore.slice(-count);
     
+    // Filter for actual digest entries (have digest-specific fields)
+    const digestEntries = recent.filter(entry => 
+      entry && 
+      typeof entry === 'object' && 
+      (entry.headline || entry.narrative) && 
+      Array.isArray(entry.tags) &&
+      ['high', 'medium', 'low'].includes(entry.priority)
+    );
+    
     // Return compact summaries with key fields
-    return recent.map(entry => ({
+    return digestEntries.map(entry => ({
       timestamp: entry.timestamp,
       headline: entry.headline,
       tags: entry.tags || [],

@@ -176,7 +176,7 @@ class NarrativeMemory {
    * @returns {Array} Array of compact digest summaries
    */
   getRecentDigestSummaries(lookback = 3) {
-    if (!Number.isFinite(lookback) || lookback <= 0) {
+    if (!Number.isFinite(lookback) || lookback < 0) {
       lookback = 3;
     }
     

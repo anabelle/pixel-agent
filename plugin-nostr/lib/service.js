@@ -1828,7 +1828,6 @@ Response (YES/NO):`;
         .filter(r => r.status === 'fulfilled' && typeof r.value?.score === 'number' && r.value.score > 0.1)
         .map(r => r.value)
         .sort((a, b) => b.score - a.score);
-        .sort((a, b) => b.score - a.score);
 
       allScoredEvents = [...allScoredEvents, ...scored];
 

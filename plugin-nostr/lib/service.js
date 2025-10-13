@@ -392,6 +392,16 @@ class NostrService {
     );
     this.logger.info(`[NOSTR] Narrative context provider initialized`);
     
+    // Topic Evolution Tracker - Semantic subtopic clustering and phase detection
+    const { TopicEvolutionTracker } = require('./topicEvolution');
+    this.topicEvolutionTracker = new TopicEvolutionTracker(
+      runtime,
+      this.narrativeMemory,
+      this.semanticAnalyzer,
+      this.logger
+    );
+    this.logger.info(`[NOSTR] Topic evolution tracker initialized (LLM: ${this.topicEvolutionTracker.llmEnabled ? 'ON' : 'OFF'})`);
+    
     // Connect managers to context accumulator for integrated intelligence
     if (this.contextAccumulator) {
       this.contextAccumulator.userProfileManager = this.userProfileManager;
@@ -6183,6 +6193,38 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       this.logger?.debug?.('[NOSTR] Storyline advancement check failed:', err?.message);
     }
 
+    // Phase 6: Topic Evolution - Semantic subtopic clustering and phase detection
+    let topicEvolution = null;
+    try {
+      if (this.topicEvolutionTracker && topics.length > 0) {
+        const primaryTopic = topics[0]; // Use first/main topic
+        const contextHints = {
+          trending: trendingMatches,
+          watchlist: watchlistMatch?.matches?.map(m => m.item) || []
+        };
+        
+        topicEvolution = await this.topicEvolutionTracker.analyzeEvolution(
+          primaryTopic,
+          normalizedContent,
+          contextHints
+        );
+        
+        if (topicEvolution && topicEvolution.evolutionScore > 0) {
+          // Apply evolution score as bonus
+          const evolutionBonus = topicEvolution.evolutionScore * 0.5; // Max 0.5 bonus
+          score += evolutionBonus;
+          
+          this.logger?.debug?.(
+            `[TOPIC-EVOLUTION] ${evt.id.slice(0, 8)} ${primaryTopic}: ${topicEvolution.subtopic} ` +
+            `(phase: ${topicEvolution.phase}, novel: ${topicEvolution.isNovelAngle}, ` +
+            `phaseChange: ${topicEvolution.isPhaseChange}, +${evolutionBonus.toFixed(2)})`
+          );
+        }
+      }
+    } catch (err) {
+      this.logger?.debug?.('[NOSTR] Topic evolution tracking failed:', err?.message);
+    }
+
     if (score < 1 && authorScore < 0.4) {
       return null;
     }
@@ -6214,6 +6256,11 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
         signals.push('emerging thread');
       }
     }
+    
+    // Add topic evolution signals
+    if (topicEvolution && topicEvolution.signals?.length > 0) {
+      signals.push(...topicEvolution.signals);
+    }
 
     const reasonParts = [];
     if (wordCount >= 40) reasonParts.push('long-form');
@@ -6234,6 +6281,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       trendingMatches,
       watchlistMatches: watchlistMatch?.matches || [],
       storylineAdvancement: storylineAdvancement || null,
+      topicEvolution: topicEvolution || null,
       authorScore: Number(authorScore.toFixed(2)),
       signals,
       summary: null,

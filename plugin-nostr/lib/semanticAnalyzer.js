@@ -368,6 +368,80 @@ Respond with ONLY numbers and YES/NO, one per line:
     this.semanticCache.clear();
     this.logger.info('[SEMANTIC] Destroyed - Cache stats:', this.getCacheStats());
   }
+
+  /**
+   * Label a subtopic using LLM or fallback
+   * Used by TopicEvolutionTracker for semantic subtopic clustering
+   */
+  async labelSubtopic(topic, content, contextHints = {}) {
+    // Use simplified prompt for subtopic labeling
+    const trendingContext = contextHints.trending?.length 
+      ? `\nTrending: ${contextHints.trending.slice(0, 3).join(', ')}`
+      : '';
+
+    const prompt = `Label the specific angle for "${topic}":
+"${content.slice(0, 300)}"${trendingContext}
+
+Reply with 2-5 words describing the specific angle:`;
+
+    if (!this.llmSemanticEnabled || !this.runtime?.generateText) {
+      // Fallback: extract key terms
+      return this._fallbackSubtopicLabel(topic, content);
+    }
+
+    try {
+      const response = await this.runtime.generateText(prompt, {
+        temperature: 0.1,
+        maxTokens: 20
+      });
+
+      let label = response.trim()
+        .toLowerCase()
+        .replace(/^["']|["']$/g, '')
+        .slice(0, 50);
+
+      // Validate
+      if (!label || label.length < 3 || label.split(' ').length > 6) {
+        return this._fallbackSubtopicLabel(topic, content);
+      }
+
+      return label;
+    } catch (err) {
+      this.logger.debug('[SEMANTIC] Subtopic labeling failed:', err.message);
+      return this._fallbackSubtopicLabel(topic, content);
+    }
+  }
+
+  /**
+   * Fallback subtopic labeling without LLM
+   */
+  _fallbackSubtopicLabel(topic, content) {
+    const contentLower = content.toLowerCase();
+    
+    // Extract meaningful bigrams
+    const words = contentLower
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !this._isStopWord(w))
+      .slice(0, 8);
+    
+    if (words.length >= 2) {
+      return `${words[0]} ${words[1]}`;
+    }
+    
+    return `${topic} discussion`;
+  }
+
+  /**
+   * Check if word is a stop word
+   */
+  _isStopWord(word) {
+    const stopWords = new Set([
+      'this', 'that', 'with', 'from', 'have', 'been', 'their', 'which',
+      'about', 'would', 'there', 'could', 'should', 'when', 'where'
+    ]);
+    return stopWords.has(word.toLowerCase());
+  }
 }
 
 module.exports = { SemanticAnalyzer };

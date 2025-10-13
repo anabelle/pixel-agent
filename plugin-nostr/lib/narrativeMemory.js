@@ -22,6 +22,10 @@ class NarrativeMemory {
     this.activeWatchlist = new Map(); // item -> {addedAt, source, digestId}
     this.watchlistExpiryMs = 24 * 60 * 60 * 1000; // 24 hours
     
+    // Topic Evolution - Subtopic clustering and phase tracking
+    this.topicClusters = new Map(); // topic -> {subtopics: Set, entries: [], lastPhase, lastMentions: Map}
+    this.maxClusterEntries = parseInt(process.env.TOPIC_CLUSTER_MAX_ENTRIES) || 100;
+    
     // Configuration
     this.maxHourlyCache = 7 * 24; // 7 days
     this.maxDailyCache = 90; // 90 days
@@ -264,12 +268,95 @@ class NarrativeMemory {
       narrative: n.narrative?.summary || n.summary?.summary || ''
     }));
 
+    // Get cluster data for subtopics and phase information
+    const cluster = this.getTopicCluster(topic);
+    const subtopicDistribution = this._getSubtopicDistribution(cluster);
+    
     return {
       topic,
       dataPoints: evolution,
       trend: this._calculateTrendDirection(evolution.map(e => e.mentions)),
-      summary: this._summarizeEvolution(evolution)
+      summary: this._summarizeEvolution(evolution),
+      subtopics: subtopicDistribution,
+      currentPhase: cluster.lastPhase || 'general',
+      subtopicCount: cluster.subtopics?.size || 0
     };
+  }
+
+  /**
+   * Get or create a topic cluster
+   */
+  getTopicCluster(topic) {
+    if (!this.topicClusters.has(topic)) {
+      this.topicClusters.set(topic, {
+        subtopics: new Set(),
+        entries: [],
+        lastPhase: null,
+        lastMentions: new Map() // subtopic -> timestamp
+      });
+    }
+    return this.topicClusters.get(topic);
+  }
+
+  /**
+   * Update topic cluster with new entry
+   */
+  updateTopicCluster(topic, entry) {
+    const cluster = this.getTopicCluster(topic);
+    
+    // Add subtopic to set
+    if (entry.subtopic) {
+      cluster.subtopics.add(entry.subtopic);
+      cluster.lastMentions.set(entry.subtopic, entry.timestamp || Date.now());
+    }
+    
+    // Update phase
+    if (entry.phase) {
+      cluster.lastPhase = entry.phase;
+    }
+    
+    // Add entry to history
+    cluster.entries.push({
+      subtopic: entry.subtopic,
+      phase: entry.phase,
+      timestamp: entry.timestamp || Date.now(),
+      content: entry.content
+    });
+    
+    // Trim old entries to keep memory bounded
+    if (cluster.entries.length > this.maxClusterEntries) {
+      cluster.entries = cluster.entries.slice(-this.maxClusterEntries);
+    }
+    
+    // Update the map
+    this.topicClusters.set(topic, cluster);
+    
+    return cluster;
+  }
+
+  /**
+   * Get subtopic distribution for a cluster
+   */
+  _getSubtopicDistribution(cluster) {
+    if (!cluster.entries || cluster.entries.length === 0) {
+      return [];
+    }
+    
+    const subtopicCounts = new Map();
+    
+    for (const entry of cluster.entries) {
+      if (entry.subtopic) {
+        subtopicCounts.set(
+          entry.subtopic, 
+          (subtopicCounts.get(entry.subtopic) || 0) + 1
+        );
+      }
+    }
+    
+    return Array.from(subtopicCounts.entries())
+      .map(([subtopic, count]) => ({ subtopic, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10); // Top 10 subtopics
   }
 
   async getSimilarPastMoments(currentDigest, limit = 5) {

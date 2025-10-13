@@ -600,20 +600,23 @@ class NostrService {
      let contextInfo = '';
      if (this.contextAccumulator && this.contextAccumulator.enabled) {
        try {
-         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
-         
-         if (emergingStories.length > 0) {
-           const topics = emergingStories.map(s => s.topic).join(', ');
+         // Prefer adaptive trending over emerging stories
+         let trending = [];
+         try { trending = this.contextAccumulator.getAdaptiveTrendingTopics(5) || []; } catch {}
+         if (trending.length === 0) {
+           // fallback best-effort: emerging stories
+           try {
+             trending = (this.getEmergingStories(this._getEmergingStoryContextOptions()) || []).map(s => ({ topic: s.topic, score: 1.0, intensity: 0.2 }));
+           } catch {}
+         }
+         if (trending.length > 0) {
+           const topics = trending.map(t => t.topic).join(', ');
            contextInfo = ` Currently trending topics: ${topics}.`;
-           
-           // Check if post relates to trending topics
            const contentLower = evt.content.toLowerCase();
-           const matchingTopic = emergingStories.find(s => 
-             contentLower.includes(s.topic.toLowerCase())
-           );
-           
+           const matchingTopic = trending.find(t => contentLower.includes(String(t.topic).toLowerCase()));
            if (matchingTopic) {
-             contextInfo += ` This post relates to trending topic "${matchingTopic.topic}" - HIGHER PRIORITY.`;
+             const boostHint = matchingTopic.intensity ? ` (intensity ${(matchingTopic.intensity * 100).toFixed(0)}%)` : '';
+             contextInfo += ` This post relates to trending topic "${matchingTopic.topic}"${boostHint} - HIGHER PRIORITY.`;
            }
          }
        } catch (err) {
@@ -658,21 +661,17 @@ class NostrService {
      let contextInfo = '';
      if (this.contextAccumulator && this.contextAccumulator.enabled) {
        try {
-         const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions());
+         let trending = [];
+         try { trending = this.contextAccumulator.getAdaptiveTrendingTopics(5) || []; } catch {}
          const currentActivity = this.getCurrentActivity();
-         
-         if (emergingStories.length > 0) {
-           const topics = emergingStories.map(s => s.topic).join(', ');
+         if (trending.length > 0) {
+           const topics = trending.map(t => t.topic).join(', ');
            contextInfo = `\n\nCURRENT COMMUNITY CONTEXT: Hot topics right now are: ${topics}. `;
-           
-           // Check if the mention relates to current hot topics
            const mentionLower = evt.content.toLowerCase();
-           const matchingTopic = emergingStories.find(s => 
-             mentionLower.includes(s.topic.toLowerCase())
-           );
-           
+           const matchingTopic = trending.find(t => mentionLower.includes(String(t.topic).toLowerCase()));
            if (matchingTopic) {
-             contextInfo += `This mention relates to "${matchingTopic.topic}" which is trending (${matchingTopic.mentions} mentions, ${matchingTopic.users} users discussing it). HIGHER RELEVANCE for trending topics.`;
+             const intensity = matchingTopic.intensity ? `, intensity ${(matchingTopic.intensity * 100).toFixed(0)}%` : '';
+             contextInfo += `This mention relates to "${matchingTopic.topic}" which is trending (score ${matchingTopic.score?.toFixed?.(2) || '1.0'}${intensity}). HIGHER RELEVANCE for trending topics.`;
            }
          }
          
@@ -1298,28 +1297,21 @@ Response (YES/NO):`;
   async _scoreEventForEngagement(evt) { 
     let baseScore = _scoreEventForEngagement(evt);
     
-    // Boost score if event relates to trending topics
+    // Boost score if event relates to adaptive trending topics
     if (this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
-        const emergingStories = this.getEmergingStories(this._getEmergingStoryContextOptions({
-          minUsers: Math.max(5, this.contextAccumulator?.emergingStoryContextMinUsers || 0)
-        }));
-        if (emergingStories.length > 0) {
+        const trending = this.contextAccumulator.getAdaptiveTrendingTopics(5) || [];
+        if (trending.length > 0) {
           const contentLower = evt.content.toLowerCase();
-          const matchingStory = emergingStories.find((s, index) => {
-            const match = contentLower.includes(s.topic.toLowerCase());
-            if (match) {
-              // Boost score based on how hot the topic is (higher for top trending)
-              const boost = 0.3 - (index * 0.05); // 0.3 for #1, 0.25 for #2, etc.
-              return true;
-            }
-            return false;
-          });
-          
-          if (matchingStory) {
-            const boostAmount = 0.3 - (emergingStories.indexOf(matchingStory) * 0.05);
+          const matchIdx = trending.findIndex(t => contentLower.includes(String(t.topic).toLowerCase()));
+          if (matchIdx >= 0) {
+            const t = trending[matchIdx];
+            // Map intensity 0..1 to boost 0.15..0.35 with small rank decay
+            const intensityBoost = 0.15 + 0.2 * Math.max(0, Math.min(1, t.intensity || 0));
+            const rankDecay = Math.max(0, 1 - (matchIdx * 0.1));
+            const boostAmount = intensityBoost * rankDecay;
             baseScore += boostAmount;
-            logger.debug(`[NOSTR] Boosted engagement score for ${evt.id.slice(0, 8)} by +${boostAmount.toFixed(2)} (relates to trending topic "${matchingStory.topic}")`);
+            logger.debug(`[NOSTR] Boosted engagement score for ${evt.id.slice(0, 8)} by +${boostAmount.toFixed(2)} (adaptive trending: "${t.topic}", score=${(t.score||0).toFixed(2)}, vel=${(t.velocity||0).toFixed(2)}, nov=${(t.novelty||0).toFixed(2)})`);
           }
         }
       } catch (err) {
@@ -1372,10 +1364,10 @@ Response (YES/NO):`;
           // Provide lightweight trending hints from context accumulator (best-effort)
           let hints = undefined;
           try {
-            if (this.contextAccumulator?.getTopTopicsAcrossHours) {
-              const top = this.contextAccumulator.getTopTopicsAcrossHours({ hours: 6, limit: 5, minMentions: 2 }) || [];
-              const trending = top.map(x => (typeof x === 'string' ? x : (x?.topic || ''))).filter(Boolean);
-              if (trending.length) hints = { trending };
+            if (this.contextAccumulator?.getAdaptiveTrendingTopics) {
+              const top = this.contextAccumulator.getAdaptiveTrendingTopics(5) || [];
+              const trendingTopics = top.map(x => x.topic).filter(Boolean);
+              if (trendingTopics.length) hints = { trending: trendingTopics };
             }
           } catch {}
 
@@ -1807,7 +1799,6 @@ Response (YES/NO):`;
       const scored = settled
         .filter(r => r.status === 'fulfilled' && typeof r.value?.score === 'number' && r.value.score > 0.1)
         .map(r => r.value)
-        .sort((a, b) => b.score - a.score);
         .sort((a, b) => b.score - a.score);
 
       allScoredEvents = [...allScoredEvents, ...scored];

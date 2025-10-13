@@ -1,5 +1,6 @@
 // Context Accumulator - Builds continuous understanding of Nostr activity
 const { extractTopicsFromEvent } = require('./nostr');
+const { AdaptiveTrending } = require('./adaptiveTrending');
 
 class ContextAccumulator {
   constructor(runtime, logger, options = {}) {
@@ -104,6 +105,48 @@ class ContextAccumulator {
     this.rollingWindowInterval = null;
     this.trendDetectionInterval = null;
 
+    // Adaptive trending instance (env-configurable)
+    const adaptMinScore = (() => {
+      const v = parseFloat(process.env.ADAPTIVE_TRENDING_MIN_SCORE);
+      if (Number.isFinite(v) && v > 0) return v;
+      if (Number.isFinite(options?.adaptiveMinScore)) return options.adaptiveMinScore;
+      return 1.2;
+    })();
+    const adaptRecentMs = (() => {
+      const mins = parsePositiveInt(process.env.ADAPTIVE_TRENDING_RECENT_MINUTES, null);
+      if (Number.isFinite(mins) && mins > 0) return mins * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveRecentMs)) return options.adaptiveRecentMs;
+      return 30 * 60 * 1000;
+    })();
+    const adaptPrevMs = (() => {
+      const mins = parsePositiveInt(process.env.ADAPTIVE_TRENDING_PREVIOUS_MINUTES, null);
+      if (Number.isFinite(mins) && mins > 0) return mins * 60 * 1000;
+      if (Number.isFinite(options?.adaptivePreviousMs)) return options.adaptivePreviousMs;
+      return 30 * 60 * 1000;
+    })();
+    const adaptBaselineMs = (() => {
+      const hrs = parsePositiveInt(process.env.ADAPTIVE_TRENDING_BASELINE_HOURS, null);
+      if (Number.isFinite(hrs) && hrs > 0) return hrs * 60 * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveBaselineMs)) return options.adaptiveBaselineMs;
+      return 24 * 60 * 60 * 1000;
+    })();
+    const adaptMaxHistoryMs = (() => {
+      const hrs = parsePositiveInt(process.env.ADAPTIVE_TRENDING_MAX_HISTORY_HOURS, null);
+      if (Number.isFinite(hrs) && hrs > 0) return hrs * 60 * 60 * 1000;
+      if (Number.isFinite(options?.adaptiveMaxHistoryMs)) return options.adaptiveMaxHistoryMs;
+      return 36 * 60 * 60 * 1000;
+    })();
+
+    this.adaptiveTrending = new AdaptiveTrending({
+      minScoreThreshold: adaptMinScore,
+      recentWindowMs: adaptRecentMs,
+      previousWindowMs: adaptPrevMs,
+      baselineWindowMs: adaptBaselineMs,
+      maxHistoryMs: adaptMaxHistoryMs,
+    });
+    // For adaptive trending log deduplication
+    this._lastTrendingSignature = null;
+
     // Start real-time analysis if enabled
     if (this.realtimeAnalysisEnabled) {
       setTimeout(() => this.startRealtimeAnalysis(), 10000); // Start after 10 seconds
@@ -173,6 +216,8 @@ class ContextAccumulator {
       for (const topic of extracted.topics) {
         digest.topics.set(topic, (digest.topics.get(topic) || 0) + 1);
         this._updateTopicTimeline(topic, evt);
+        // Adaptive trending topic history
+        try { this.adaptiveTrending.recordTopicMention(topic, evt); } catch {}
       }
       
       // 4. Track sentiment
@@ -1426,12 +1471,17 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([topic, count]) => ({ topic, count }));
+
+    // Provide adaptive trending alongside raw counts
+    let trending = [];
+    try { trending = this.getAdaptiveTrendingTopics(5); } catch {}
     
     return {
       events: digest.eventCount,
       users: digest.users.size,
       topics: topTopics,
-      sentiment: digest.sentiment
+      sentiment: digest.sentiment,
+      trending
     };
   }
 
@@ -1874,6 +1924,30 @@ OUTPUT JSON:
         recentUsers: recentUsers.size,
         previousUsers: previousUsers.size
       });
+
+      // Adaptive trending snapshot log when it changes to avoid log spam
+      try {
+        const adaptiveTop = this.getAdaptiveTrendingTopics(5) || [];
+        if (adaptiveTop.length > 0) {
+          const signature = adaptiveTop.map(t => `${t.topic}:${Math.round((t.score || 0) * 100)}`).join('|');
+          if (signature !== this._lastTrendingSignature) {
+            this._lastTrendingSignature = signature;
+            const pretty = adaptiveTop.map(t => {
+              const score = (t.score ?? 0).toFixed(2);
+              const vel = (t.velocity ?? 0).toFixed(2);
+              const nov = (t.novelty ?? 0).toFixed(2);
+              const dev = (t.development ?? 0).toFixed(2);
+              return `${t.topic} (score ${score}, vel ${vel}, nov ${nov}, dev ${dev})`;
+            }).join(' | ');
+            this.logger.info(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
+          }
+        } else if (this._lastTrendingSignature) {
+          // Reset signature when no trending topics
+          this._lastTrendingSignature = null;
+        }
+      } catch (e) {
+        this.logger.debug('[CONTEXT] Adaptive trending log failed:', e?.message || e);
+      }
     }
   }
 
@@ -1960,7 +2034,8 @@ OUTPUT JSON:
       emergingStories: this.emergingStories.size,
       topicTimelines: this.topicTimelines.size,
       dailyEvents: this.dailyEvents.length,
-      currentActivity: this.getCurrentActivity(),
+  currentActivity: this.getCurrentActivity(),
+  adaptiveTrendingEnabled: !!this.adaptiveTrending,
       config: {
         maxHourlyDigests: this.maxHourlyDigests,
         maxTopicTimelineEvents: this.maxTopicTimelineEvents,
@@ -1979,3 +2054,9 @@ OUTPUT JSON:
 }
 
 module.exports = { ContextAccumulator };
+
+// Extend prototype with helper for adaptive trending
+ContextAccumulator.prototype.getAdaptiveTrendingTopics = function(limit = 5) {
+  if (!this.adaptiveTrending) return [];
+  return this.adaptiveTrending.getTrendingTopics(limit);
+};

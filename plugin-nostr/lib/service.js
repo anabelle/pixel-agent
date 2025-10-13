@@ -6180,7 +6180,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
         }
       }
     } catch (err) {
-      logger.debug('[NOSTR] Storyline advancement check failed:', err?.message);
+      this.logger?.debug?.('[NOSTR] Storyline advancement check failed:', err?.message);
     }
 
     if (score < 1 && authorScore < 0.4) {

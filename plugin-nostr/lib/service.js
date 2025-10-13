@@ -6602,7 +6602,7 @@ CONTENT:
       const type = this._getSmallModelType();
 
       // Get recent digest context to avoid repetition
-      const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(3) || [];
+      const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(5) || [];
       
       // Take most recent posts that fit in prompt (prioritize recency)
       const maxPostsInPrompt = Math.min(this.timelineLoreMaxPostsInPrompt, batch.length);

@@ -1044,6 +1044,62 @@ OUTPUT JSON:
   }
 
   /**
+   * Get topic recency to detect if a topic has been frequently covered recently
+   * Returns the number of mentions and last seen timestamp for novelty scoring
+   * @param {string} topic - The topic to check
+   * @param {number} lookbackHours - How many hours to look back (default: 24)
+   * @returns {{mentions: number, lastSeen: number|null}} Recency information
+   */
+  getTopicRecency(topic, lookbackHours = 24) {
+    if (!topic || typeof topic !== 'string') {
+      return { mentions: 0, lastSeen: null };
+    }
+
+    const cutoff = Date.now() - (lookbackHours * 60 * 60 * 1000);
+    const topicLower = topic.toLowerCase();
+    
+    const recentMentions = this.timelineLore
+      .filter(entry => entry.timestamp > cutoff)
+      .reduce((count, entry) => {
+        return count + (entry.tags || []).filter(tag => 
+          tag.toLowerCase() === topicLower
+        ).length;
+      }, 0);
+    
+    return { 
+      mentions: recentMentions, 
+      lastSeen: this._getLastTopicMention(topic) 
+    };
+  }
+
+  /**
+   * Helper method to find when a topic was last mentioned in timeline lore
+   * @param {string} topic - The topic to find
+   * @returns {number|null} Timestamp of last mention or null
+   */
+  _getLastTopicMention(topic) {
+    if (!topic || typeof topic !== 'string') {
+      return null;
+    }
+
+    const topicLower = topic.toLowerCase();
+    
+    // Search from most recent to oldest
+    for (let i = this.timelineLore.length - 1; i >= 0; i--) {
+      const entry = this.timelineLore[i];
+      const hasTopic = (entry.tags || []).some(tag => 
+        tag.toLowerCase() === topicLower
+      );
+      
+      if (hasTopic) {
+        return entry.timestamp || null;
+      }
+    }
+    
+    return null;
+  }
+
+  /**
    * PHASE 4: WATCHLIST MONITORING
    * Add watchlist items from a lore digest with 24h expiry
    */

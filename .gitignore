@@ -47,4 +47,5 @@ Thumbs.db
 backups/
 *.backup
 *.tar.gz
-backup_summary_*.txt
+backup_summary_*.txttest-novelty-scoring.js
+test-service-novelty-integration.js

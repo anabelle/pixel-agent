@@ -6122,6 +6122,30 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       logger.debug('[NOSTR] Timeline lore watchlist check failed:', err?.message || err);
     }
 
+    // Novelty scoring: penalize recently covered topics, reward new topics
+    let noveltyAdjustment = 0;
+    const novelTopics = [];
+    const overexposedTopics = [];
+    if (this.narrativeMemory?.getTopicRecency && topics.length > 0) {
+      for (const topic of topics) {
+        try {
+          const recency = this.narrativeMemory.getTopicRecency(topic, 24);
+          if (recency.mentions > 3) {
+            // Heavily covered recently - penalize
+            noveltyAdjustment -= 0.5;
+            overexposedTopics.push(topic);
+          } else if (recency.mentions === 0) {
+            // New topic - bonus
+            noveltyAdjustment += 0.4;
+            novelTopics.push(topic);
+          }
+        } catch (err) {
+          logger.debug('[NOSTR] Timeline lore novelty check failed for topic:', topic, err?.message || err);
+        }
+      }
+      score += noveltyAdjustment;
+    }
+
     if (score < 1 && authorScore < 0.4) {
       return null;
     }
@@ -6133,6 +6157,13 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
     if (trendingMatches.length) signals.push(`trending: ${trendingMatches.join(', ')}`);
     if (watchlistMatch) {
       signals.push(watchlistMatch.reason);
+    }
+    // Add novelty signals
+    if (novelTopics.length > 0) {
+      signals.push(`new topics: ${novelTopics.slice(0, 2).join(', ')}`);
+    }
+    if (overexposedTopics.length > 0) {
+      signals.push(`overexposed: ${overexposedTopics.slice(0, 2).join(', ')}`);
     }
 
     const reasonParts = [];

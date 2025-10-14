@@ -273,9 +273,9 @@ class NostrService {
      this.homeFeedTimer = null;
      this.homeFeedMinSec = 1800; // Check home feed every 30 minutes (less frequent)
      this.homeFeedMaxSec = 3600; // Up to 1 hour
-     this.homeFeedReactionChance = 0.05; // 5% chance to react (reduced)
-     this.homeFeedRepostChance = 0.005; // 0.5% chance to repost (rare)
-     this.homeFeedQuoteChance = 0.001; // 0.1% chance to quote repost (very rare)
+     this.homeFeedReactionChance = 0.15; // 15% chance to react (increased for better engagement)
+     this.homeFeedRepostChance = 0.01; // 1% chance to repost (rare)
+     this.homeFeedQuoteChance = 0.005; // 0.5% chance to quote repost (very rare)
      this.homeFeedMaxInteractions = 1; // Max 1 interaction per check (reduced)
      this.homeFeedProcessedEvents = new Set(); // Track processed events (for interactions)
      this.homeFeedQualityTracked = new Set(); // Track events for quality scoring (dedup across relays)

@@ -728,85 +728,7 @@ Response (YES/NO):`;
      }
    }
 
-   async _handleHomeFeedEvent(evt) {
-     if (this.homeFeedProcessedEvents.has(evt.id)) return;
-     this.homeFeedProcessedEvents.add(evt.id);
 
-     // Analyze post for relevance before interacting
-     if (!(await this._analyzePostForInteraction(evt))) {
-       logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0,8)} - not relevant`);
-       return;
-     }
-
-     const rand = Math.random();
-     let interactionType = null;
-     let action = null;
-     
-     if (rand < this.homeFeedReactionChance) {
-       interactionType = 'reaction';
-       action = async () => await this.postReaction(evt, '+');
-     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
-       interactionType = 'repost';
-       action = async () => await this.postRepost(evt);
-     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
-       interactionType = 'quote';
-       action = async () => await this.postQuoteRepost(evt, 'interesting');
-     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) {
-       interactionType = 'reply';
-       action = async () => {
-         // Get thread context for better replies
-         const threadContext = await this._getThreadContext(evt);
-         const convId = this._getConversationIdFromEvent(evt);
-         const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
-         
-         // Decide whether to engage based on thread context
-         const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
-         if (!shouldEngage) {
-           logger.debug(`[NOSTR] Home feed skipping reply to ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
-           return false;
-         }
-         
-         // Process images in home feed post content (if enabled)
-         let imageContext = { imageDescriptions: [], imageUrls: [] };
-         if (this.imageProcessingEnabled) {
-           try {
-             logger.info(`[NOSTR] Processing images in home feed post: "${evt.content?.slice(0, 200)}..."`);
-             const { processImageContent } = require('./image-vision');
-             const fullImageContext = await processImageContent(evt.content || '', this.runtime);
-             imageContext = {
-               imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-               imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-             };
-             logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from home feed post`);
-           } catch (error) {
-             logger.error(`[NOSTR] Error in home feed image processing: ${error.message || error}`);
-             imageContext = { imageDescriptions: [], imageUrls: [] };
-           }
-         }
-         
-         const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
-         
-         // Check if LLM generation failed (returned null)
-         if (!text || !text.trim()) {
-           logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-           return false;
-         }
-         
-         return await this.postReply(evt, text);
-       };
-     }
-     
-     if (interactionType && action) {
-       logger.info(`[NOSTR] Queuing home feed ${interactionType} for ${evt.id.slice(0,8)}`);
-       await this.postingQueue.enqueue({
-         type: `homefeed_${interactionType}`,
-         id: `homefeed:${interactionType}:${evt.id}:${Date.now()}`,
-         priority: this.postingQueue.priorities.MEDIUM,
-         metadata: { eventId: evt.id.slice(0, 8), interactionType },
-         action: action
-       });
-     }
-   }
 
    static async start(runtime) {
      await ensureDeps();
@@ -5724,6 +5646,49 @@ Response (YES/NO):`;
              case 'quote':
                success = await this.postQuoteRepost(evt);
                break;
+             case 'reply':
+               // Get thread context for better replies
+               const threadContext = await this._getThreadContext(evt);
+               const convId = this._getConversationIdFromEvent(evt);
+               const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
+               
+               // Decide whether to engage based on thread context
+               const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
+               if (!shouldEngage) {
+                 logger.debug(`[NOSTR] Home feed skipping reply to ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
+                 success = false;
+                 break;
+               }
+               
+               // Process images in home feed post content (if enabled)
+               let imageContext = { imageDescriptions: [], imageUrls: [] };
+               if (this.imageProcessingEnabled) {
+                 try {
+                   logger.info(`[NOSTR] Processing images in home feed post: "${evt.content?.slice(0, 200)}..."`);
+                   const { processImageContent } = require('./image-vision');
+                   const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+                   imageContext = {
+                     imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+                     imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+                   };
+                   logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from home feed post`);
+                 } catch (error) {
+                   logger.error(`[NOSTR] Error in home feed image processing: ${error.message || error}`);
+                   imageContext = { imageDescriptions: [], imageUrls: [] };
+                 }
+               }
+               
+               const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+               
+               // Check if LLM generation failed (returned null)
+               if (!text || !text.trim()) {
+                 logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+                 success = false;
+                 break;
+               }
+               
+               success = await this.postReply(evt, text);
+               break;
            }
 
           if (success) {
@@ -5754,6 +5719,7 @@ Response (YES/NO):`;
     if (rand < this.homeFeedReactionChance) return 'reaction';
     if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) return 'repost';
     if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) return 'quote';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) return 'reply';
     return null;
   }
 

@@ -275,7 +275,8 @@ class NostrService {
      this.homeFeedMaxSec = 3600; // Up to 1 hour
      this.homeFeedReactionChance = 0.15; // 15% chance to react (increased for better engagement)
      this.homeFeedRepostChance = 0.01; // 1% chance to repost (rare)
-     this.homeFeedQuoteChance = 0.005; // 0.5% chance to quote repost (very rare)
+     this.homeFeedQuoteChance = 0.02; // 2% chance to quote repost
+     this.homeFeedReplyChance = 0.05; // 5% chance to reply
      this.homeFeedMaxInteractions = 1; // Max 1 interaction per check (reduced)
      this.homeFeedProcessedEvents = new Set(); // Track processed events (for interactions)
      this.homeFeedQualityTracked = new Set(); // Track events for quality scoring (dedup across relays)
@@ -750,6 +751,49 @@ Response (YES/NO):`;
      } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
        interactionType = 'quote';
        action = async () => await this.postQuoteRepost(evt, 'interesting');
+     } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) {
+       interactionType = 'reply';
+       action = async () => {
+         // Get thread context for better replies
+         const threadContext = await this._getThreadContext(evt);
+         const convId = this._getConversationIdFromEvent(evt);
+         const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
+         
+         // Decide whether to engage based on thread context
+         const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
+         if (!shouldEngage) {
+           logger.debug(`[NOSTR] Home feed skipping reply to ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
+           return false;
+         }
+         
+         // Process images in home feed post content (if enabled)
+         let imageContext = { imageDescriptions: [], imageUrls: [] };
+         if (this.imageProcessingEnabled) {
+           try {
+             logger.info(`[NOSTR] Processing images in home feed post: "${evt.content?.slice(0, 200)}..."`);
+             const { processImageContent } = require('./image-vision');
+             const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+             imageContext = {
+               imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+               imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+             };
+             logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from home feed post`);
+           } catch (error) {
+             logger.error(`[NOSTR] Error in home feed image processing: ${error.message || error}`);
+             imageContext = { imageDescriptions: [], imageUrls: [] };
+           }
+         }
+         
+         const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+         
+         // Check if LLM generation failed (returned null)
+         if (!text || !text.trim()) {
+           logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+           return false;
+         }
+         
+         return await this.postReply(evt, text);
+       };
      }
      
      if (interactionType && action) {
@@ -812,9 +856,10 @@ Response (YES/NO):`;
     const homeFeedMin = normalizeSeconds(runtime.getSetting('NOSTR_HOME_FEED_INTERVAL_MIN') ?? '300', 'NOSTR_HOME_FEED_INTERVAL_MIN');
     const homeFeedMax = normalizeSeconds(runtime.getSetting('NOSTR_HOME_FEED_INTERVAL_MAX') ?? '900', 'NOSTR_HOME_FEED_INTERVAL_MAX');
     const homeFeedReactionChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REACTION_CHANCE') ?? '0.15');
-    const homeFeedRepostChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REPOST_CHANCE') ?? '0.05');
+    const homeFeedRepostChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REPOST_CHANCE') ?? '0.01');
     const homeFeedQuoteChance = Number(runtime.getSetting('NOSTR_HOME_FEED_QUOTE_CHANCE') ?? '0.02');
-    const homeFeedMaxInteractions = Number(runtime.getSetting('NOSTR_HOME_FEED_MAX_INTERACTIONS') ?? '3');
+    const homeFeedReplyChance = Number(runtime.getSetting('NOSTR_HOME_FEED_REPLY_CHANCE') ?? '0.05');
+    const homeFeedMaxInteractions = Number(runtime.getSetting('NOSTR_HOME_FEED_MAX_INTERACTIONS') ?? '1');
 
     const unfollowVal = runtime.getSetting('NOSTR_UNFOLLOW_ENABLE') ?? true;
     const unfollowMinQualityScore = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_QUALITY_SCORE') ?? '0.2');
@@ -864,6 +909,7 @@ Response (YES/NO):`;
     svc.homeFeedReactionChance = Math.max(0, Math.min(1, homeFeedReactionChance));
     svc.homeFeedRepostChance = Math.max(0, Math.min(1, homeFeedRepostChance));
     svc.homeFeedQuoteChance = Math.max(0, Math.min(1, homeFeedQuoteChance));
+    svc.homeFeedReplyChance = Math.max(0, Math.min(1, homeFeedReplyChance));
     svc.homeFeedMaxInteractions = Math.max(1, Math.min(10, homeFeedMaxInteractions));
   svc.dailyDigestPostingEnabled = String(dailyDigestPostVal ?? 'true').toLowerCase() === 'true';
 
@@ -884,7 +930,7 @@ Response (YES/NO):`;
     svc.reconnectDelayMs = reconnectDelaySec * 1000;
     svc.maxReconnectAttempts = maxReconnectAttempts;
 
-     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, relevanceCheck=${svc.relevanceCheckEnabled}, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
+     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, relevanceCheck=${svc.relevanceCheckEnabled}, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} replyChance=${svc.homeFeedReplyChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');

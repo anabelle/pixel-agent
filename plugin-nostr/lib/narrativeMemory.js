@@ -1286,6 +1286,33 @@ OUTPUT JSON:
   }
 
   /**
+   * Get recent lore tags for freshness decay computation
+   * Returns a set of tags from the last N digests for quick lookup
+   * @param {number} lookbackCount - Number of recent digests to scan (default: 3)
+   * @returns {Set<string>} Set of normalized (lowercase) tags from recent digests
+   */
+  getRecentLoreTags(lookbackCount = 3) {
+    if (!Number.isFinite(lookbackCount) || lookbackCount <= 0) {
+      lookbackCount = 3;
+    }
+    
+    const recent = this.timelineLore.slice(-lookbackCount);
+    const tags = new Set();
+    
+    for (const entry of recent) {
+      if (Array.isArray(entry.tags)) {
+        for (const tag of entry.tags) {
+          if (tag && typeof tag === 'string') {
+            tags.add(tag.toLowerCase());
+          }
+        }
+      }
+    }
+    
+    return tags;
+  }
+
+  /**
    * PHASE 4: WATCHLIST MONITORING
    * Add watchlist items from a lore digest with 24h expiry
    */

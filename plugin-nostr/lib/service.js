@@ -1548,10 +1548,17 @@ Response (YES/NO):`;
     }
     
     // Check storyline advancement for additional penalty reduction
+    // Only apply if content specifically mentions advancement/development indicators
     try {
       if (this.narrativeMemory.checkStorylineAdvancement && evt.content) {
         const advancement = this.narrativeMemory.checkStorylineAdvancement(evt.content, topics);
-        if (advancement && (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
+        
+        // Additional check: content should actually indicate advancement, not just match topics
+        const contentLower = String(evt.content || '').toLowerCase();
+        const hasAdvancementIndicators = /\b(develop|evolv|advanc|progress|break|announ|launch|updat|new|major|significant)\w*/.test(contentLower);
+        
+        if (advancement && hasAdvancementIndicators && 
+            (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
           // Reduce penalty by an absolute 0.1 for storyline advancement
           finalPenalty = Math.max(0, finalPenalty - 0.1);
           

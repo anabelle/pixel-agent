@@ -84,7 +84,11 @@ function computeFreshnessPenalty(topics, narrativeMemory, options = {}) {
 
   // Storyline advancement reduction
   const advancement = narrativeMemory.checkStorylineAdvancement(content, topics);
-  if (advancement && (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
+  const contentLower = String(content || '').toLowerCase();
+  const hasAdvancementIndicators = /\b(develop|evolv|advanc|progress|break|announ|launch|updat|new|major|significant)\w*/.test(contentLower);
+  
+  if (advancement && hasAdvancementIndicators && 
+      (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
     finalPenalty = Math.max(0, finalPenalty - 0.1);
   }
 
@@ -217,7 +221,7 @@ async function runIntegrationTest() {
   console.log(`\nComputed penalty: ${(ethereumPenalty * 100).toFixed(1)}%`);
   console.log(`Score impact: ${baseScore.toFixed(2)} → ${ethereumFinalScore.toFixed(2)} (-${((baseScore - ethereumFinalScore) * 100).toFixed(1)}%)\n`);
   
-  console.log('Expected: Low penalty (~5-15%) due to light coverage and older mention\n');
+  console.log('Expected: Low-moderate penalty (~15-25%) - single mention but only 12h old\n');
   
   console.log('═'.repeat(70));
   console.log('TEST CASE E: Completely new topic (nostr)');
@@ -301,12 +305,12 @@ async function runIntegrationTest() {
     failed++;
   }
   
-  // Test 3: Light coverage should have low penalty
-  if (ethereumPenalty < 0.2) {
-    console.log('✅ Light coverage has low penalty (<20%)');
+  // Test 3: Light coverage should have low-moderate penalty (12h old, 1 mention)
+  if (ethereumPenalty >= 0.15 && ethereumPenalty < 0.25) {
+    console.log('✅ Light coverage has low-moderate penalty (15-25%)');
     passed++;
   } else {
-    console.log(`❌ Light coverage penalty too high: ${(ethereumPenalty * 100).toFixed(1)}%`);
+    console.log(`❌ Light coverage penalty out of expected range: ${(ethereumPenalty * 100).toFixed(1)}%`);
     failed++;
   }
   
@@ -319,7 +323,16 @@ async function runIntegrationTest() {
     failed++;
   }
   
-  // Test 5: Scores should be properly ranked
+  // Test 5: Storyline advancement should reduce penalty
+  if (storylinePenalty < bitcoinPenalty) {
+    console.log('✅ Storyline advancement reduces penalty');
+    passed++;
+  } else {
+    console.log(`❌ Storyline advancement did not reduce penalty: ${(storylinePenalty * 100).toFixed(1)}% vs ${(bitcoinPenalty * 100).toFixed(1)}%`);
+    failed++;
+  }
+  
+  // Test 6: Scores should be properly ranked
   if (nostrFinalScore >= ethereumFinalScore && ethereumFinalScore > bitcoinFinalScore) {
     console.log('✅ Scores properly ranked: new > light > heavy coverage');
     passed++;

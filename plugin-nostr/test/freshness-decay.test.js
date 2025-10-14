@@ -89,14 +89,23 @@ class MockNarrativeMemory {
   }
 
   checkStorylineAdvancement(content, topics) {
-    // Simple mock: return advancement if content includes "advancement"
-    if (content.toLowerCase().includes('advancement')) {
+    // Mock: bitcoin is a recurring theme (appears in 5+ digests in our tests)
+    // Check if topics include bitcoin and content suggests advancement
+    const contentLower = content.toLowerCase();
+    const topicsLower = topics.map(t => t.toLowerCase());
+    
+    // Bitcoin is recurring in our mock (5 mentions)
+    const advancesRecurringTheme = topicsLower.includes('bitcoin') && 
+      (contentLower.includes('advancement') || contentLower.includes('major') || contentLower.includes('storyline'));
+    
+    if (advancesRecurringTheme) {
       return {
         advancesRecurringTheme: true,
         watchlistMatches: [],
         isEmergingThread: false
       };
     }
+    
     return null;
   }
 }
@@ -244,7 +253,11 @@ describe('Content Freshness Decay', () => {
 
       // Storyline advancement reduction
       const advancement = narrativeMemory.checkStorylineAdvancement(content, topics);
-      if (advancement && (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
+      const contentLower = String(content || '').toLowerCase();
+      const hasAdvancementIndicators = /\b(develop|evolv|advanc|progress|break|announ|launch|updat|new|major|significant)\w*/.test(contentLower);
+      
+      if (advancement && hasAdvancementIndicators && 
+          (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
         finalPenalty = Math.max(0, finalPenalty - 0.1);
       }
 

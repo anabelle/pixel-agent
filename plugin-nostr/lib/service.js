@@ -5646,7 +5646,7 @@ Response (YES/NO):`;
              case 'quote':
                success = await this.postQuoteRepost(evt);
                break;
-             case 'reply':
+             case 'reply': {
                // Get thread context for better replies
                const threadContext = await this._getThreadContext(evt);
                const convId = this._getConversationIdFromEvent(evt);
@@ -5689,6 +5689,7 @@ Response (YES/NO):`;
                
                success = await this.postReply(evt, text);
                break;
+             }
            }
 
           if (success) {

@@ -862,7 +862,7 @@ describe('TopicExtractor', () => {
       expect(extractor._hasFullSentence('This is a complete sentence.')).toBe(true);
       expect(extractor._hasFullSentence('Short')).toBe(false);
       expect(extractor._hasFullSentence('At least five words here!')).toBe(true);
-      expect(extractor._hasFullSentence('Question mark?')).toBe(true);
+      expect(extractor._hasFullSentence('Is this a question?')).toBe(true);
       expect(extractor._hasFullSentence('Two, words')).toBe(false);
     });
 

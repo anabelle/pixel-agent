@@ -2,14 +2,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the core module before importing the service
-vi.mock('@elizaos/core', () => ({
-  logger: {
-    warn: vi.fn(),
-    debug: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn()
-  }
-}));
+// Use default export to work with both ESM and CommonJS
+const mockLogger = {
+  warn: vi.fn(),
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn()
+};
+
+vi.mock('@elizaos/core', () => {
+  const mocked = {
+    logger: mockLogger,
+    createUniqueUuid: vi.fn((runtime, seed) => `test-uuid-${seed || Math.random()}`),
+    ChannelType: { PUBLIC: 'PUBLIC', DIRECT: 'DIRECT' },
+    ModelType: { TEXT_SMALL: 'TEXT_SMALL', TEXT_MEDIUM: 'TEXT_MEDIUM' }
+  };
+  // Expose for CommonJS require()
+  mocked.default = mocked;
+  return mocked;
+});
 
 const {
   decryptDirectMessageMock,
@@ -55,7 +66,7 @@ describe('NostrService Handler Integration', () => {
   let service;
   let mockRuntime;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Mock global logger
     global.logger = {
       warn: vi.fn(),
@@ -63,6 +74,18 @@ describe('NostrService Handler Integration', () => {
       error: vi.fn(),
       info: vi.fn()
     };
+
+    // Also inject logger into the service module
+    const serviceModule = await import('../lib/service.js');
+    if (serviceModule) {
+      // Inject logger into module scope if possible
+      try {
+        // This is a workaround since we can't easily access module-level variables
+        // The service will try to use logger from @elizaos/core which we mocked above
+      } catch (e) {
+        // Ignore
+      }
+    }
 
     mockRuntime = {
       character: { 
@@ -108,6 +131,18 @@ describe('NostrService Handler Integration', () => {
     service.pkHex = 'bot-pubkey-hex';
     service.sk = 'bot-private-key';
     service.relays = ['wss://test.relay'];
+    
+    // Initialize properties that are normally set in start()
+    service.maxEventAgeDays = 2;
+    service.handledEventIds = new Set();
+    service.lastReplyByUser = new Map();
+    service.pendingReplyTimers = new Map();
+    service.replyEnabled = true;
+    service.replyThrottleSec = 5;
+    service.dmEnabled = true;
+    service.dmReplyEnabled = true;
+    service.dmThrottleSec = 30;
+    service.logger = mockRuntime.logger;
     
     // Mock common service methods
     service.isSelfAuthor = vi.fn().mockReturnValue(false);

@@ -13,6 +13,9 @@
 const { NarrativeMemory } = require('./lib/narrativeMemory');
 const { TopicEvolution } = require('./lib/topicEvolution');
 
+// Test-level configuration
+const RECURRING_THEME = 'bitcoin';
+
 const noopLogger = { 
   info: (...args) => console.log('[INFO]', ...args),
   warn: (...args) => console.log('[WARN]', ...args),
@@ -121,7 +124,7 @@ async function runIntegrationTest() {
     const timestamp = now - (i * 3600000); // Every hour for 5 hours
     nm.timelineLore.push({
       timestamp,
-      tags: ['bitcoin', 'price', 'crypto'],
+      tags: [RECURRING_THEME, 'price', 'crypto'],
       priority: 'high',
       headline: `Bitcoin price update ${i + 1}`,
       narrative: 'Bitcoin price movements discussed'
@@ -143,7 +146,7 @@ async function runIntegrationTest() {
   console.log('TEST CASE A: Recent, heavily covered topic (bitcoin)');
   console.log('═'.repeat(70) + '\n');
   
-  const bitcoinTopics = ['bitcoin', 'price'];
+  const bitcoinTopics = [RECURRING_THEME, 'price'];
   const bitcoinPenalty = computeFreshnessPenalty(bitcoinTopics, nm);
   const baseScore = 0.7;
   const bitcoinFinalScore = baseScore * (1 - bitcoinPenalty);
@@ -238,7 +241,7 @@ async function runIntegrationTest() {
   console.log('TEST CASE F: Storyline advancement (bitcoin with continuation)');
   console.log('═'.repeat(70) + '\n');
   
-  const storylineContent = 'This represents a major advancement in the bitcoin adoption storyline';
+  const storylineContent = `This represents a major advancement in the ${RECURRING_THEME} adoption storyline`;
   const storylinePenalty = computeFreshnessPenalty(bitcoinTopics, nm, {
     content: storylineContent
   });

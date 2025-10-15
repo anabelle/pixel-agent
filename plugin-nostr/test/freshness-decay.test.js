@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
+// Test-level configuration
+const RECURRING_THEME = 'bitcoin';
+
 /**
  * Content Freshness Decay Tests
  * 
@@ -92,10 +95,10 @@ class MockNarrativeMemory {
     // Mock: bitcoin is a recurring theme (appears in 5+ digests in our tests)
     // Check if topics include bitcoin and content suggests advancement
     const contentLower = content.toLowerCase();
-    const topicsLower = topics.map(t => t.toLowerCase());
+  const topicsLower = topics.map(t => t.toLowerCase());
     
-    // Bitcoin is recurring in our mock (5 mentions)
-    const advancesRecurringTheme = topicsLower.includes('bitcoin') && 
+    // Recurring theme shortcut for tests (default: 'bitcoin')
+    const advancesRecurringTheme = topicsLower.includes(RECURRING_THEME) && 
       (contentLower.includes('advancement') || contentLower.includes('major') || contentLower.includes('storyline'));
     
     if (advancesRecurringTheme) {

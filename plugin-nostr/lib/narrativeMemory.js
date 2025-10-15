@@ -1292,11 +1292,18 @@ OUTPUT JSON:
    * @returns {Set<string>} Set of normalized (lowercase) tags from recent digests
    */
   getRecentLoreTags(lookbackCount = 3) {
-    if (!Number.isFinite(lookbackCount) || lookbackCount <= 0) {
+    if (lookbackCount === undefined || !Number.isFinite(lookbackCount)) {
       lookbackCount = 3;
+    } else if (lookbackCount <= 0) {
+      return new Set();
     }
-    
-    const recent = this.timelineLore.slice(-lookbackCount);
+
+    const count = Math.max(0, Math.floor(lookbackCount));
+    if (count === 0) {
+      return new Set();
+    }
+
+    const recent = this.timelineLore.slice(-count);
     const tags = new Set();
     
     for (const entry of recent) {

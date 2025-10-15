@@ -80,12 +80,14 @@ const topicPenalty = stalenessBase * (0.25 + 0.35 * intensity);
 
 **Example calculations:**
 
-| Mentions | Hours Ago | Staleness | Intensity | Topic Penalty |
-|----------|-----------|-----------|-----------|---------------|
-| 1        | 12h       | 0.5       | 0.2       | 0.14 (14%)    |
-| 3        | 6h        | 0.75      | 0.6       | 0.41 (41%)    |
-| 5        | 2h        | 0.92      | 1.0       | 0.55 (55%)    |
-| 5        | 20h       | 0.17      | 1.0       | 0.10 (10%)    |
+```text
+Mentions | Hours Ago | Staleness | Intensity | Topic Penalty
+---------|-----------|-----------|-----------|--------------
+1        | 12h       | 0.5       | 0.2       | 0.14 (14%)
+3        | 6h        | 0.75      | 0.6       | 0.41 (41%)
+5        | 2h        | 0.92      | 1.0       | 0.55 (55%)
+5        | 20h       | 0.17      | 1.0       | 0.10 (10%)
+```
 
 #### 3. Similarity Bump
 
@@ -121,20 +123,14 @@ Reduces penalty for posts that advance ongoing narratives:
 
 ```javascript
 const advancement = narrativeMemory.checkStorylineAdvancement(content, topics);
-const hasIndicators = /\b(develop|evolv|advanc|progress|break|announ|launch|updat|new|major|significant)\w*/.test(content);
 
-if (advancement && hasIndicators && advancement.advancesRecurringTheme) {
+if (advancement && advancement.advancesRecurringTheme) {
   // Absolute reduction of 0.1 (10%)
   finalPenalty = Math.max(0, finalPenalty - 0.1);
 }
 ```
 
-**Requirements:**
-1. Topics match recurring themes in recent lore
-2. Content contains advancement keywords
-3. `checkStorylineAdvancement` confirms advancement
-
-This prevents all posts about recurring topics from getting automatic reductions.
+This relies on `checkStorylineAdvancement` to validate genuine progression based on recent lore and watchlist context, avoiding duplicated keyword checks.
 
 ## Configuration
 
@@ -172,7 +168,7 @@ Chosen for conservative penalty with strong novelty protection:
 
 **Scenario:** Bitcoin price discussed 5 times in last 4 hours
 
-```
+```text
 Topics: ['bitcoin', 'price']
 Mentions: 5 (in 24h window)
 Last seen: 4 hours ago
@@ -192,7 +188,7 @@ Result: Base score 0.7 → 0.42 (-40%)
 
 **Scenario:** Bitcoin heavily covered, but post about new regulation angle
 
-```
+```text
 Topics: ['bitcoin', 'regulation']
 Evolution: { isNovelAngle: true, subtopic: 'bitcoin-regulation' }
 
@@ -208,7 +204,7 @@ Result: Base score 0.7 → 0.56 (-20%)
 
 **Scenario:** Bitcoin covered, post announces major development
 
-```
+```text
 Topics: ['bitcoin']
 Content: "Major announcement: Bitcoin ETF approved by SEC"
 Recurring themes: ['bitcoin'] (appears in 5 recent digests)
@@ -225,7 +221,7 @@ Result: Base score 0.7 → 0.49 (-30%)
 
 **Scenario:** Nostr protocol post (never mentioned before)
 
-```
+```text
 Topics: ['nostr', 'protocol']
 Mentions: 0
 Last seen: null
@@ -401,9 +397,9 @@ Multiplicative penalties preserve relative differences in base scores. A 0.8 bas
 
 Conservative maximum ensures quality content about covered topics can still score well. Higher caps risk completely suppressing important updates.
 
-### Why require advancement indicators for storyline reduction?
+### How do we prevent abuse of advancement reductions?
 
-Without content checks, all posts about recurring themes would get penalty reductions, defeating the purpose of freshness decay. The keyword check ensures only genuinely advancing content gets protection.
+Advancement reductions are only applied when `checkStorylineAdvancement` confirms a genuine storyline progression tied to recurring themes or watchlist matches. This centralizes the signal and avoids brittle duplicate keyword checks.
 
 ### What if topics aren't extracted properly?
 

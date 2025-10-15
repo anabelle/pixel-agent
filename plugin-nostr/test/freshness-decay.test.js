@@ -1,4 +1,4 @@
-const { describe, it, expect, beforeEach } = globalThis;
+import { describe, it, expect, beforeEach } from 'vitest';
 
 /**
  * Content Freshness Decay Tests
@@ -253,11 +253,7 @@ describe('Content Freshness Decay', () => {
 
       // Storyline advancement reduction
       const advancement = narrativeMemory.checkStorylineAdvancement(content, topics);
-      const contentLower = String(content || '').toLowerCase();
-      const hasAdvancementIndicators = /\b(develop|evolv|advanc|progress|break|announ|launch|updat|new|major|significant)\w*/.test(contentLower);
-      
-      if (advancement && hasAdvancementIndicators && 
-          (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
+      if (advancement && (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
         finalPenalty = Math.max(0, finalPenalty - 0.1);
       }
 

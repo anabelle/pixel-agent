@@ -1565,7 +1565,10 @@ Response (YES/NO):`;
         }
       }
     } catch (err) {
-      // Silent fail - storyline check is optional
+      // Storyline check is optional, but log failures for debugging
+      this.logger?.debug?.(
+        `[FRESHNESS-DECAY] Storyline advancement check failed: ${err && err.message ? err.message : err}`
+      );
     }
     
     // Clamp to [0, maxPenalty]

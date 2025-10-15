@@ -1,4 +1,5 @@
-const { describe, it, expect, beforeEach, afterEach, vi } = globalThis;
+const { describe, it, expect, beforeEach, afterEach } = globalThis;
+const { vi } = globalThis;
 const { ContextAccumulator } = require('../lib/contextAccumulator');
 
 // Mock logger

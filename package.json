@@ -10,6 +10,7 @@
     "start": "npm run build:character && elizaos start --character ./character.json --port 3002",
     "start:patched": "./start-with-twitter-patch.sh",
     "test": "elizaos test",
+    "test:plugin-nostr": "cd plugin-nostr && npm test",
     "clean-db": "./clean-db.sh"
   },
   "dependencies": {

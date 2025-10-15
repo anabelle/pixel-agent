@@ -1699,6 +1699,73 @@ OUTPUT JSON:
 
     return estimates[storylineType] || estimates.unknown;
   }
+
+  /**
+   * Record a subtopic (angle) for a topic
+   * @param {string} topic - The main topic
+   * @param {string} subtopic - The subtopic/angle label
+   * @param {string} snippet - Content snippet (optional)
+   * @param {number} timestamp - Event timestamp
+   */
+  recordTopicAngle(topic, subtopic, snippet = '', timestamp = Date.now()) {
+    if (!topic || !subtopic) return;
+    const key = String(topic).toLowerCase();
+    
+    // Initialize cluster if it doesn't exist
+    if (!this.topicClusters.has(key)) {
+      this.topicClusters.set(key, {
+        subtopics: new Set(),
+        timeline: [],
+        currentPhase: null
+      });
+    }
+    
+    const cluster = this.topicClusters.get(key);
+    cluster.subtopics.add(subtopic);
+    cluster.timeline.push({ 
+      subtopic, 
+      timestamp, 
+      snippet: snippet ? String(snippet).slice(0, 200) : undefined 
+    });
+    
+    // Trim timeline to max entries
+    if (cluster.timeline.length > this.maxTopicClusterEntries) {
+      cluster.timeline = cluster.timeline.slice(-this.maxTopicClusterEntries);
+    }
+  }
+
+  /**
+   * Get topic cluster data
+   * @param {string} topic - The topic to retrieve
+   * @returns {Object|null} Cluster data or null
+   */
+  getTopicCluster(topic) {
+    if (!topic) return null;
+    const key = String(topic).toLowerCase();
+    return this.topicClusters.get(key) || null;
+  }
+
+  /**
+   * Set the current phase for a topic
+   * @param {string} topic - The topic
+   * @param {string} phase - The phase name
+   */
+  setTopicPhase(topic, phase) {
+    if (!topic) return;
+    const key = String(topic).toLowerCase();
+    
+    // Initialize cluster if it doesn't exist
+    if (!this.topicClusters.has(key)) {
+      this.topicClusters.set(key, {
+        subtopics: new Set(),
+        timeline: [],
+        currentPhase: null
+      });
+    }
+    
+    const cluster = this.topicClusters.get(key);
+    cluster.currentPhase = phase;
+  }
 }
 
 module.exports = { NarrativeMemory };

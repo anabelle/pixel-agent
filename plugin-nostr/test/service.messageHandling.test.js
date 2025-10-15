@@ -120,10 +120,16 @@ describe('NostrService Message Handling', () => {
       logger: mockLogger
     };
 
-    service = await NostrService.start(mockRuntime);
-    service.pool = {
-      publish: vi.fn().mockResolvedValue(true)
+    // Mock pool setup
+    const mockPool = {
+      subscribeMany: vi.fn(() => vi.fn()),
+      publish: vi.fn().mockResolvedValue(true),
+      close: vi.fn()
     };
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
+
+    service = await NostrService.start(mockRuntime);
+    service.pool = mockPool;
   });
 
   afterEach(async () => {

@@ -80,13 +80,17 @@ describe('NostrService Discovery and Integration', () => {
       logger: mockLogger
     };
 
-    service = await NostrService.start(mockRuntime);
-    service.pool = {
+    // Mock pool setup
+    const mockPool = {
       subscribeMany: vi.fn(() => vi.fn()),
       publish: vi.fn().mockResolvedValue(true),
       close: vi.fn(),
       list: vi.fn().mockResolvedValue([])
     };
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
+
+    service = await NostrService.start(mockRuntime);
+    service.pool = mockPool;
   });
 
   afterEach(async () => {

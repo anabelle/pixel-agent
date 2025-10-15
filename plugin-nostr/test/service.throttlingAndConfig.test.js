@@ -60,6 +60,14 @@ describe('NostrService Throttling and Configuration', () => {
       logger: mockLogger
     };
 
+    // Mock pool setup
+    const mockPool = {
+      subscribeMany: vi.fn(() => vi.fn()),
+      publish: vi.fn().mockResolvedValue(true),
+      close: vi.fn()
+    };
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
+
     service = await NostrService.start(mockRuntime);
   });
 

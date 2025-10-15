@@ -108,6 +108,9 @@ describe('NostrService Posting and Relay Management', () => {
       logger: mockLogger
     };
 
+    // Add createSimplePool to mockRuntime
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
+
     service = await NostrService.start(mockRuntime);
     service.pool = mockPool;
   });

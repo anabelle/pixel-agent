@@ -62,6 +62,9 @@ describe('NostrService Lifecycle', () => {
       close: vi.fn()
     };
 
+    // Add createSimplePool to mockRuntime
+    mockRuntime.createSimplePool = vi.fn(() => mockPool);
+
     service = null;
   });
 

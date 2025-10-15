@@ -4517,32 +4517,32 @@ Response (YES/NO):`;
   async handleMention(evt) {
     try {
       if (!evt || !evt.id) return;
-       if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.info('[NOSTR] Ignoring self-mention'); return; }
-       if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
+       if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { try { logger?.info?.('[NOSTR] Ignoring self-mention'); } catch {} return; }
+       if (this.handledEventIds.has(evt.id)) { try { logger?.info?.(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch {} return; }
 
        // Check if mention is too old (ignore mentions older than configured days)
        const eventAgeMs = Date.now() - (evt.created_at * 1000);
        const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
        if (eventAgeMs > maxAgeMs) {
-         logger.info(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`);
+         try { logger?.info?.(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`); } catch {}
          this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
          return;
        }
 
        // Check if this is actually a mention directed at us vs just a thread reply
        const isActualMention = this._isActualMention(evt);
-       logger.info(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`);
+       try { logger?.info?.(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`); } catch {}
        if (!isActualMention) {
-         logger.info(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`);
+         try { logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`); } catch {}
          this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
          return;
        }
 
        // Check if the mention is relevant and worth responding to
        const isRelevant = await this._isRelevantMention(evt);
-       logger.info(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`);
+       try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch {}
        if (!isRelevant) {
-         logger.info(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`);
+         try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`); } catch {}
          this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
          return;
        }
@@ -4553,23 +4553,23 @@ Response (YES/NO):`;
       const conversationId = this._getConversationIdFromEvent(evt);
       const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
       let alreadySaved = false;
-      try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; logger.info(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } } catch {}
+      try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; try { logger?.info?.(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } catch {} } } catch {}
       const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
       const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: evt.content || '', source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
-  if (!alreadySaved) { logger.info(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); await this._createMemorySafe(memory, 'messages'); }
+  if (!alreadySaved) { try { logger?.info?.(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); } catch {} await this._createMemorySafe(memory, 'messages'); }
       try {
   const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
-        if (hasReply) { logger.info(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); return; }
+        if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); } catch {} return; }
       } catch {}
       // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
-      if (!this.replyEnabled) { logger.info('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); return; }
-      if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying'); return; }
-      if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send reply'); return; }
+      if (!this.replyEnabled) { try { logger?.info?.('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); } catch {} return; }
+      if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying'); } catch {} return; }
+      if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send reply'); } catch {} return; }
 
       // Check if user is muted
       if (await this._isUserMuted(evt.pubkey)) {
-        logger.debug(`[NOSTR] Skipping reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        try { logger?.debug?.(`[NOSTR] Skipping reply to muted user ${evt.pubkey.slice(0, 8)}`); } catch {}
         return;
       }
 
@@ -4578,22 +4578,22 @@ Response (YES/NO):`;
         const waitMs = this.replyThrottleSec * 1000 - (now - last) + 250;
         const existing = this.pendingReplyTimers.get(evt.pubkey);
         if (!existing) {
-          logger.info(`[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`);
+          try { logger?.info?.(`[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch {}
           const pubkey = evt.pubkey; const parentEvt = { ...evt }; const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
           const timer = setTimeout(async () => {
             this.pendingReplyTimers.delete(pubkey);
             try {
-              logger.info(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`);
+              try { logger?.info?.(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch {}
               try {
                 const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
-                if (hasReply) { logger.info(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); return; }
+                if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch {} return; }
               } catch {}
               // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
-              if (now2 - lastNow < this.replyThrottleSec * 1000) { logger.info(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); return; }
+              if (now2 - lastNow < this.replyThrottleSec * 1000) { try { logger?.info?.(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch {} return; }
                // Check if user is muted before scheduled reply
-               if (await this._isUserMuted(pubkey)) { logger.debug(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); return; }
+               if (await this._isUserMuted(pubkey)) { try { logger?.debug?.(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); } catch {} return; }
                 this.lastReplyByUser.set(pubkey, now2);
                 // Retrieve stored image context for scheduled reply
                 const storedImageContext = this._getStoredImageContext(parentEvt.id);
@@ -4980,20 +4980,20 @@ Response (YES/NO):`;
       if (!evt || evt.kind !== 4) return;
       if (!this.pkHex) return;
       if (isSelfAuthor(evt, this.pkHex)) return;
-      if (!this.dmEnabled) { logger.info('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); return; }
-      if (!this.dmReplyEnabled) { logger.info('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); return; }
-      if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to DM'); return; }
-      if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send DM reply'); return; }
+      if (!this.dmEnabled) { try { logger?.info?.('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); } catch {} return; }
+      if (!this.dmReplyEnabled) { try { logger?.info?.('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); } catch {} return; }
+      if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying to DM'); } catch {} return; }
+      if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send DM reply'); } catch {} return; }
 
   // Decrypt the DM content (allow runtime override for testing or custom behavior)
   const decryptDirectMessageImpl = this._decryptDirectMessage || require('./nostr').decryptDirectMessage;
   const decryptedContent = await decryptDirectMessageImpl(evt, this.sk, this.pkHex, nip04?.decrypt || null);
       if (!decryptedContent) {
-        logger.warn('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8));
+        try { logger?.warn?.('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8)); } catch {}
         return;
       }
 
-      logger.info(`[NOSTR] DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+      try { logger?.info?.(`[NOSTR] DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`); } catch {}
       // Debug DM prompt meta (no CoT)
       try {
         const dbg = (
@@ -5006,13 +5006,13 @@ Response (YES/NO):`;
             hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
             kind: evt.kind,
           };
-          logger.debug(`[NOSTR][DEBUG] DM prompt meta: ${JSON.stringify(meta)}`);
+          try { logger?.debug?.(`[NOSTR][DEBUG] DM prompt meta: ${JSON.stringify(meta)}`); } catch {}
         }
       } catch {}
 
       // Check for duplicate handling
       if (this.handledEventIds.has(evt.id)) {
-        logger.info(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`);
+        try { logger?.info?.(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch {}
         return;
       }
       this.handledEventIds.add(evt.id);
@@ -5029,7 +5029,7 @@ Response (YES/NO):`;
         const existing = await runtime.getMemoryById(eventMemoryId);
         if (existing) {
           alreadySaved = true;
-          logger.info(`[NOSTR] DM ${evt.id.slice(0, 8)} already in memory (persistent dedup)`);
+          try { logger?.info?.(`[NOSTR] DM ${evt.id.slice(0, 8)} already in memory (persistent dedup)`); } catch {}
         }
       } catch {}
 
@@ -5043,7 +5043,7 @@ Response (YES/NO):`;
           createdAt: createdAtMs,
         };
         await this._createMemorySafe(memory, 'messages');
-        logger.info(`[NOSTR] Saved DM as memory id=${eventMemoryId}`);
+        try { logger?.info?.(`[NOSTR] Saved DM as memory id=${eventMemoryId}`); } catch {}
       }
 
       // Check for existing reply
@@ -5051,7 +5051,7 @@ Response (YES/NO):`;
         const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
         const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
         if (hasReply) {
-          logger.info(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`);
+          try { logger?.info?.(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`); } catch {}
           return;
         }
       } catch {}
@@ -5063,7 +5063,7 @@ Response (YES/NO):`;
         const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
         const existing = this.pendingReplyTimers.get(evt.pubkey);
         if (!existing) {
-          logger.info(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`);
+          try { logger?.info?.(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch {}
           const pubkey = evt.pubkey;
           // Carry decrypted content into the scheduled event used for prompt
           const parentEvt = { ...evt, content: decryptedContent };
@@ -5072,24 +5072,24 @@ Response (YES/NO):`;
       const timer = setTimeout(async () => {
             this.pendingReplyTimers.delete(pubkey);
             try {
-              logger.info(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
+              try { logger?.info?.(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch {}
               try {
         const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
                 const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
                 if (hasReply) {
-                  logger.info(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
+                  try { logger?.info?.(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch {}
                   return;
                 }
               } catch {}
               const lastNow = this.lastReplyByUser.get(pubkey) || 0;
               const now2 = Date.now();
               if (now2 - lastNow < this.dmThrottleSec * 1000) {
-                logger.info(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
+                try { logger?.info?.(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch {}
                 return;
               }
               // Check if user is muted before scheduled DM reply
               if (await this._isUserMuted(pubkey)) {
-                logger.debug(`[NOSTR] Skipping scheduled DM reply to muted user ${pubkey.slice(0, 8)}`);
+                try { logger?.debug?.(`[NOSTR] Skipping scheduled DM reply to muted user ${pubkey.slice(0, 8)}`); } catch {}
                 return;
               }
               this.lastReplyByUser.set(pubkey, now2);
@@ -5097,7 +5097,7 @@ Response (YES/NO):`;
               
               // Check if LLM generation failed (returned null)
               if (!replyText || !replyText.trim()) {
-                logger.warn(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                try { logger?.warn?.(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`); } catch {}
                 return;
               }
               // Debug generated scheduled DM snippet

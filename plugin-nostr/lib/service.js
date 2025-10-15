@@ -1380,8 +1380,201 @@ Response (YES/NO):`;
     } catch (err) {
       this.logger?.debug?.('[NOSTR] Storyline scoring failed:', err?.message || err);
     }
+
+    // Phase 5: Apply freshness decay penalty to avoid over-saturating with recently covered topics
+    try {
+      if (this.narrativeMemory && evt && evt.content) {
+        const freshnessEnabled = String(
+          this.runtime?.getSetting?.('NOSTR_FRESHNESS_DECAY_ENABLE') ?? 
+          process?.env?.NOSTR_FRESHNESS_DECAY_ENABLE ?? 
+          'true'
+        ).toLowerCase() === 'true';
+        
+        if (freshnessEnabled) {
+          // Get the topic evolution analysis that was computed earlier, if available
+          const evolutionAnalysis = evt.__topicEvolution || null;
+          
+          const penalty = await this._computeFreshnessPenalty(evt, primaryTopic, evolutionAnalysis);
+          if (penalty > 0) {
+            const penaltyFactor = 1 - penalty;
+            const oldScore = baseScore;
+            baseScore = baseScore * penaltyFactor;
+            
+            this.logger?.debug?.(
+              `[FRESHNESS-DECAY] ${evt.id?.slice?.(0, 8) || 'evt'}: penalty=${penalty.toFixed(2)}, ` +
+              `factor=${penaltyFactor.toFixed(2)}, score ${oldScore.toFixed(2)} -> ${baseScore.toFixed(2)}`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      this.logger?.debug?.('[NOSTR] Freshness decay computation failed:', err?.message || err);
+    }
     
     return Math.max(0, Math.min(1, baseScore)); // Clamp to [0, 1]
+  }
+
+  /**
+   * Compute freshness penalty based on recent timeline lore coverage
+   * Returns a penalty value in [0, maxPenalty] to down-weight recently covered topics
+   * 
+   * @param {Object} evt - The event being scored
+   * @param {string|null} primaryTopic - The primary topic extracted from the event (may be null)
+   * @param {Object|null} evolutionAnalysis - Topic evolution analysis with isNovelAngle, isPhaseChange
+   * @returns {Promise<number>} Penalty value in [0, maxPenalty], typically [0, 0.4]
+   */
+  async _computeFreshnessPenalty(evt, primaryTopic, evolutionAnalysis = null) {
+    // Configuration from environment
+    const lookbackHours = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_LOOKBACK_HOURS') ?? 
+      process?.env?.NOSTR_FRESHNESS_LOOKBACK_HOURS ?? 
+      24
+    );
+    const lookbackDigests = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_LOOKBACK_DIGESTS') ?? 
+      process?.env?.NOSTR_FRESHNESS_LOOKBACK_DIGESTS ?? 
+      3
+    );
+    const mentionsFullIntensity = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_MENTIONS_FULL_INTENSITY') ?? 
+      process?.env?.NOSTR_FRESHNESS_MENTIONS_FULL_INTENSITY ?? 
+      5
+    );
+    const maxPenalty = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_MAX_PENALTY') ?? 
+      process?.env?.NOSTR_FRESHNESS_MAX_PENALTY ?? 
+      0.4
+    );
+    const similarityBump = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_SIMILARITY_BUMP') ?? 
+      process?.env?.NOSTR_FRESHNESS_SIMILARITY_BUMP ?? 
+      0.05
+    );
+    const noveltyReduction = Number(
+      this.runtime?.getSetting?.('NOSTR_FRESHNESS_NOVELTY_REDUCTION') ?? 
+      process?.env?.NOSTR_FRESHNESS_NOVELTY_REDUCTION ?? 
+      0.5
+    );
+
+    // Extract topics from event
+    let topics = [];
+    if (primaryTopic) {
+      topics.push(primaryTopic);
+    }
+    
+    // Also check t-tags as fallback/additional topics
+    if (Array.isArray(evt.tags)) {
+      const tTags = evt.tags
+        .filter(t => t && t[0] === 't' && t[1])
+        .map(t => String(t[1]).trim().toLowerCase())
+        .filter(Boolean);
+      
+      for (const tag of tTags) {
+        if (!topics.includes(tag)) {
+          topics.push(tag);
+        }
+      }
+    }
+    
+    // If no topics, no penalty
+    if (topics.length === 0) {
+      return 0;
+    }
+    
+    // Limit to top 3 topics to avoid over-penalizing broad content
+    topics = topics.slice(0, 3);
+    
+    // Get recent lore tags for similarity check
+    const recentLoreTags = this.narrativeMemory.getRecentLoreTags?.(lookbackDigests) || new Set();
+    
+    // Compute per-topic staleness penalties
+    const topicPenalties = [];
+    const now = Date.now();
+    
+    for (const topic of topics) {
+      const recencyInfo = this.narrativeMemory.getTopicRecency(topic, lookbackHours);
+      const { mentions, lastSeen } = recencyInfo;
+      
+      // If topic hasn't been seen recently, no penalty for this topic
+      if (!lastSeen || mentions === 0) {
+        topicPenalties.push(0);
+        continue;
+      }
+      
+      // Calculate staleness based on time since last seen
+      const hoursSince = (now - lastSeen) / (1000 * 60 * 60);
+      
+      // stalenessBase: 1.0 if just seen, decays to 0 at lookbackHours
+      const stalenessBase = Math.max(0, Math.min(1, (lookbackHours - hoursSince) / lookbackHours));
+      
+      // intensity: how frequently mentioned (0 = rare, 1 = very frequent)
+      const intensity = Math.max(0, Math.min(1, mentions / mentionsFullIntensity));
+      
+      // Penalty scales from 0.25 (light coverage) to 0.6 (heavy coverage) based on intensity
+      // Then multiply by staleness (recent = high staleness = more penalty)
+      const topicPenalty = stalenessBase * (0.25 + 0.35 * intensity);
+      
+      topicPenalties.push(topicPenalty);
+    }
+    
+    // Use max penalty among all topics (most saturated topic drives the penalty)
+    let finalPenalty = topicPenalties.length > 0 ? Math.max(...topicPenalties) : 0;
+    
+    // Similarity bump: if any topic exists in recent lore tags, add a small bump
+    let hasSimilarityBump = false;
+    for (const topic of topics) {
+      if (recentLoreTags.has(topic.toLowerCase())) {
+        hasSimilarityBump = true;
+        break;
+      }
+    }
+    if (hasSimilarityBump) {
+      finalPenalty = Math.min(maxPenalty, finalPenalty + similarityBump);
+    }
+    
+    // Novelty guardrails: reduce penalty for novel angles or phase changes
+    if (evolutionAnalysis) {
+      if (evolutionAnalysis.isNovelAngle || evolutionAnalysis.isPhaseChange) {
+        const reduction = noveltyReduction; // 0.5 = reduce penalty by 50%
+        finalPenalty = finalPenalty * (1 - reduction);
+        
+        this.logger?.debug?.(
+          `[FRESHNESS-DECAY] Novelty reduction applied: ` +
+          `isNovelAngle=${!!evolutionAnalysis.isNovelAngle}, ` +
+          `isPhaseChange=${!!evolutionAnalysis.isPhaseChange}, ` +
+          `reduction=${reduction.toFixed(2)}`
+        );
+      }
+    }
+    
+    // Check storyline advancement for additional penalty reduction
+    try {
+      if (this.narrativeMemory.checkStorylineAdvancement && evt.content) {
+        const advancement = this.narrativeMemory.checkStorylineAdvancement(evt.content, topics);
+        
+        if (advancement &&
+            (advancement.advancesRecurringTheme || advancement.watchlistMatches?.length > 0)) {
+          // Reduce penalty by an absolute 0.1 for storyline advancement
+          finalPenalty = Math.max(0, finalPenalty - 0.1);
+          
+          this.logger?.debug?.(
+            `[FRESHNESS-DECAY] Storyline advancement reduction: ` +
+            `advancesTheme=${!!advancement.advancesRecurringTheme}, ` +
+            `watchlistHits=${advancement.watchlistMatches?.length || 0}`
+          );
+        }
+      }
+    } catch (err) {
+      // Storyline check is optional, but log failures for debugging
+      this.logger?.debug?.(
+        `[FRESHNESS-DECAY] Storyline advancement check failed: ${err && err.message ? err.message : err}`
+      );
+    }
+    
+    // Clamp to [0, maxPenalty]
+    finalPenalty = Math.max(0, Math.min(maxPenalty, finalPenalty));
+    
+    return finalPenalty;
   }
 
   /**

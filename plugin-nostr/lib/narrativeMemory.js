@@ -5,44 +5,44 @@ class NarrativeMemory {
   constructor(runtime, logger) {
     this.runtime = runtime;
     this.logger = logger || console;
-    
+
     // In-memory cache of recent narratives
     this.hourlyNarratives = []; // Last 7 days of hourly narratives
     this.dailyNarratives = []; // Last 90 days of daily narratives
-  this.weeklyNarratives = []; // Last 52 weeks
-  this.monthlyNarratives = []; // Last 24 months
-  this.timelineLore = []; // Recent timeline lore digests
-    
+    this.weeklyNarratives = []; // Last 52 weeks
+    this.monthlyNarratives = []; // Last 24 months
+    this.timelineLore = []; // Recent timeline lore digests
+
     // Trend tracking
     this.topicTrends = new Map(); // topic -> {counts: [], timestamps: []}
     this.sentimentTrends = new Map(); // date -> {positive, negative, neutral}
     this.engagementTrends = []; // {date, events, users, quality}
-  // Topic evolution clusters (subtopics + phase)
-  /**
-   * Maps a topic to its cluster data.
-   * Structure:
-   *   topic => {
-   *     subtopics: Set<string>, // Set of subtopic names
-   *     timeline: Array<{ subtopic: string, timestamp: number, snippet?: string }>, // History of subtopic changes
-   *     currentPhase: string|null // Current phase of the topic, or null
-   *   }
-   */
-  this.topicClusters = new Map();
-    
+    // Topic evolution clusters (subtopics + phase)
+    /**
+     * Maps a topic to its cluster data.
+     * Structure:
+     *   topic => {
+     *     subtopics: Set<string>, // Set of subtopic names
+     *     timeline: Array<{ subtopic: string, timestamp: number, snippet?: string }>, // History of subtopic changes
+     *     currentPhase: string|null // Current phase of the topic, or null
+     *   }
+     */
+    this.topicClusters = new Map();
+
     // Watchlist tracking (Phase 4)
     this.activeWatchlist = new Map(); // item -> {addedAt, source, digestId}
     this.watchlistExpiryMs = 24 * 60 * 60 * 1000; // 24 hours
-    
+
     // Configuration
     this.maxHourlyCache = 7 * 24; // 7 days
     this.maxDailyCache = 90; // 90 days
     this.maxWeeklyCache = 52; // 52 weeks
-  this.maxMonthlyCache = 24; // 24 months
-  this.maxTimelineLoreCache = 120; // Recent timeline lore entries
-  // Max entries per topic cluster timeline (bounded memory)
-  const clusterMaxRaw = this.runtime?.getSetting?.('TOPIC_CLUSTER_MAX_ENTRIES') ?? process?.env?.TOPIC_CLUSTER_MAX_ENTRIES;
-  this.maxTopicClusterEntries = Number.isFinite(Number(clusterMaxRaw)) && Number(clusterMaxRaw) > 0 ? Number(clusterMaxRaw) : 500;
-    
+    this.maxMonthlyCache = 24; // 24 months
+    this.maxTimelineLoreCache = 120; // Recent timeline lore entries
+    // Max entries per topic cluster timeline (bounded memory)
+    const clusterMaxRaw = this.runtime?.getSetting?.('TOPIC_CLUSTER_MAX_ENTRIES') ?? process?.env?.TOPIC_CLUSTER_MAX_ENTRIES;
+    this.maxTopicClusterEntries = Number.isFinite(Number(clusterMaxRaw)) && Number(clusterMaxRaw) > 0 ? Number(clusterMaxRaw) : 500;
+
     this.initialized = false;
 
     this._systemContext = null;
@@ -75,7 +75,7 @@ class NarrativeMemory {
             const core = require('@elizaos/core');
             if (core?.ChannelType) channelType = core.ChannelType;
           }
-        } catch {}
+        } catch { }
 
         this._systemContextPromise = ensureNostrContextSystem(this.runtime, {
           createUniqueUuid,
@@ -100,15 +100,15 @@ class NarrativeMemory {
 
   async initialize() {
     if (this.initialized) return;
-    
+
     this.logger.info('[NARRATIVE-MEMORY] Initializing historical narrative memory...');
-    
+
     // Load recent narratives from memory
     await this._loadRecentNarratives();
-    
+
     // Build trend data
     await this._rebuildTrends();
-    
+
     this.initialized = true;
     this.logger.info('[NARRATIVE-MEMORY] Initialized with historical context');
   }
@@ -146,7 +146,7 @@ class NarrativeMemory {
 
     this._updateTrendsFromNarrative(narrative);
     await this._persistNarrative(narrative, 'daily');
-    
+
     // Check if we should generate weekly summary
     await this._maybeGenerateWeeklySummary();
   }
@@ -198,7 +198,7 @@ class NarrativeMemory {
     if (!Number.isFinite(limit) || limit <= 0) {
       limit = 5;
     }
-    
+
     // Sort by priority (high > medium > low) then recency
     const priorityMap = { high: 3, medium: 2, low: 1 };
     const sorted = [...this.timelineLore].sort((a, b) => {
@@ -206,7 +206,7 @@ class NarrativeMemory {
       if (priorityDiff !== 0) return priorityDiff;
       return (b.timestamp || 0) - (a.timestamp || 0);
     });
-    
+
     return sorted.slice(0, limit);
   }
 
@@ -229,16 +229,16 @@ class NarrativeMemory {
     // Get the most recent timeline lore entries (guard against -0 => 0 returning full array)
     const count = Math.max(0, Math.floor(lookback));
     const recent = count === 0 ? [] : this.timelineLore.slice(-count);
-    
+
     // Filter for actual digest entries (have digest-specific fields)
-    const digestEntries = recent.filter(entry => 
-      entry && 
-      typeof entry === 'object' && 
-      (entry.headline || entry.narrative) && 
+    const digestEntries = recent.filter(entry =>
+      entry &&
+      typeof entry === 'object' &&
+      (entry.headline || entry.narrative) &&
       Array.isArray(entry.tags) &&
       ['high', 'medium', 'low'].includes(entry.priority)
     );
-    
+
     // Return enhanced summaries with comprehensive context fields
     return digestEntries.map(entry => ({
       timestamp: entry.timestamp,
@@ -289,7 +289,7 @@ class NarrativeMemory {
   async compareWithHistory(currentDigest, comparisonPeriod = '7d') {
     // Compare current activity with historical patterns
     const historical = await this.getHistoricalContext(comparisonPeriod);
-    
+
     const comparison = {
       eventTrend: this._calculateEventTrend(currentDigest, historical),
       userTrend: this._calculateUserTrend(currentDigest, historical),
@@ -309,7 +309,7 @@ class NarrativeMemory {
         return age <= days;
       })
       .filter(n => {
-        const hasTopicInNarrative = n.summary?.topTopics?.some(t => 
+        const hasTopicInNarrative = n.summary?.topTopics?.some(t =>
           t.topic?.toLowerCase().includes(topic.toLowerCase())
         );
         return hasTopicInNarrative;
@@ -317,7 +317,7 @@ class NarrativeMemory {
 
     const evolution = relevantNarratives.map(n => ({
       date: new Date(n.timestamp).toISOString().split('T')[0],
-      mentions: n.summary?.topTopics?.find(t => 
+      mentions: n.summary?.topTopics?.find(t =>
         t.topic?.toLowerCase().includes(topic.toLowerCase())
       )?.count || 0,
       sentiment: n.summary?.overallSentiment || {},
@@ -360,7 +360,7 @@ class NarrativeMemory {
 
     for (const past of this.dailyNarratives) {
       const similarity = this._calculateNarrativeSimilarity(currentDigest, past);
-      
+
       if (similarity > 0.3) {
         similarities.push({
           narrative: past,
@@ -379,7 +379,7 @@ class NarrativeMemory {
   async generateWeeklySummary() {
     // Generate weekly summary from daily narratives
     const lastWeek = this.dailyNarratives.slice(-7);
-    
+
     if (lastWeek.length < 5) {
       this.logger.debug('[NARRATIVE-MEMORY] Not enough data for weekly summary');
       return null;
@@ -413,9 +413,9 @@ class NarrativeMemory {
     }
 
     await this._persistNarrative(summary, 'weekly');
-    
+
     this.logger.info(`[NARRATIVE-MEMORY] 📅 Generated weekly summary: ${summary.totalEvents} events, ${summary.uniqueUsers} users`);
-    
+
     return summary;
   }
 
@@ -460,7 +460,7 @@ OUTPUT JSON:
 
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       return jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-      
+
     } catch (err) {
       this.logger.debug('[NARRATIVE-MEMORY] Weekly narrative generation failed:', err.message);
       return null;
@@ -470,11 +470,11 @@ OUTPUT JSON:
   _calculateEventTrend(current, historical) {
     const historicalAvg = this._calculateHistoricalAverage(historical, 'events');
     const currentEvents = current.eventCount || 0;
-    
+
     if (historicalAvg === 0) return { direction: 'stable', change: 0 };
-    
+
     const change = ((currentEvents - historicalAvg) / historicalAvg) * 100;
-    
+
     return {
       direction: change > 10 ? 'up' : change < -10 ? 'down' : 'stable',
       change: Math.round(change),
@@ -486,11 +486,11 @@ OUTPUT JSON:
   _calculateUserTrend(current, historical) {
     const historicalAvg = this._calculateHistoricalAverage(historical, 'users');
     const currentUsers = current.users?.size || 0;
-    
+
     if (historicalAvg === 0) return { direction: 'stable', change: 0 };
-    
+
     const change = ((currentUsers - historicalAvg) / historicalAvg) * 100;
-    
+
     return {
       direction: change > 10 ? 'up' : change < -10 ? 'down' : 'stable',
       change: Math.round(change),
@@ -507,23 +507,23 @@ OUTPUT JSON:
       .map(([topic]) => topic);
 
     const historicalTopics = this._getHistoricalTopTopics(historical, 10);
-    
+
     const emerging = currentTopics.filter(t => !historicalTopics.includes(t));
     const declining = historicalTopics.filter(t => !currentTopics.includes(t));
-    
+
     return { emerging, declining, stable: currentTopics.filter(t => historicalTopics.includes(t)) };
   }
 
   _detectSentimentShift(current, historical) {
     const currentSentiment = current.sentiment || { positive: 0, negative: 0, neutral: 0 };
     const historicalSentiment = this._calculateHistoricalSentiment(historical);
-    
+
     const shifts = {};
     for (const key of ['positive', 'negative', 'neutral']) {
       const curr = currentSentiment[key] || 0;
       const hist = historicalSentiment[key] || 0;
       const total = curr + hist;
-      
+
       if (total > 0) {
         const change = ((curr - hist) / total) * 100;
         if (Math.abs(change) > 15) {
@@ -531,26 +531,26 @@ OUTPUT JSON:
         }
       }
     }
-    
+
     return shifts;
   }
 
   _detectEmergingPatterns(current, historical) {
     // Detect new patterns or behaviors
     const patterns = [];
-    
+
     // Check for unusual activity spikes
     const eventTrend = this._calculateEventTrend(current, historical);
     if (eventTrend.change > 50) {
       patterns.push({ type: 'activity_spike', magnitude: eventTrend.change });
     }
-    
+
     // Check for topic clustering
     const topicShifts = this._detectTopicShifts(current, historical);
     if (topicShifts.emerging.length > 3) {
       patterns.push({ type: 'topic_explosion', topics: topicShifts.emerging });
     }
-    
+
     return patterns;
   }
 
@@ -559,34 +559,34 @@ OUTPUT JSON:
       ...historical.hourly || [],
       ...historical.daily || []
     ];
-    
+
     if (allNarratives.length === 0) return 0;
-    
+
     const values = allNarratives.map(n => {
       if (metric === 'events') return n.summary?.eventCount || n.summary?.totalEvents || 0;
       if (metric === 'users') return n.summary?.users?.size || n.summary?.activeUsers || 0;
       return 0;
     }).filter(v => v > 0);
-    
+
     if (values.length === 0) return 0;
     return values.reduce((sum, v) => sum + v, 0) / values.length;
   }
 
   _getHistoricalTopTopics(historical, limit = 10) {
     const topicCounts = new Map();
-    
+
     const allNarratives = [
       ...historical.daily || [],
       ...historical.weekly || []
     ];
-    
+
     for (const narrative of allNarratives) {
       const topics = narrative.summary?.topTopics || [];
       for (const { topic, count } of topics) {
         topicCounts.set(topic, (topicCounts.get(topic) || 0) + count);
       }
     }
-    
+
     return Array.from(topicCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
@@ -595,10 +595,10 @@ OUTPUT JSON:
 
   _calculateHistoricalSentiment(historical) {
     const allNarratives = [...historical.daily || [], ...historical.weekly || []];
-    
+
     const totals = { positive: 0, negative: 0, neutral: 0 };
     let count = 0;
-    
+
     for (const narrative of allNarratives) {
       const sentiment = narrative.summary?.overallSentiment || narrative.summary?.sentiment;
       if (sentiment) {
@@ -608,9 +608,9 @@ OUTPUT JSON:
         count++;
       }
     }
-    
+
     if (count === 0) return totals;
-    
+
     return {
       positive: Math.round(totals.positive / count),
       negative: Math.round(totals.negative / count),
@@ -622,41 +622,41 @@ OUTPUT JSON:
     // Compare topics
     const currentTopics = new Set(Array.from(current.topics?.keys() || []));
     const pastTopics = new Set(past.summary?.topTopics?.map(t => t.topic) || []);
-    
+
     const intersection = new Set([...currentTopics].filter(t => pastTopics.has(t)));
     const union = new Set([...currentTopics, ...pastTopics]);
-    
+
     const topicSimilarity = union.size > 0 ? intersection.size / union.size : 0;
-    
+
     // Compare sentiment
     const currentSent = current.sentiment || {};
     const pastSent = past.summary?.overallSentiment || past.summary?.sentiment || {};
-    
+
     const sentimentDiff = Math.abs(
       (currentSent.positive || 0) - (pastSent.positive || 0)
     ) + Math.abs(
       (currentSent.negative || 0) - (pastSent.negative || 0)
     );
-    
+
     const sentimentSimilarity = 1 - (sentimentDiff / 100);
-    
+
     return (topicSimilarity * 0.7 + sentimentSimilarity * 0.3);
   }
 
   _updateTrendsFromNarrative(narrative) {
     const timestamp = Date.now();
-    
+
     // Update topic trends
     if (narrative.summary?.topTopics) {
       for (const { topic, count } of narrative.summary.topTopics) {
         if (!this.topicTrends.has(topic)) {
           this.topicTrends.set(topic, { counts: [], timestamps: [] });
         }
-        
+
         const trend = this.topicTrends.get(topic);
         trend.counts.push(count);
         trend.timestamps.push(timestamp);
-        
+
         // Keep last 90 data points
         if (trend.counts.length > 90) {
           trend.counts.shift();
@@ -664,14 +664,14 @@ OUTPUT JSON:
         }
       }
     }
-    
+
     // Update engagement trends
     this.engagementTrends.push({
       timestamp,
       events: narrative.summary?.eventCount || narrative.summary?.totalEvents || 0,
       users: narrative.summary?.users?.size || narrative.summary?.activeUsers || 0
     });
-    
+
     // Keep last 90 days
     if (this.engagementTrends.length > 90) {
       this.engagementTrends.shift();
@@ -680,14 +680,14 @@ OUTPUT JSON:
 
   _aggregateTopTopics(narratives) {
     const topicCounts = new Map();
-    
+
     for (const n of narratives) {
       const topics = n.summary?.topTopics || [];
       for (const { topic, count } of topics) {
         topicCounts.set(topic, (topicCounts.get(topic) || 0) + count);
       }
     }
-    
+
     return Array.from(topicCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
@@ -696,17 +696,17 @@ OUTPUT JSON:
 
   _aggregateSentiment(narratives) {
     const totals = { positive: 0, negative: 0, neutral: 0 };
-    
+
     for (const n of narratives) {
       const sent = n.summary?.overallSentiment || n.summary?.sentiment || {};
       totals.positive += sent.positive || 0;
       totals.negative += sent.negative || 0;
       totals.neutral += sent.neutral || 0;
     }
-    
+
     const total = totals.positive + totals.negative + totals.neutral;
     if (total === 0) return 'neutral';
-    
+
     const max = Math.max(totals.positive, totals.negative, totals.neutral);
     if (max === totals.positive) return 'positive';
     if (max === totals.negative) return 'negative';
@@ -716,14 +716,14 @@ OUTPUT JSON:
   _identifyWeeklyStories(narratives) {
     // Find topics that appeared multiple days
     const topicDays = new Map();
-    
+
     for (const n of narratives) {
       const topics = n.summary?.topTopics?.map(t => t.topic) || [];
       for (const topic of topics) {
         topicDays.set(topic, (topicDays.get(topic) || 0) + 1);
       }
     }
-    
+
     return Array.from(topicDays.entries())
       .filter(([_, days]) => days >= 3) // Appeared at least 3 days
       .sort((a, b) => b[1] - a[1])
@@ -733,15 +733,15 @@ OUTPUT JSON:
 
   _calculateTrendDirection(values) {
     if (values.length < 2) return 'stable';
-    
+
     const recent = values.slice(-7);
     const older = values.slice(-14, -7);
-    
+
     if (older.length === 0) return 'stable';
-    
+
     const recentAvg = recent.reduce((sum, v) => sum + v, 0) / recent.length;
     const olderAvg = older.reduce((sum, v) => sum + v, 0) / older.length;
-    
+
     if (recentAvg > olderAvg * 1.2) return 'rising';
     if (recentAvg < olderAvg * 0.8) return 'declining';
     return 'stable';
@@ -749,17 +749,17 @@ OUTPUT JSON:
 
   _summarizeEvolution(evolution) {
     if (evolution.length === 0) return 'No data available';
-    
+
     const trend = this._calculateTrendDirection(evolution.map(e => e.mentions));
     const avgMentions = evolution.reduce((sum, e) => e.mentions + sum, 0) / evolution.length;
-    
+
     return `${trend} trend with average ${Math.round(avgMentions)} mentions per period`;
   }
 
   async _loadRecentNarratives() {
     // Load from database using runtime memory system
     this.logger.debug('[NARRATIVE-MEMORY] Loading recent narratives from memory...');
-    
+
     if (!this.runtime || typeof this.runtime.getMemories !== 'function') {
       this.logger.debug('[NARRATIVE-MEMORY] Runtime getMemories not available, skipping load');
       return;
@@ -776,7 +776,7 @@ OUTPUT JSON:
         });
         hourlyMems = await Promise.resolve(res);
       } catch { hourlyMems = []; }
-      
+
       for (const mem of hourlyMems) {
         if (mem.content?.type === 'narrative_hourly' && mem.content?.data) {
           this.hourlyNarratives.push({
@@ -786,7 +786,7 @@ OUTPUT JSON:
           });
         }
       }
-      
+
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
 
       // Load daily narratives (last 90 days)
@@ -798,7 +798,7 @@ OUTPUT JSON:
         });
         dailyMems = await Promise.resolve(resDaily);
       } catch { dailyMems = []; }
-      
+
       for (const mem of dailyMems) {
         if (mem.content?.type === 'narrative_daily' && mem.content?.data) {
           this.dailyNarratives.push({
@@ -808,7 +808,7 @@ OUTPUT JSON:
           });
         }
       }
-      
+
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
 
       // Load weekly narratives
@@ -820,7 +820,7 @@ OUTPUT JSON:
         });
         weeklyMems = await Promise.resolve(resWeekly);
       } catch { weeklyMems = []; }
-      
+
       for (const mem of weeklyMems) {
         if (mem.content?.type === 'narrative_weekly' && mem.content?.data) {
           this.weeklyNarratives.push({
@@ -830,7 +830,7 @@ OUTPUT JSON:
           });
         }
       }
-      
+
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
       // Load timeline lore entries
@@ -936,7 +936,7 @@ OUTPUT JSON:
   async _maybeGenerateWeeklySummary() {
     // Check if it's time for weekly summary (every 7 days)
     const lastWeekly = this.weeklyNarratives[this.weeklyNarratives.length - 1];
-    
+
     if (!lastWeekly) {
       // First weekly summary
       if (this.dailyNarratives.length >= 7) {
@@ -944,9 +944,9 @@ OUTPUT JSON:
       }
       return;
     }
-    
+
     const daysSinceLastWeekly = (Date.now() - lastWeekly.timestamp) / (24 * 60 * 60 * 1000);
-    
+
     if (daysSinceLastWeekly >= 7) {
       await this.generateWeeklySummary();
     }
@@ -960,9 +960,9 @@ OUTPUT JSON:
       monthlyNarratives: this.monthlyNarratives.length,
       timelineLore: this.timelineLore.length,
       trackedTopics: this.topicTrends.size,
-  engagementDataPoints: this.engagementTrends.length,
-  topicClusters: this.topicClusters.size,
-      oldestNarrative: this.dailyNarratives[0] 
+      engagementDataPoints: this.engagementTrends.length,
+      topicClusters: this.topicClusters.size,
+      oldestNarrative: this.dailyNarratives[0]
         ? new Date(this.dailyNarratives[0].timestamp).toISOString().split('T')[0]
         : null,
       newestNarrative: this.dailyNarratives[this.dailyNarratives.length - 1]
@@ -1014,8 +1014,8 @@ OUTPUT JSON:
     const priorityMap = { low: 1, medium: 2, high: 3 };
     const priorityTrend = recent.map(l => priorityMap[l.priority] || 1);
     const priorityChange = priorityTrend.slice(-1)[0] - priorityTrend[0];
-    const priorityDirection = priorityChange > 0 ? 'escalating' : 
-                             priorityChange < 0 ? 'de-escalating' : 'stable';
+    const priorityDirection = priorityChange > 0 ? 'escalating' :
+      priorityChange < 0 ? 'de-escalating' : 'stable';
 
     // 3. Check watchlist follow-through (did predicted items appear in latest digest?)
     const watchlistItems = recent.slice(0, -1).flatMap(l => l.watchlist || []);
@@ -1023,9 +1023,9 @@ OUTPUT JSON:
     const latestInsights = recent.slice(-1)[0]?.insights || [];
     const followedUp = watchlistItems.filter(item => {
       const itemLower = item.toLowerCase();
-      return Array.from(latestTags).some(tag => 
+      return Array.from(latestTags).some(tag =>
         tag.toLowerCase().includes(itemLower) || itemLower.includes(tag.toLowerCase())
-      ) || latestInsights.some(insight => 
+      ) || latestInsights.some(insight =>
         insight.toLowerCase().includes(itemLower)
       );
     });
@@ -1057,15 +1057,15 @@ OUTPUT JSON:
     });
 
     return {
-      hasEvolution: recurringThemes.length > 0 || Math.abs(priorityChange) > 0 || 
-                    followedUp.length > 0 || emergingNew.length > 0,
+      hasEvolution: recurringThemes.length > 0 || Math.abs(priorityChange) > 0 ||
+        followedUp.length > 0 || emergingNew.length > 0,
       recurringThemes: recurringThemes.slice(0, 5),
       priorityTrend: priorityDirection,
       priorityChange,
       watchlistFollowUp: followedUp,
-      toneProgression: toneShift && tones.length >= 2 ? { 
-        from: tones[0], 
-        to: tones.slice(-1)[0] 
+      toneProgression: toneShift && tones.length >= 2 ? {
+        from: tones[0],
+        to: tones.slice(-1)[0]
       } : null,
       emergingThreads: emergingNew.slice(0, 5),
       coolingThreads: cooling.slice(0, 5),
@@ -1091,7 +1091,7 @@ OUTPUT JSON:
     const lookbackCount = 5;
     const recent = this.timelineLore.slice(-lookbackCount);
     if (recent.length < 2) return null;
-    
+
     // Calculate continuity inline
     const tagFrequency = new Map();
     recent.forEach(lore => {
@@ -1105,9 +1105,9 @@ OUTPUT JSON:
       .filter(([_, count]) => count >= 2)
       .sort((a, b) => b[1] - a[1])
       .map(([tag]) => tag);
-    
+
     const watchlistItems = recent.slice(0, -1).flatMap(l => l.watchlist || []);
-    
+
     const earlierTags = new Set(
       recent
         .slice(0, -1)
@@ -1115,26 +1115,26 @@ OUTPUT JSON:
     );
     const latestTagsArray = (recent.slice(-1)[0]?.tags || []).map(t => String(t || '').toLowerCase());
     const emergingThreads = latestTagsArray.filter(t => !earlierTags.has(t));
-    
-  const contentLower = String(content || '').toLowerCase();
-  const topicsLower = (topics || []).map(t => String(t || '').toLowerCase());
-    
+
+    const contentLower = String(content || '').toLowerCase();
+    const topicsLower = (topics || []).map(t => String(t || '').toLowerCase());
+
     // Check if content advances recurring themes
     const advancesThemes = recurringThemes.some(theme =>
       contentLower.includes(theme.toLowerCase()) ||
       topicsLower.some(topic => topic.includes(theme.toLowerCase()))
     );
-    
+
     // Check if content relates to watchlist items
     const watchlistHits = watchlistItems.filter(item =>
       contentLower.includes(item.toLowerCase())
     );
-    
+
     // Check if content relates to emerging threads
     const isEmergingThread = emergingThreads.some(thread =>
       topicsLower.some(topic => topic.includes(thread.toLowerCase()))
     );
-    
+
     return {
       advancesRecurringTheme: advancesThemes,
       watchlistMatches: watchlistHits,
@@ -1144,33 +1144,33 @@ OUTPUT JSON:
 
   _buildContinuitySummary(data) {
     const parts = [];
-    
+
     if (data.recurringThemes.length) {
       parts.push(`Recurring: ${data.recurringThemes.slice(0, 3).join(', ')}`);
     }
-    
+
     if (data.priorityDirection === 'escalating') {
       parts.push(`Priority escalating (+${data.priorityChange})`);
     } else if (data.priorityDirection === 'de-escalating') {
       parts.push(`Priority cooling (${data.priorityChange})`);
     }
-    
+
     if (data.followedUp.length) {
       parts.push(`Watchlist hits: ${data.followedUp.slice(0, 2).join(', ')}`);
     }
-    
+
     if (data.toneShift && data.tones.length >= 2) {
       parts.push(`Mood: ${data.tones[0]} → ${data.tones.slice(-1)[0]}`);
     }
-    
+
     if (data.emergingNew.length) {
       parts.push(`New: ${data.emergingNew.slice(0, 3).join(', ')}`);
     }
-    
+
     if (data.cooling.length && !data.emergingNew.length) {
       parts.push(`Fading: ${data.cooling.slice(0, 2).join(', ')}`);
     }
-    
+
     return parts.length ? parts.join(' | ') : 'No clear evolution detected';
   }
 
@@ -1182,25 +1182,25 @@ OUTPUT JSON:
     const toneWindow = recentLore
       .filter(l => l.tone && typeof l.tone === 'string')
       .map(l => ({ timestamp: l.timestamp, tone: l.tone }));
-    
+
     if (toneWindow.length < 3) return null;
-    
+
     // Detect significant shifts between earlier and recent periods
     const midpoint = Math.floor(toneWindow.length / 2);
     const earlier = toneWindow.slice(0, midpoint);
     const recent = toneWindow.slice(midpoint);
-    
+
     const recentTones = new Set(recent.map(t => t.tone));
     const earlierTones = new Set(earlier.map(t => t.tone));
-    
+
     // Check if recent tones are completely different from earlier
     const shifted = ![...recentTones].some(t => earlierTones.has(t));
-    
+
     if (shifted && recent.length >= 2) {
       const timeSpanHours = Math.round(
         (recent.slice(-1)[0].timestamp - earlier[0].timestamp) / (60 * 60 * 1000)
       );
-      
+
       return {
         detected: true,
         shift: `${earlier.slice(-1)[0]?.tone || 'unknown'} → ${recent.slice(-1)[0]?.tone}`,
@@ -1210,12 +1210,12 @@ OUTPUT JSON:
         recentTones: Array.from(recentTones)
       };
     }
-    
+
     // Check for consistent tone (no shift but worth noting)
     if (toneWindow.length >= 5) {
       const dominantTone = toneWindow.slice(-3).map(t => t.tone)[0];
       const allSame = toneWindow.slice(-3).every(t => t.tone === dominantTone);
-      
+
       if (allSame) {
         return {
           detected: false,
@@ -1225,7 +1225,7 @@ OUTPUT JSON:
         };
       }
     }
-    
+
     return null;
   }
 
@@ -1243,18 +1243,18 @@ OUTPUT JSON:
 
     const cutoff = Date.now() - (lookbackHours * 60 * 60 * 1000);
     const topicLower = topic.toLowerCase();
-    
+
     const recentMentions = this.timelineLore
       .filter(entry => entry.timestamp > cutoff)
       .reduce((count, entry) => {
-        return count + (entry.tags || []).filter(tag => 
+        return count + (entry.tags || []).filter(tag =>
           tag.toLowerCase() === topicLower
         ).length;
       }, 0);
-    
-    return { 
-      mentions: recentMentions, 
-      lastSeen: this._getLastTopicMention(topic) 
+
+    return {
+      mentions: recentMentions,
+      lastSeen: this._getLastTopicMention(topic)
     };
   }
 
@@ -1269,20 +1269,54 @@ OUTPUT JSON:
     }
 
     const topicLower = topic.toLowerCase();
-    
+
     // Search from most recent to oldest
     for (let i = this.timelineLore.length - 1; i >= 0; i--) {
       const entry = this.timelineLore[i];
-      const hasTopic = (entry.tags || []).some(tag => 
+      const hasTopic = (entry.tags || []).some(tag =>
         tag.toLowerCase() === topicLower
       );
-      
+
       if (hasTopic) {
         return entry.timestamp || null;
       }
     }
-    
+
     return null;
+  }
+
+  /**
+   * Get recent lore tags for freshness decay computation
+   * Returns a set of tags from the last N digests for quick lookup
+   * @param {number} lookbackCount - Number of recent digests to scan (default: 3)
+   * @returns {Set<string>} Set of normalized (lowercase) tags from recent digests
+   */
+  getRecentLoreTags(lookbackCount = 3) {
+    if (lookbackCount === undefined || !Number.isFinite(lookbackCount)) {
+      lookbackCount = 3;
+    } else if (lookbackCount <= 0) {
+      return new Set();
+    }
+
+    const count = Math.max(0, Math.floor(lookbackCount));
+    if (count === 0) {
+      return new Set();
+    }
+
+    const recent = this.timelineLore.slice(-count);
+    const tags = new Set();
+
+    for (const entry of recent) {
+      if (Array.isArray(entry.tags)) {
+        for (const tag of entry.tags) {
+          if (tag && typeof tag === 'string') {
+            tags.add(tag.toLowerCase());
+          }
+        }
+      }
+    }
+
+    return tags;
   }
 
   /**
@@ -1291,7 +1325,7 @@ OUTPUT JSON:
    */
   addWatchlistItems(watchlistItems, source = 'digest', digestId = null) {
     if (!Array.isArray(watchlistItems) || !watchlistItems.length) return;
-    
+
     // Import ignored terms filter
     let TIMELINE_LORE_IGNORED_TERMS;
     try {
@@ -1300,43 +1334,43 @@ OUTPUT JSON:
     } catch {
       TIMELINE_LORE_IGNORED_TERMS = new Set();
     }
-    
+
     const now = Date.now();
     const added = [];
-    
+
     for (const item of watchlistItems) {
       const normalized = String(item || '').trim().toLowerCase();
       if (!normalized || normalized.length < 3) continue;
-      
+
       // Skip overly generic terms
       if (TIMELINE_LORE_IGNORED_TERMS.has(normalized)) {
         this.logger?.debug?.(`[WATCHLIST] Skipping generic term: ${normalized}`);
         continue;
       }
-      
+
       // Deduplicate - don't re-add if already tracking
       if (this.activeWatchlist.has(normalized)) {
         this.logger?.debug?.(`[WATCHLIST] Already tracking: ${normalized}`);
         continue;
       }
-      
+
       this.activeWatchlist.set(normalized, {
         addedAt: now,
         source,
         digestId,
         original: item
       });
-      
+
       added.push(normalized);
     }
-    
+
     if (added.length) {
       this.logger?.info?.(`[WATCHLIST] Added ${added.length} items: ${added.join(', ')}`);
     }
-    
+
     // Cleanup expired items
     this._pruneExpiredWatchlist();
-    
+
     return added;
   }
 
@@ -1346,22 +1380,22 @@ OUTPUT JSON:
    */
   checkWatchlistMatch(content, tags = []) {
     if (!content || !this.activeWatchlist.size) return null;
-    
+
     this._pruneExpiredWatchlist(); // Lazy cleanup
-    
+
     const contentLower = String(content).toLowerCase();
     const tagsLower = tags.map(t => String(t || '').toLowerCase());
     const matches = [];
-    
+
     for (const [item, metadata] of this.activeWatchlist.entries()) {
       // Check content match
       const inContent = contentLower.includes(item);
-      
+
       // Check tag match (fuzzy - either way contains other)
-      const inTags = tagsLower.some(tag => 
+      const inTags = tagsLower.some(tag =>
         tag.includes(item) || item.includes(tag)
       );
-      
+
       if (inContent || inTags) {
         matches.push({
           item: metadata.original || item,
@@ -1371,12 +1405,12 @@ OUTPUT JSON:
         });
       }
     }
-    
+
     if (!matches.length) return null;
-    
+
     // Conservative boost: cap at +0.5 regardless of match count
     const boostScore = Math.min(0.5, 0.2 * matches.length);
-    
+
     return {
       matches,
       boostScore,
@@ -1389,7 +1423,7 @@ OUTPUT JSON:
    */
   getWatchlistState() {
     this._pruneExpiredWatchlist();
-    
+
     return {
       active: this.activeWatchlist.size,
       items: Array.from(this.activeWatchlist.entries()).map(([item, meta]) => ({
@@ -1619,7 +1653,7 @@ OUTPUT JSON:
     let sequentialCount = 0;
 
     for (let i = 1; i < recentPhases.length; i++) {
-      const prevIndex = expectedPhases.indexOf(recentPhases[i-1]);
+      const prevIndex = expectedPhases.indexOf(recentPhases[i - 1]);
       const currIndex = expectedPhases.indexOf(recentPhases[i]);
 
       if (prevIndex >= 0 && currIndex === prevIndex + 1) {

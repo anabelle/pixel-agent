@@ -2,9 +2,6 @@ name: Test plugin-nostr on PR
 
 on:
   pull_request:
-    paths:
-      - 'plugin-nostr/**'
-      - '.github/workflows/plugin-nostr-tests.yml'
   workflow_dispatch:
 
 jobs:

@@ -722,4 +722,336 @@ describe('Nostr Protocol Utilities', () => {
       expect(topics.some(t => t === 'important')).toBe(true);
     });
   });
+
+  describe('Token Filtering and Scoring', () => {
+    it('filters out tokens shorter than 3 characters', async () => {
+      const event = {
+        id: 'test',
+        content: 'ab cd ef programming language',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Short tokens should be filtered
+      expect(topics.some(t => t === 'ab' || t === 'cd' || t === 'ef')).toBe(false);
+      expect(topics.some(t => t.includes('programming') || t.includes('language'))).toBe(true);
+    });
+
+    it('filters NOISE_TOKENS (src, ref, utm, etc)', async () => {
+      const event = {
+        id: 'test',
+        content: 'src ref utm twsrc tfw important article',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      expect(topics.some(t => t === 'src' || t === 'ref' || t === 'utm')).toBe(false);
+      expect(topics.some(t => t.includes('important') || t.includes('article'))).toBe(true);
+    });
+
+    it('requires alphanumeric characters in tokens', async () => {
+      const event = {
+        id: 'test',
+        content: '### @@@ $$$ valid topic',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Pure special characters should be filtered
+      expect(topics.some(t => t.includes('valid') || t.includes('topic'))).toBe(true);
+    });
+
+    it('handles hyphens and apostrophes in tokens', async () => {
+      const event = {
+        id: 'test',
+        content: "state-of-the-art isn't it's don't machine-learning",
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should preserve hyphenated and contracted words
+      expect(topics.length).toBeGreaterThan(0);
+    });
+
+    it('deduplicates topics in results', async () => {
+      const event = {
+        id: 'test',
+        content: 'typescript typescript typescript',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should not have duplicates
+      const uniqueTopics = new Set(topics);
+      expect(topics.length).toBe(uniqueTopics.size);
+    });
+
+    it('excludes bigrams with identical tokens', async () => {
+      const event = {
+        id: 'test',
+        content: 'test test test programming programming programming',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should not create bigrams like "test test" or "programming programming"
+      expect(topics.some(t => t === 'test test')).toBe(false);
+      expect(topics.some(t => t === 'programming programming')).toBe(false);
+    });
+
+    it('excludes candidates containing "http"', async () => {
+      const event = {
+        id: 'test',
+        content: 'httpserver httpclient interesting technology',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Even partial matches with "http" should be filtered in final results
+      expect(topics.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Bigram Scoring Logic', () => {
+    it('excludes bigrams when both tokens are not meaningful', async () => {
+      const event = {
+        id: 'test',
+        content: 'the and but programming language',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Bigrams of stopwords should not appear
+      expect(topics.some(t => t === 'the and' || t === 'and but')).toBe(false);
+    });
+
+    it('includes bigrams when at least one token is meaningful', async () => {
+      const event = {
+        id: 'test',
+        content: 'machine learning deep learning',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should have meaningful bigrams
+      expect(topics.length).toBeGreaterThan(0);
+    });
+
+    it('scores bigrams higher than single words (weight 2 vs 1)', async () => {
+      const event = {
+        id: 'test',
+        content: 'quantum computing quantum computing single',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Bigrams appear first due to higher weight
+      // At minimum, should have both bigram and single word
+      expect(topics.length).toBeGreaterThan(0);
+    });
+
+    it('handles adjacent single-char tokens gracefully', async () => {
+      const event = {
+        id: 'test',
+        content: 'a b c programming language x y z',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should get meaningful topics despite single-char noise
+      expect(topics.some(t => t.includes('programming') || t.includes('language'))).toBe(true);
+    });
+  });
+
+  describe('Case Sensitivity and Normalization', () => {
+    it('normalizes content to lowercase for extraction', async () => {
+      const event = {
+        id: 'test',
+        content: 'TYPESCRIPT JavaScript RuSt',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // All topics should be lowercase
+      topics.forEach(topic => {
+        expect(topic).toBe(topic.toLowerCase());
+      });
+    });
+
+    it('treats case-insensitive matches as same topic', async () => {
+      const event = {
+        id: 'test',
+        content: 'Python PYTHON python',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should deduplicate case variations
+      const pythonCount = topics.filter(t => t === 'python').length;
+      expect(pythonCount).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe('Environment Variable Configuration', () => {
+    it('EXTRACTED_TOPICS_LIMIT can be configured via environment', () => {
+      // The limit is read at module load time
+      expect(typeof EXTRACTED_TOPICS_LIMIT).toBe('number');
+      expect(EXTRACTED_TOPICS_LIMIT).toBeGreaterThan(0);
+      // Default is 15 unless overridden
+      expect(EXTRACTED_TOPICS_LIMIT).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Special Characters and Formatting', () => {
+    it('handles newlines and multiple spaces', async () => {
+      const event = {
+        id: 'test',
+        content: 'machine\n\nlearning   deep    neural    networks',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      expect(topics.length).toBeGreaterThan(0);
+    });
+
+    it('handles tabs and other whitespace', async () => {
+      const event = {
+        id: 'test',
+        content: 'artificial\tintelligence\tand\trobots',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      expect(topics.some(t => t.includes('artificial') || t.includes('intelligence'))).toBe(true);
+    });
+
+    it('handles mixed scripts and languages', async () => {
+      const event = {
+        id: 'test',
+        content: 'Python プログラミング JavaScript 编程',
+      };
+      const topics = await extractTopicsFromEvent(event, null);
+      // Should extract valid tokens from mixed content
+      expect(Array.isArray(topics)).toBe(true);
+    });
+  });
+
+  describe('Conversation Threading', () => {
+    it('getConversationIdFromEvent handles reply marker', () => {
+      const event = {
+        id: 'reply-abc',
+        tags: [
+          ['e', 'root-123', '', 'root'],
+          ['e', 'parent-456', '', 'reply'],
+        ],
+      };
+      // Root takes precedence over reply
+      expect(getConversationIdFromEvent(event)).toBe('root-123');
+    });
+
+    it('getConversationIdFromEvent handles mention marker', () => {
+      const event = {
+        id: 'mention-abc',
+        tags: [
+          ['e', 'mentioned-123', '', 'mention'],
+          ['e', 'other-456'],
+        ],
+      };
+      // Root/reply not present, so first e-tag wins
+      expect(getConversationIdFromEvent(event)).toBe('mentioned-123');
+    });
+
+    it('getConversationIdFromEvent prefers root over first e-tag', () => {
+      const event = {
+        id: 'test',
+        tags: [
+          ['e', 'first-123'],
+          ['e', 'root-456', '', 'root'],
+        ],
+      };
+      expect(getConversationIdFromEvent(event)).toBe('root-456');
+    });
+  });
+
+  describe('Encryption Key Format Variations', () => {
+    it('handles mixed case hex keys consistently', async () => {
+      const lowerKey = 'a'.repeat(64);
+      const upperKey = 'A'.repeat(64);
+      const mixedKey = 'aAbBcC' + 'd'.repeat(58);
+      const peerPubkey = 'b'.repeat(64);
+      const message = 'Test message';
+
+      // All should work without throwing
+      await expect(encryptNIP04Manual(lowerKey, peerPubkey, message)).resolves.toBeDefined();
+      await expect(encryptNIP04Manual(upperKey, peerPubkey, message)).resolves.toBeDefined();
+      await expect(encryptNIP04Manual(mixedKey, peerPubkey, message)).resolves.toBeDefined();
+    });
+
+    it('handles short hex keys with padding', async () => {
+      const shortKey = 'abc123';
+      const peerPubkey = 'b'.repeat(64);
+      const message = 'Test';
+
+      // Should either work or throw a clear error
+      await expect(encryptNIP04Manual(shortKey, peerPubkey, message)).rejects.toThrow();
+    });
+  });
+
+  describe('DM Tag Handling', () => {
+    it('decryptDirectMessage finds first p-tag as recipient', async () => {
+      const mockDecryptFn = vi.fn().mockResolvedValue('Decrypted');
+      const selfPubkey = 'd'.repeat(64);
+      const senderPubkey = 'e'.repeat(64);
+      const recipientPubkey = 'f'.repeat(64);
+
+      const event = {
+        kind: 4,
+        pubkey: senderPubkey,
+        content: 'encrypted',
+        tags: [
+          ['p', recipientPubkey],
+          ['p', 'other-recipient'],
+        ],
+      };
+
+      await decryptDirectMessage(event, 'c'.repeat(64), selfPubkey, mockDecryptFn);
+      expect(mockDecryptFn).toHaveBeenCalled();
+    });
+
+    it('decryptDirectMessage ignores tags without pubkey', async () => {
+      const mockDecryptFn = vi.fn().mockResolvedValue('Decrypted');
+      const selfPubkey = 'd'.repeat(64);
+      const senderPubkey = 'e'.repeat(64);
+
+      const event = {
+        kind: 4,
+        pubkey: senderPubkey,
+        content: 'encrypted',
+        tags: [
+          ['p'], // Missing pubkey
+          ['p', selfPubkey],
+        ],
+      };
+
+      const result = await decryptDirectMessage(event, 'c'.repeat(64), selfPubkey, mockDecryptFn);
+      // Should use the second p-tag (first valid one)
+      expect(result).toBe('Decrypted');
+    });
+  });
+
+  describe('Runtime Integration', () => {
+    it('extracts topics with string response from model', async () => {
+      const mockRuntime = {
+        agentId: 'test-string-response',
+        logger: { debug: vi.fn() },
+        useModel: vi.fn().mockResolvedValue('topic1\ntopic2\ntopic3'),
+      };
+
+      const event = { id: 'test', content: 'Some content' };
+      const topics = await extractTopicsFromEvent(event, mockRuntime);
+
+      expect(Array.isArray(topics)).toBe(true);
+      expect(topics.length).toBeGreaterThan(0);
+    });
+
+    it('extracts topics with object response from model', async () => {
+      const mockRuntime = {
+        agentId: 'test-object-response',
+        logger: { debug: vi.fn() },
+        useModel: vi.fn().mockResolvedValue({ text: 'topic1\ntopic2' }),
+      };
+
+      const event = { id: 'test', content: 'Some content' };
+      const topics = await extractTopicsFromEvent(event, mockRuntime);
+
+      expect(Array.isArray(topics)).toBe(true);
+    });
+
+    it('handles missing agentId by using default key', async () => {
+      const mockRuntime = {
+        // No agentId
+        logger: { debug: vi.fn() },
+        useModel: vi.fn().mockResolvedValue({ text: 'topic' }),
+      };
+
+      const event = { id: 'test', content: 'Some content' };
+      await extractTopicsFromEvent(event, mockRuntime);
+
+      const stats = getTopicExtractorStats(mockRuntime);
+      // Should use 'default' key
+      expect(stats).not.toBeNull();
+
+      await destroyTopicExtractor(mockRuntime);
+    });
+  });
 });

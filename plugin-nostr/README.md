@@ -201,12 +201,36 @@ cd .\plugin-nostr
 npm run test
 ```
 
-Optional:
+### Test Scripts
 
-- Watch mode (interactive): `npx vitest -c ./vitest.config.mjs`
-- Coverage: `npx vitest run --coverage -c ./vitest.config.mjs`
+- **Basic tests**: `npm run test` - Run all tests once
+- **Watch mode**: `npm run test:watch` - Run tests in interactive watch mode
+- **Coverage**: `npm run test:coverage` - Generate comprehensive coverage reports
+- **Coverage watch**: `npm run test:coverage:watch` - Coverage with watch mode
 
-Status: ✅ Production ready with comprehensive testing and memory integration
+### Coverage Reporting
+
+The test suite includes comprehensive code coverage reporting powered by [@vitest/coverage-v8](https://vitest.dev/guide/coverage.html). Coverage reports are generated in multiple formats:
+- **Text**: Summary printed to console
+- **HTML**: Interactive browsable report in `coverage/index.html`
+- **JSON**: Machine-readable data for CI integration
+- **LCOV**: Compatible with external coverage services (Codecov, Coveralls, etc.)
+
+Coverage is configured to analyze all source files in `lib/` with the following quality thresholds:
+- Lines: 80%
+- Functions: 80%
+- Branches: 80%
+- Statements: 80%
+
+To view the HTML coverage report:
+```powershell
+npm run test:coverage
+# Open coverage/index.html in your browser
+```
+
+**Note**: Coverage reports are excluded from git via `.gitignore`
+
+Status: ✅ Production ready with comprehensive testing, coverage reporting, and memory integration
 
 ### Pixel purchase delegation usage
 

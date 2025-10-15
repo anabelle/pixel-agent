@@ -7,8 +7,11 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc",
-  "dev": "tsc --watch",
-  "test": "vitest run -c ./vitest.config.mjs"
+    "dev": "tsc --watch",
+    "test": "vitest run -c ./vitest.config.mjs",
+    "test:watch": "vitest -c ./vitest.config.mjs",
+    "test:coverage": "vitest run --coverage -c ./vitest.config.mjs",
+    "test:coverage:watch": "vitest --coverage -c ./vitest.config.mjs"
   },
   "dependencies": {
     "@elizaos/core": "^1.4.5",
@@ -19,7 +22,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-  "typescript": "^5.0.0",
-  "vitest": "^1.6.0"
+    "@vitest/coverage-v8": "^1.6.1",
+    "typescript": "^5.0.0",
+    "vitest": "^1.6.0"
   }
 }

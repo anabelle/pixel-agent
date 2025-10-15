@@ -437,7 +437,7 @@ class UserProfileManager {
     }
     
     // Final sync before cleanup
-    await _syncProfilesToMemory();
+    await this._syncProfilesToMemory();
   }
 
   getStats() {

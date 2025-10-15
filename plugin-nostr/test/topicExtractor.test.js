@@ -1,6 +1,6 @@
 const { describe, it, expect, beforeEach, afterEach, vi } = globalThis;
-const { TopicExtractor } = require('../lib/topicExtractor');
-const { FORBIDDEN_TOPIC_WORDS, TIMELINE_LORE_IGNORED_TERMS, EXTRACTED_TOPICS_LIMIT } = require('../lib/nostr');
+const { TopicExtractor } = require('../lib/topicExtractor.js');
+const { FORBIDDEN_TOPIC_WORDS, TIMELINE_LORE_IGNORED_TERMS, EXTRACTED_TOPICS_LIMIT } = require('../lib/nostr.js');
 
 describe('TopicExtractor', () => {
   let mockRuntime;

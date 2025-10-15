@@ -1259,5 +1259,246 @@ describe('LNPixels Listener', () => {
       const health = socket._pixelHealth();
       expect(health.totalErrors).toBeGreaterThan(0);
     });
+
+    it('should handle cleanup errors gracefully', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      // Make disconnect throw an error
+      socket.disconnect = () => {
+        throw new Error('Disconnect error');
+      };
+      
+      // Trigger cleanup - should not throw
+      process.emit('SIGTERM');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      expect(mockRuntime.logger.error).toHaveBeenCalledWith(
+        'Cleanup error:',
+        'Disconnect error'
+      );
+    });
+  });
+
+  describe('Edge Cases in Validation', () => {
+    it('should handle bulk purchase with pixelCount already set', async () => {
+      process.env.LNPIXELS_ALLOW_BULK_SUMMARY = 'true';
+      
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        type: 'bulk_purchase',
+        summary: '10 pixels purchased',
+        pixelCount: 10, // Already set
+        totalSats: 1000,
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+      const emittedActivity = bridgeEmitSpy.mock.calls[0][1].activity;
+      expect(emittedActivity.pixelCount).toBe(10);
+    });
+
+    it('should parse pixelCount from summary when not provided', async () => {
+      process.env.LNPIXELS_ALLOW_BULK_SUMMARY = 'true';
+      
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        type: 'bulk_purchase',
+        summary: '7 pixels purchased',
+        // pixelCount not provided
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+      const emittedActivity = bridgeEmitSpy.mock.calls[0][1].activity;
+      expect(emittedActivity.pixelCount).toBe(7);
+    });
+
+    it('should reject bulk purchase with summary but no pixel keyword', async () => {
+      process.env.LNPIXELS_ALLOW_BULK_SUMMARY = 'true';
+      
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        type: 'bulk_purchase',
+        summary: 'Something else happened',
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).not.toHaveBeenCalled();
+    });
+
+    it('should reject bulk purchase without summary or metadata', async () => {
+      process.env.LNPIXELS_ALLOW_BULK_SUMMARY = 'true';
+      
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        type: 'bulk_purchase',
+        // No summary or metadata
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).not.toHaveBeenCalled();
+    });
+
+    it('should accept events with x=0, y=0', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        x: 0,
+        y: 0,
+        color: '#000000',
+        sats: 10,
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+    });
+
+    it('should accept events with letter=null', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        x: 1,
+        y: 1,
+        color: '#000000',
+        sats: 10,
+        letter: null,
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+    });
+
+    it('should validate color coordinate separately', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      // Missing only color
+      const activity = {
+        x: 1,
+        y: 1,
+        // color missing
+        sats: 10,
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).not.toHaveBeenCalled();
+    });
+
+    it('should accept events with optional sats', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        x: 1,
+        y: 1,
+        color: '#000000',
+        // sats not provided
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+    });
+
+    it('should handle bulk purchase with totalSats calculation', async () => {
+      const socket = listenerModule.startLNPixelsListener(mockRuntime);
+      const { emitter: bridge } = await import('../lib/bridge.js');
+      const bridgeEmitSpy = vi.spyOn(bridge, 'emit');
+      
+      await new Promise(resolve => setTimeout(resolve, 10));
+      socket.simulateConnect();
+      
+      const activity = {
+        type: 'payment',
+        metadata: {
+          pixelUpdates: [
+            { x: 1, y: 1, color: '#FF0000', price: 100 },
+            { x: 2, y: 2, color: '#00FF00', price: 150 },
+            { x: 3, y: 3, color: '#0000FF', price: 200 }
+          ]
+        },
+        created_at: Date.now()
+      };
+      
+      socket.simulateActivity(activity);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      expect(bridgeEmitSpy).toHaveBeenCalled();
+      const emittedActivity = bridgeEmitSpy.mock.calls[0][1].activity;
+      expect(emittedActivity.totalSats).toBe(450);
+      expect(emittedActivity.pixelCount).toBe(3);
+      // Should remove individual pixel coordinates
+      expect(emittedActivity.x).toBeUndefined();
+      expect(emittedActivity.y).toBeUndefined();
+      expect(emittedActivity.color).toBeUndefined();
+    });
   });
 });

@@ -1,4 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock the core module before importing the service
+const mockLogger = {
+  warn: vi.fn(),
+  debug: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn()
+};
+
+vi.mock('@elizaos/core', () => {
+  const mocked = {
+    logger: mockLogger,
+    createUniqueUuid: vi.fn((runtime, seed) => `test-uuid-${seed || Math.random()}`),
+    ChannelType: { PUBLIC: 'PUBLIC', DIRECT: 'DIRECT' },
+    ModelType: { TEXT_SMALL: 'TEXT_SMALL', TEXT_MEDIUM: 'TEXT_MEDIUM' }
+  };
+  mocked.default = mocked;
+  return mocked;
+});
+
 import { NostrService } from '../lib/service.js';
 
 describe('NostrService Lifecycle', () => {
@@ -88,9 +108,10 @@ describe('NostrService Lifecycle', () => {
     });
 
     it('should handle missing relays gracefully', async () => {
+      const originalGetSetting = mockRuntime.getSetting;
       mockRuntime.getSetting = vi.fn((key) => {
         if (key === 'NOSTR_RELAYS') return '';
-        return mockRuntime.getSetting(key);
+        return originalGetSetting(key);
       });
 
       service = await NostrService.start(mockRuntime);

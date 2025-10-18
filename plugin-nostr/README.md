@@ -51,6 +51,7 @@ Config (from Character.settings):
 - NOSTR_UNFOLLOW_MIN_QUALITY_SCORE: 0.0-1.0 (default 0.3)
 - NOSTR_UNFOLLOW_MIN_POSTS_THRESHOLD: number (default 5)
 - NOSTR_UNFOLLOW_CHECK_INTERVAL_HOURS: number (default 24)
+- NOSTR_UNFOLLOW_ADD_TO_MUTE: true/false (default true)
 
 ## Home Feed Interactions
 
@@ -111,12 +112,20 @@ The plugin includes intelligent unfollow functionality to maintain feed quality 
 - Set `NOSTR_UNFOLLOW_MIN_QUALITY_SCORE=0.3` for minimum quality score (0.0-1.0)
 - Set `NOSTR_UNFOLLOW_MIN_POSTS_THRESHOLD=5` for minimum posts before considering unfollow
 - Set `NOSTR_UNFOLLOW_CHECK_INTERVAL_HOURS=24` for how often to check (1-168 hours)
+- Set `NOSTR_UNFOLLOW_ADD_TO_MUTE=true` to automatically add unfollowed users to mute list (prevents rediscovery)
 
 **Quality scoring:**
 - Posts are scored based on content quality (length, relevance, engagement potential)
 - Running averages prevent single bad posts from triggering unfollows
 - Only users with sufficient post history are considered for unfollowing
 - Quality filtering uses the same criteria as home feed interactions
+
+**Mute list integration:**
+- When `NOSTR_UNFOLLOW_ADD_TO_MUTE=true` (default), unfollowed users are automatically added to the mute list
+- This prevents the discovery process from rediscovering and refollowing them
+- Muted users are automatically filtered out during discovery (existing behavior)
+- If a muted user is manually unmuted, they can be rediscovered and followed again
+- Mute operation errors are logged but don't prevent the unfollow from completing
 
 **Safety features:**
 - Only unfollows users with enough posts to establish patterns

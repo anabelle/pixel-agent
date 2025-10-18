@@ -2325,7 +2325,7 @@ Response (YES/NO):`;
                   text: String(c.text).slice(0, 200)
                 };
               });
-            recentAgentPosts = mapped.slice(-8);
+            recentAgentPosts = mapped.slice(-12);
 
             try {
               const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
@@ -2735,7 +2735,7 @@ Response (YES/NO):`;
                   text: String(c.text).slice(0, 200)
                 };
               });
-            recentAgentPosts = mapped.slice(-8);
+            recentAgentPosts = mapped.slice(-12);
 
             // Build compact summaries of permanent memories by type
             try {
@@ -3155,7 +3155,7 @@ Response (YES/NO):`;
                   else if (c.type) type = c.type;
                   return { id: m.id, createdAtIso: m.createdAt ? new Date(m.createdAt).toISOString() : null, type, text: String(c.text).slice(0, 200) };
                 });
-              recentAgentPosts = mapped.slice(-8);
+              recentAgentPosts = mapped.slice(-12);
               // Compact permanent summaries are built by generateAwarenessPostTextLLM; reuse same helper logic here
               try {
                 const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];
@@ -3669,7 +3669,7 @@ Response (YES/NO):`;
                   text: String(c.text).slice(0, 200)
                 };
               });
-            recentAgentPosts = mapped.slice(-8);
+            recentAgentPosts = mapped.slice(-12);
 
             try {
               const pickLatest = (list, n) => Array.isArray(list) ? list.slice(-n) : [];

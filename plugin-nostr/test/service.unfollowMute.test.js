@@ -70,7 +70,7 @@ describe('NostrService unfollow with mute functionality', () => {
       unfollowAddToMute: true, // Default to true
       runtime: {
         getSetting: (key) => {
-          if (key === 'NOSTR_UNFOLLOW_MUTED_USERS') return 'true';
+          if (key === 'NOSTR_UNFOLLOW_ADD_TO_MUTE') return 'true';
           return null;
         }
       },

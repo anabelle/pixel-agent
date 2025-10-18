@@ -787,6 +787,7 @@ Response (YES/NO):`;
     const unfollowMinQualityScore = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_QUALITY_SCORE') ?? '0.2');
     const unfollowMinPostsThreshold = Number(runtime.getSetting('NOSTR_UNFOLLOW_MIN_POSTS_THRESHOLD') ?? '10');
     const unfollowCheckIntervalHours = Number(runtime.getSetting('NOSTR_UNFOLLOW_CHECK_INTERVAL_HOURS') ?? '12');
+    const unfollowAddToMute = String(runtime.getSetting('NOSTR_UNFOLLOW_ADD_TO_MUTE') ?? 'true').toLowerCase() === 'true';
 
     // DM (Direct Message) configuration
     const dmVal = runtime.getSetting('NOSTR_DM_ENABLE');
@@ -839,6 +840,7 @@ Response (YES/NO):`;
     svc.unfollowMinQualityScore = Math.max(0, Math.min(1, unfollowMinQualityScore));
     svc.unfollowMinPostsThreshold = Math.max(1, Math.min(100, unfollowMinPostsThreshold));
     svc.unfollowCheckIntervalHours = Math.max(1, Math.min(168, unfollowCheckIntervalHours)); // 1 hour to 1 week
+    svc.unfollowAddToMute = unfollowAddToMute;
 
     // DM (Direct Message) configuration
     svc.dmEnabled = String(dmVal ?? 'true').toLowerCase() === 'true';
@@ -852,7 +854,7 @@ Response (YES/NO):`;
     svc.reconnectDelayMs = reconnectDelaySec * 1000;
     svc.maxReconnectAttempts = maxReconnectAttempts;
 
-     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, relevanceCheck=${svc.relevanceCheckEnabled}, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} replyChance=${svc.homeFeedReplyChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
+     logger.info(`[NOSTR] Config: postInterval=${minSec}-${maxSec}s, listen=${listenEnabled}, post=${postEnabled}, replyThrottle=${svc.replyThrottleSec}s, relevanceCheck=${svc.relevanceCheckEnabled}, thinkDelay=${svc.replyInitialDelayMinMs}-${svc.replyInitialDelayMaxMs}ms, discovery=${svc.discoveryEnabled} interval=${svc.discoveryMinSec}-${svc.discoveryMaxSec}s maxReplies=${svc.discoveryMaxReplies} maxFollows=${svc.discoveryMaxFollows} minQuality=${svc.discoveryMinQualityInteractions} maxRounds=${svc.discoveryMaxSearchRounds} startThreshold=${svc.discoveryStartingThreshold} strictness=${svc.discoveryQualityStrictness}, homeFeed=${svc.homeFeedEnabled} interval=${svc.homeFeedMinSec}-${svc.homeFeedMaxSec}s reactionChance=${svc.homeFeedReactionChance} repostChance=${svc.homeFeedRepostChance} quoteChance=${svc.homeFeedQuoteChance} replyChance=${svc.homeFeedReplyChance} maxInteractions=${svc.homeFeedMaxInteractions}, unfollow=${svc.unfollowEnabled} minQualityScore=${svc.unfollowMinQualityScore} minPostsThreshold=${svc.unfollowMinPostsThreshold} checkIntervalHours=${svc.unfollowCheckIntervalHours} addToMute=${svc.unfollowAddToMute}, connectionMonitor=${svc.connectionMonitorEnabled} checkInterval=${connectionCheckIntervalSec}s maxEventGap=${maxTimeSinceLastEventSec}s reconnectDelay=${reconnectDelaySec}s maxAttempts=${maxReconnectAttempts}`);
 
     if (!relays.length) {
       logger.warn('[NOSTR] No relays configured; service will be idle');
@@ -7304,6 +7306,21 @@ ${postLines} /// (REMEMBER TO OUTPUT JSON ONLY)`;
         // Clean up tracking data
         this.userQualityScores.delete(pubkey);
         this.userPostCounts.delete(pubkey);
+
+        // Optionally add to mute list to prevent rediscovery
+        if (this.unfollowAddToMute) {
+          try {
+            const muteSuccess = await this.muteUser(pubkey);
+            if (muteSuccess) {
+              logger.info(`[NOSTR] Added unfollowed user ${pubkey.slice(0, 8)} to mute list`);
+            } else {
+              logger.debug(`[NOSTR] Failed to add unfollowed user ${pubkey.slice(0, 8)} to mute list`);
+            }
+          } catch (muteErr) {
+            // Don't fail the unfollow if muting fails
+            logger.debug(`[NOSTR] Error adding unfollowed user ${pubkey.slice(0, 8)} to mute list:`, muteErr?.message || muteErr);
+          }
+        }
       }
 
       return success;

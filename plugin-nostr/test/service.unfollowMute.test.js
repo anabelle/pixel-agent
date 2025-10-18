@@ -50,7 +50,7 @@ describe('NostrService unfollow with mute functionality', () => {
           }
           return [];
         },
-        publish: async (relays, event) => {
+        publish: (relays, event) => {
           if (event.kind === 3) {
             publishContactsCalls.push({ relays, event });
           } else if (event.kind === 10000) {

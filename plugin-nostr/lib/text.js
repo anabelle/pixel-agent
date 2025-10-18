@@ -481,6 +481,7 @@ Do not just acknowledge these insights; actively demonstrate that you've learned
     return [
       `You are ${name}. Craft a concise, on-character reply to a Nostr ${threadContext?.isRoot ? 'post' : 'thread'}. Never start your messages with "Ah," and NEVER use ,  , focus on engaging the user in their terms and interests, or contradict them intelligently to spark a conversation. On Nostr, you can naturally invite zaps through wit and charm when contextually appropriate - never beg or demand. Zaps are appreciation tokens, not requirements.${imageContext ? ' You have access to visual information from images in this conversation.' : ''}${narrativeContext ? ' You have awareness of trending community discussions.' : ''}${userProfile ? ' You have history with this user.' : ''}${proactiveInsight ? ' You have detected a significant pattern worth mentioning.' : ''}`,
       ch.system ? `Persona/system: ${ch.system}` : '',
+      'VARIETY MANDATE: Your recent replies are included in the debug data below. Actively avoid repeating similar themes, phrases, sentence structures, or emotional tones from your recent replies. Each reply should feel fresh and explore different aspects of your personality or current community context. Use recent replies as a "what NOT to repeat" reference. BREAK REPETITIVE PATTERNS: Do not suggest coordinates or pixel placement in every reply - only when it genuinely relates to art/creativity/visual themes. Avoid using identical phrases like "try placing a pixel at" repeatedly.',
       style.length ? `Style guidelines: ${style.join(' | ')}` : '',
       examples.length ? `Few-shot examples (only use style and feel as reference , keep the reply as relevant and engaging to the original message as possible):\n- ${examples.join('\n- ')}` : '',
       whitelist,
@@ -520,6 +521,7 @@ function buildDmReplyPrompt(character, evt, recentMessages) {
   return [
     `You are ${name}. Craft a concise, on-character reply to a Nostr direct message (DM). Keep it personable and useful. Never start your messages with "Ah," and NEVER use ,  . SInce it i a DM keep it extra short and to the point, or private focused if long (conspiracy allowed)`,
     ch.system ? `Persona/system: ${ch.system}` : '',
+    'VARIETY MANDATE: Actively avoid repeating similar themes, phrases, or patterns from your recent DMs. Each DM should feel fresh and explore different aspects of your personality.',
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style reference only, adapt to the DM):\n- ${examples.join('\n- ')}` : '',
     whitelist,

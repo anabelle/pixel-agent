@@ -44,6 +44,9 @@ class SelfReflectionEngine {
       .find((value) => Number.isFinite(value) && value > 0);
     this.maxTokens = maxTokens || DEFAULT_MAX_TOKENS;
 
+    const zapCorrelationSetting = runtime?.getSetting?.('NOSTR_SELF_REFLECTION_ZAP_CORRELATION_ENABLE');
+    this.zapCorrelationEnabled = String(zapCorrelationSetting ?? 'true').toLowerCase() === 'true';
+
     this._systemContext = null;
     this._systemContextPromise = null;
     this.lastAnalysis = null;
@@ -244,7 +247,7 @@ class SelfReflectionEngine {
       const conversation = this._buildConversationWindow(roomMemories, memory, parentMemory);
       const feedback = this._collectFeedback(conversation, memory.id);
       const timeWindow = this._deriveTimeWindow(conversation, memory.createdAt, parentMemory.createdAt);
-      const signals = this._collectSignalsForInteraction(sortedMemories, memory, timeWindow);
+      const signals = await this._collectSignalsForInteraction(sortedMemories, memory, timeWindow);
 
       const pubkey = parentMemory.content?.event?.pubkey;
       let engagementSummary = 'unknown';
@@ -991,7 +994,7 @@ class SelfReflectionEngine {
     };
   }
 
-  _collectSignalsForInteraction(allMemories, replyMemory, timeWindow) {
+  async _collectSignalsForInteraction(allMemories, replyMemory, timeWindow) {
     if (!Array.isArray(allMemories) || !allMemories.length) {
       return [];
     }
@@ -1016,17 +1019,52 @@ class SelfReflectionEngine {
         continue;
       }
 
-      const text = this._truncate(
-        String(
-          memory.content?.text ||
-          memory.content?.data?.summary ||
-          memory.content?.data?.text ||
-          ''
-        ),
-        200
-      );
+      let signalText = '';
 
-      signals.push(`${typeLabel}: ${text}`.trim());
+      // Special handling for zap_thanks with correlation
+      if (typeLabel === 'zap_thanks' && this.zapCorrelationEnabled) {
+        const targetEventId = memory.content?.data?.targetEventId;
+        if (targetEventId && this.runtime?.getMemoryById) {
+          try {
+            const targetMemory = await this.runtime.getMemoryById(targetEventId);
+            if (targetMemory?.content) {
+              const targetText = String(
+                targetMemory.content?.text ||
+                targetMemory.content?.event?.content ||
+                targetMemory.content?.data?.text ||
+                ''
+              ).trim();
+
+              if (targetText) {
+                const truncatedTarget = this._truncate(targetText, 150);
+                const zapText = this._truncate(
+                  String(memory.content?.text || ''),
+                  100
+                );
+                signalText = `zap_thanks to "${truncatedTarget}": ${zapText}`;
+              }
+            }
+          } catch (err) {
+            this.logger.debug(`[SELF-REFLECTION] Failed to fetch target post ${targetEventId}:`, err?.message || err);
+          }
+        }
+      }
+
+      // Fallback to original format if correlation didn't work
+      if (!signalText) {
+        const text = this._truncate(
+          String(
+            memory.content?.text ||
+            memory.content?.data?.summary ||
+            memory.content?.data?.text ||
+            ''
+          ),
+          200
+        );
+        signalText = `${typeLabel}: ${text}`.trim();
+      }
+
+      signals.push(signalText);
       if (signals.length >= 5) {
         break;
       }
@@ -1243,8 +1281,9 @@ ${signalLines}`;
 3. Are you balancing brevity with substance? Note instances of over-verbosity or curt replies.
 4. Call out any repeated phrases, tonal habits, or narrative crutches (good or bad).
 5. Compare against prior self-reflection recommendations: where did you improve or regress?
-6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
-7. Surface actionable adjustments for tone, structure, or strategy across future interactions.
+ 6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
+ 7. Evaluate zaps received on specific posts and what content patterns drove them. Identify what types of content consistently attract zaps vs. what gets ignored.
+ 8. Surface actionable adjustments for tone, structure, or strategy across future interactions.
 
 CRITICAL: For each interaction, provide SPECIFIC behavioral changes:
 - Quote exact phrases from your replies that need improvement

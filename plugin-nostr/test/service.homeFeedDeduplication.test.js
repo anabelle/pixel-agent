@@ -78,6 +78,10 @@ describe('NostrService Home Feed Reply Deduplication', () => {
 
   // Helper function to set up common mocks
   function setupHomeFeedMocks(service) {
+    service.pool = mockPool; // Ensure pool is set for processHomeFeed
+    service.sk = 'test-sk'; // Mock private key
+    service.relays = ['wss://test.relay']; // Mock relays
+    service.pkHex = 'test-pk-hex'; // Mock public key hex
     service._loadCurrentContacts = vi.fn(() => Promise.resolve(new Set(['test-pubkey'])));
     service._list = vi.fn(() => Promise.resolve([{
       id: 'test-event-id',

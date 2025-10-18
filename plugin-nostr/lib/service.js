@@ -5873,14 +5873,24 @@ Response (YES/NO):`;
                
                const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
                
-               // Check if LLM generation failed (returned null)
-               if (!text || !text.trim()) {
-                 logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-                 success = false;
-                 break;
-               }
-               
-               success = await this.postReply(evt, text);
+                // Check if LLM generation failed (returned null)
+                if (!text || !text.trim()) {
+                  logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+                  success = false;
+                  break;
+                }
+
+                // Check if we've already replied to this event
+                const eventMemoryId = this.createUniqueUuid(this.runtime, evt.id);
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+                if (hasReply) {
+                  logger.info(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} (found existing reply)`);
+                  success = false;
+                  break;
+                }
+
+                success = await this.postReply(evt, text);
                break;
              }
            }

@@ -11,7 +11,7 @@ try {
 }
 
 const DEFAULT_MAX_INTERACTIONS = 40;
-const DEFAULT_TEMPERATURE = 0.6;
+const DEFAULT_TEMPERATURE = 0.75;
 const DEFAULT_MAX_TOKENS = 800;
 
 class SelfReflectionEngine {

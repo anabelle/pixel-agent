@@ -6926,7 +6926,7 @@ EXTRACT SPECIFICS:
 IF POSTS MENTION AGENT/BOT:
 - Treat as regular topic, focus on other content
 
-OUTPUT MANDATORY REQUIREMENTS (JSON IS THE ONLY VALID RESPONSE):
+OUTPUT MANDATORY REQUIREMENTS - RETURN RAW JSON ONLY (NO MARKDOWN, NO CODE FENCES, NO BACKTICKS):
 {
   "headline": "What PROGRESSED or EMERGED (<=18 words, not just 'X was discussed')",
   "narrative": "Focus on CHANGE, EVOLUTION, or NEW DEVELOPMENTS (3-5 sentences)",
@@ -6941,13 +6941,15 @@ OUTPUT MANDATORY REQUIREMENTS (JSON IS THE ONLY VALID RESPONSE):
 Tags from post metadata: ${rankedTags.join(', ') || 'none'}
 
 POSTS TO ANALYZE (${recentBatch.length} posts):
-${postLines} /// (REMEMBER TO OUTPUT JSON ONLY)`;
+${postLines}
+
+YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
 
       const raw = await generateWithModelOrFallback(
         this.runtime,
         type,
         prompt,
-        { maxTokens: 480, temperature: 0.45 },
+        { maxTokens: 1000, temperature: 0.45 },
         (res) => this._extractTextFromModelResult(res),
         (s) => (typeof s === 'string' ? s.trim() : ''),
         () => null

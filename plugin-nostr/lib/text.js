@@ -20,7 +20,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
       ? ch.postExamples
       : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
     : [];
-  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Do not include URLs/addresses in every post. Focus on creativity, art, philosophy first. Only mention payment details when contextually appropriate.';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
   
   // NEW: Build context section if available
   let contextSection = '';
@@ -188,7 +188,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style reference only, not to copy or repeat):\n- ${examples.join('\n- ')}` : '',
     whitelist,
-    'NOSTR ZAP STRATEGY: Rarely (not every post) use playful zap humor: "my server runs on pure optimism and lightning bolts ⚡" or "pixel thoughts powered by community zaps" or "running on fumes and good vibes, zaps welcome ⚡" or "server status: vibing, but rent is real ⚡". Make it charming, not desperate.',
+    'PAYMENT CONTEXT (only if organically relevant): You have Lightning support at sparepicolo55@walletofsatoshi.com. Only mention this if someone asks how to support or if they explicitly show interest in contributing. You are financially stable now - focus on conversation and community, not fundraising.',
     contextSection, // NEW: Include community context
     reflectionSection, // NEW: Include self-reflection insights
     isScheduled ? 'Awareness mandate: If context hints are present, surface at least one concrete detail (trend, stat, or name) as part of the story, unless it would clearly break character.' : '',
@@ -202,7 +202,7 @@ function buildReplyPrompt(character, evt, recentMessages, threadContext = null, 
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Only mention payment/URLs when contextually appropriate, not in every reply.';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
   const userText = (evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 10
@@ -498,7 +498,7 @@ Do not just acknowledge these insights; actively demonstrate that you've learned
       imageContextSection,
     history,
     `${threadContext?.isRoot ? 'Original post' : 'Direct message you\'re replying to'}: "${userText}"`,
-      'NOSTR ZAP NUANCE: If conversation flows naturally toward support/appreciation, you can playfully reference zaps with humor: "your words fuel my circuits ⚡" or "running on creativity and lightning ⚡" or "zaps power the art machine ⚡". Stay contextual and witty, never pushy.',
+      'PAYMENT NUANCE: Only mention payment/zaps if someone explicitly asks. You are financially stable with a year runway - no need to push for support in every interaction. Focus on the actual conversation topic.',
       `Constraints: Output ONLY the reply text. 1–3 sentences max. Be conversational${threadContext ? ' and thread-aware' : ''}${imageContext ? ' and visually-aware (reference what you see in the images)' : ''}${narrativeContext ? ' and community-aware (acknowledge trending topics naturally)' : ''}. Avoid generic acknowledgments; add substance or wit. Respect whitelist, no other links/handles. do not add a link on every message, be a bit mysterious about sharing the access to your temple.`,
     ].filter(Boolean).join('\n\n');
 }
@@ -550,7 +550,7 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Only allowed sites: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
   
   const sats = amountMsats ? Math.floor(amountMsats / 1000) : null;
   const amountContext = sats 
@@ -599,7 +599,7 @@ function buildDailyDigestPostPrompt(character, report) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
-  const whitelist = 'Whitelist rules: Only use these URLs/handles when directly relevant: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com - IMPORTANT: Do not include URLs/addresses in every post. Focus on creativity, art, philosophy first. Only mention payment details when contextually appropriate.';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
 
   const summary = report?.summary || {};
   const narrative = report?.narrative || {};
@@ -659,7 +659,7 @@ function buildPixelBoughtPrompt(character, activity) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
-  const whitelist = 'Only allowed sites: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
 
   const x = typeof activity?.x === 'number' ? activity.x : undefined;
   const y = typeof activity?.y === 'number' ? activity.y : undefined;

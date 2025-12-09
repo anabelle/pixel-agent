@@ -486,7 +486,8 @@ class SelfReflectionEngine {
     for (const memory of memories) {
       const data = memory?.content?.data;
       const analysis = data?.analysis;
-      if (!analysis) {
+      // Skip invalid reflections - require proper structure
+      if (!analysis || !this._hasMinimalReflectionData(analysis)) {
         continue;
       }
 
@@ -1291,7 +1292,8 @@ CRITICAL: For each interaction, provide SPECIFIC behavioral changes:
 - Recommend exact wording alternatives for better engagement
 - Provide concrete examples of how to restructure responses
 
-OUTPUT JSON ONLY:
+IMPORTANT: OUTPUT VALID JSON ONLY - NO MARKDOWN, NO EXPLANATIONS, NO CODE BLOCKS.
+Your entire response must be a single valid JSON object with this exact structure:
 {
   "strengths": ["Specific successful approaches to continue using"],
   "weaknesses": ["Exact problematic phrases or patterns to eliminate", "More specific issues"],
@@ -1312,16 +1314,117 @@ OUTPUT JSON ONLY:
       return null;
     }
 
+    // Try extracting JSON first
     try {
       const match = response.match(/\{[\s\S]*\}/);
-      if (!match) {
-        return null;
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (this._isValidReflection(parsed)) {
+          return parsed;
+        }
+        this.logger.debug('[SELF-REFLECTION] JSON parsed but missing required fields, trying markdown fallback');
       }
-      return JSON.parse(match[0]);
     } catch (err) {
-      this.logger.debug('[SELF-REFLECTION] Failed to parse JSON response:', err?.message || err);
+      this.logger.debug('[SELF-REFLECTION] JSON parse failed, trying markdown fallback:', err?.message || err);
+    }
+
+    // Fallback: extract fields from markdown response
+    const markdownExtracted = this._extractFieldsFromMarkdown(response);
+    if (markdownExtracted && this._hasMinimalReflectionData(markdownExtracted)) {
+      this.logger.debug('[SELF-REFLECTION] Extracted reflection from markdown response');
+      return markdownExtracted;
+    }
+
+    this.logger.debug('[SELF-REFLECTION] Failed to extract valid reflection from response');
+    return null;
+  }
+
+  _extractFieldsFromMarkdown(text) {
+    if (!text || typeof text !== 'string') {
       return null;
     }
+
+    const result = {
+      strengths: [],
+      weaknesses: [],
+      patterns: [],
+      recommendations: [],
+      exampleGoodReply: null,
+      exampleBadReply: null,
+      regressions: [],
+      improvements: []
+    };
+
+    // Extract list items following headers or labels
+    const extractListItems = (pattern) => {
+      const matches = [];
+      const regex = new RegExp(pattern + '[:\\s]*([^\\n]+(?:\\n[-*•]\\s*[^\\n]+)*)', 'gi');
+      const match = text.match(regex);
+      if (match) {
+        for (const m of match) {
+          // Extract bullet points
+          const bullets = m.match(/[-*•]\s*([^\n]+)/g);
+          if (bullets) {
+            for (const bullet of bullets) {
+              const cleaned = bullet.replace(/^[-*•]\s*/, '').trim();
+              if (cleaned && cleaned.length > 3) {
+                matches.push(cleaned);
+              }
+            }
+          }
+          // Also extract non-bullet content after the header
+          const headerMatch = m.match(new RegExp(pattern + '[:\\s]*([^\\n]+)', 'i'));
+          if (headerMatch && headerMatch[1] && !headerMatch[1].match(/^[-*•]/)) {
+            const items = headerMatch[1].split(/[;,]/).map(s => s.trim()).filter(s => s.length > 3);
+            matches.push(...items);
+          }
+        }
+      }
+      return matches;
+    };
+
+    // Extract each field type
+    result.strengths = extractListItems('(?:strengths?|what(?:\'s| is| you\'?re?) (?:working|doing) well|positives?)');
+    result.weaknesses = extractListItems('(?:weaknesses?|what needs? (?:improvement|work)|areas? (?:to|for) improv|negatives?|issues?)');
+    result.patterns = extractListItems('(?:patterns?|repeated behaviors?|habits?)');
+    result.recommendations = extractListItems('(?:recommendations?|suggestions?|actionable (?:changes?|improvements?)|next steps?|advice)');
+    result.regressions = extractListItems('(?:regressions?|(?:where|areas?) (?:you )?slipped|went backwards?)');
+    result.improvements = extractListItems('(?:improvements?|(?:where|areas?) (?:you )?improved|progress)');
+
+    // Extract quoted examples
+    const goodReplyMatch = text.match(/(?:best|good|strong|example good)\s*(?:reply|response|moment)[:\s]*["\u201c]([^"\u201d]+)["\u201d]/i);
+    if (goodReplyMatch) {
+      result.exampleGoodReply = goodReplyMatch[1].trim();
+    }
+
+    const badReplyMatch = text.match(/(?:worst|bad|weak|example bad)\s*(?:reply|response|moment)[:\s]*["\u201c]([^"\u201d]+)["\u201d]/i);
+    if (badReplyMatch) {
+      result.exampleBadReply = badReplyMatch[1].trim();
+    }
+
+    return result;
+  }
+
+  _isValidReflection(analysis) {
+    if (!analysis || typeof analysis !== 'object') {
+      return false;
+    }
+    // Require at least strengths, weaknesses, and recommendations to be arrays
+    return (
+      Array.isArray(analysis.strengths) &&
+      Array.isArray(analysis.weaknesses) &&
+      Array.isArray(analysis.recommendations)
+    );
+  }
+
+  _hasMinimalReflectionData(analysis) {
+    if (!analysis || typeof analysis !== 'object') {
+      return false;
+    }
+    // For markdown extraction, be more lenient - require at least 2 fields with data
+    const fieldsWithData = ['strengths', 'weaknesses', 'patterns', 'recommendations', 'regressions', 'improvements']
+      .filter(field => Array.isArray(analysis[field]) && analysis[field].length > 0);
+    return fieldsWithData.length >= 2;
   }
 
   _createUuid(seed) {

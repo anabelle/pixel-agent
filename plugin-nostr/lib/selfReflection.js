@@ -1356,10 +1356,12 @@ Your entire response must be a single valid JSON object with this exact structur
     };
 
     // Extract list items following headers or labels
+    // Limit input to prevent ReDoS on large responses
+    const limitedText = text.length > 10000 ? text.slice(0, 10000) : text;
     const extractListItems = (pattern) => {
       const matches = [];
       const regex = new RegExp(pattern + '[:\\s]*([^\\n]+(?:\\n[-*•]\\s*[^\\n]+)*)', 'gi');
-      const match = text.match(regex);
+      const match = limitedText.match(regex);
       if (match) {
         for (const m of match) {
           // Extract bullet points
@@ -1384,7 +1386,8 @@ Your entire response must be a single valid JSON object with this exact structur
     };
 
     // Extract each field type
-    result.strengths = extractListItems('(?:strengths?|what(?:\'s| is| you\'?re?) (?:working|doing) well|positives?)');
+    // Note: Explicitly match "you're" or "youre" to prevent "your" from matching
+    result.strengths = extractListItems('(?:strengths?|what(?:\'s| is| (?:you\'re|youre)) (?:working|doing) well|positives?)');
     result.weaknesses = extractListItems('(?:weaknesses?|what needs? (?:improvement|work)|areas? (?:to|for) improv|negatives?|issues?)');
     result.patterns = extractListItems('(?:patterns?|repeated behaviors?|habits?)');
     result.recommendations = extractListItems('(?:recommendations?|suggestions?|actionable (?:changes?|improvements?)|next steps?|advice)');

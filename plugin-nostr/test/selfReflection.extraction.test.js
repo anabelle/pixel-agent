@@ -248,6 +248,33 @@ Recommendations:
       // Empty string is technically a valid string, but guard treats it as falsy
       expect(engine._extractFieldsFromMarkdown('')).toBeNull();
     });
+
+    it('filters out very short items (length <= 3)', () => {
+      const text = `Strengths:
+- OK
+- A valid strength item
+- Yes
+- No`;
+
+      const result = engine._extractFieldsFromMarkdown(text);
+      expect(result.strengths).toEqual(['A valid strength item']);
+      expect(result.strengths).not.toContain('OK');
+      expect(result.strengths).not.toContain('Yes');
+      expect(result.strengths).not.toContain('No');
+    });
+
+    it('does not match "your" as "you\'re"', () => {
+      const text = `What your doing well:
+- This should NOT match as strengths
+
+Strengths:
+- This should match`;
+
+      const result = engine._extractFieldsFromMarkdown(text);
+      // "your" should not match the you're pattern
+      expect(result.strengths).not.toContain('This should NOT match as strengths');
+      expect(result.strengths).toContain('This should match');
+    });
   });
 
   describe('integration: mixed JSON and markdown scenarios', () => {

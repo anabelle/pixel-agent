@@ -2278,18 +2278,53 @@ Response (YES/NO):`;
     }
 
     let reflectionInsights = null;
+    let agentLearnings = [];
+    let lifeMilestones = [];
+
     if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
       try {
         reflectionInsights = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168 });
         if (reflectionInsights) {
           logger.debug('[NOSTR] Loaded self-reflection insights for post prompt');
         }
+
+        // NEW: Fetch permanent learnings and life milestones
+        if (this.runtime?.getMemories) {
+          const allNarrativeMems = await this.runtime.getMemories({ tableName: 'messages', count: 100, unique: false });
+          agentLearnings = allNarrativeMems
+            .filter(m => m.content?.type === 'agent_learning')
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+            .slice(0, 5)
+            .map(m => m.content?.text);
+          
+          lifeMilestones = allNarrativeMems
+            .filter(m => m.content?.type === 'life_milestone')
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+            .slice(0, 3)
+            .map(m => ({
+              text: m.content?.text,
+              phase: m.content?.data?.phase,
+              date: m.content?.data?.generatedAt
+            }));
+          
+          if (agentLearnings.length || lifeMilestones.length) {
+            logger.debug(`[NOSTR] Loaded ${agentLearnings.length} learnings and ${lifeMilestones.length} milestones for post prompt`);
+          }
+        }
       } catch (err) {
-        logger.debug('[NOSTR] Failed to load self-reflection insights for post prompt:', err?.message || err);
+        logger.debug('[NOSTR] Failed to load narrative insights for post prompt:', err?.message || err);
       }
     }
     
-  let prompt = this._buildPostPrompt(contextData, reflectionInsights, { isScheduled });
+    // Add learnings to context data for the prompt builder
+    if (contextData) {
+      contextData.agentLearnings = agentLearnings;
+      contextData.lifeMilestones = lifeMilestones;
+    } else if (agentLearnings.length || lifeMilestones.length) {
+      contextData = { agentLearnings, lifeMilestones };
+    }
+    
+    let prompt = this._buildPostPrompt(contextData, reflectionInsights, { isScheduled });
     
     // Append memory dump similar to awareness prompt
     try {

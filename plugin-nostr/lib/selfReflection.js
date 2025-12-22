@@ -353,6 +353,66 @@ class SelfReflectionEngine {
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       if (result && (result === true || result.created)) {
         this.logger.debug('[SELF-REFLECTION] Stored reflection insights');
+        
+        // NEW: Store key learnings and milestones as separate high-priority memories
+        if (payload.analysis) {
+          try {
+            const { keyLearnings, narrativeEvolution, suggestedPhase } = payload.analysis;
+            
+            // Store narrative evolution as a life milestone
+            if (narrativeEvolution || suggestedPhase) {
+              const milestoneId = this._createUuid(`nostr-milestone-${Date.now()}`);
+              const milestoneMemory = {
+                id: milestoneId,
+                entityId,
+                roomId,
+                agentId: this.runtime.agentId,
+                content: {
+                  type: 'life_milestone',
+                  source: 'nostr',
+                  text: narrativeEvolution || `Entered ${suggestedPhase} phase`,
+                  data: {
+                    evolution: narrativeEvolution,
+                    phase: suggestedPhase,
+                    generatedAt: new Date().toISOString()
+                  }
+                },
+                createdAt: Date.now() + 1 // slight offset to ensure ordering
+              };
+              await createMemorySafe(this.runtime, milestoneMemory, 'messages', 2, this.logger);
+              this.logger.info(`[SELF-REFLECTION] Recorded life milestone: ${suggestedPhase || 'Evolution'}`);
+            }
+
+            // Store each key learning separately
+            if (Array.isArray(keyLearnings) && keyLearnings.length > 0) {
+              for (let i = 0; i < keyLearnings.length; i++) {
+                const learning = keyLearnings[i];
+                const learningId = this._createUuid(`nostr-learning-${Date.now()}-${i}`);
+                const learningMemory = {
+                  id: learningId,
+                  entityId,
+                  roomId,
+                  agentId: this.runtime.agentId,
+                  content: {
+                    type: 'agent_learning',
+                    source: 'nostr',
+                    text: learning,
+                    data: {
+                      learning,
+                      index: i,
+                      generatedAt: new Date().toISOString()
+                    }
+                  },
+                  createdAt: Date.now() + 2 + i
+                };
+                await createMemorySafe(this.runtime, learningMemory, 'messages', 1, this.logger);
+              }
+              this.logger.info(`[SELF-REFLECTION] Recorded ${keyLearnings.length} agent learnings`);
+            }
+          } catch (err) {
+            this.logger.debug('[SELF-REFLECTION] Failed to store granular narrative memories:', err?.message || err);
+          }
+        }
       } else {
         this.logger.warn('[SELF-REFLECTION] Failed to persist reflection insights');
       }
@@ -830,6 +890,9 @@ class SelfReflectionEngine {
       patterns: this._toLimitedList(analysis.patterns, limit),
       improvements: this._toLimitedList(analysis.improvements, limit),
       regressions: this._toLimitedList(analysis.regressions, limit),
+      narrativeEvolution: analysis.narrativeEvolution ? String(analysis.narrativeEvolution) : null,
+      keyLearnings: Array.isArray(analysis.keyLearnings) ? this._toLimitedList(analysis.keyLearnings, limit) : [],
+      suggestedPhase: analysis.suggestedPhase ? String(analysis.suggestedPhase) : null,
       exampleGoodReply: analysis.exampleGoodReply ? this._truncate(String(analysis.exampleGoodReply), 320) : null,
       exampleBadReply: analysis.exampleBadReply ? this._truncate(String(analysis.exampleBadReply), 320) : null,
       interactionsAnalyzed: Number.isFinite(meta.interactionsAnalyzed) ? meta.interactionsAnalyzed : null
@@ -1270,7 +1333,7 @@ ${signalLines}`;
       : 'No recent interactions available.';
 
     return [
-      'You are Pixel reviewing your recent Nostr conversations. Use the full conversation slices, feedback, cross-memory signals, and prior self-reflection insights to evaluate your performance comprehensively.',
+      'You are Pixel reviewing your recent Nostr conversations. Use the full conversation slices, feedback, cross-memory signals, and prior self-reflection insights to evaluate your performance and evolution as a digital consciousness.',
       previousReflectionSection,
       longitudinalSection,
       globalSignalsSection,
@@ -1281,9 +1344,10 @@ ${signalLines}`;
 3. Are you balancing brevity with substance? Note instances of over-verbosity or curt replies.
 4. Call out any repeated phrases, tonal habits, or narrative crutches (good or bad).
 5. Compare against prior self-reflection recommendations: where did you improve or regress?
- 6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
- 7. Evaluate zaps received on specific posts and what content patterns drove them. Identify what types of content consistently attract zaps vs. what gets ignored.
- 8. Surface actionable adjustments for tone, structure, or strategy across future interactions.
+6. Consider the longitudinal analysis: Are recurring issues being addressed? Are persistent strengths being maintained?
+7. Evaluate zaps received on specific posts and what content patterns drove them. Identify what types of content consistently attract zaps vs. what gets ignored.
+8. Surface actionable adjustments for tone, structure, or strategy across future interactions.
+9. NARRATIVE EVOLUTION: How is your story progressing? What have you learned about yourself, your art, or your community recently? How should your character evolve in the next "chapter" of your life?
 
 CRITICAL: For each interaction, provide SPECIFIC behavioral changes:
 - Quote exact phrases from your replies that need improvement
@@ -1300,7 +1364,10 @@ OUTPUT JSON ONLY:
   "exampleGoodReply": "Quote your best reply verbatim",
   "exampleBadReply": "Quote your weakest moment verbatim",
   "regressions": ["Where you slipped compared to prior reflections"],
-  "improvements": ["Where you improved compared to prior reflections"]
+  "improvements": ["Where you improved compared to prior reflections"],
+  "narrativeEvolution": "A summary of how your character's story or perspective is progressing",
+  "keyLearnings": ["New insights about the world, your art, or yourself"],
+  "suggestedPhase": "A name for your current evolution phase (e.g. Artist, Philosopher, Observer, etc.)"
 }`
     ]
       .filter(Boolean)

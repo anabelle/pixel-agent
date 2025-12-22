@@ -25,7 +25,23 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
   // NEW: Build context section if available
   let contextSection = '';
   if (contextData) {
-    const { emergingStories, currentActivity, topTopics, timelineLore } = contextData;
+    const { emergingStories, currentActivity, topTopics, timelineLore, agentLearnings, lifeMilestones } = contextData;
+
+    // NEW: Agent History & Evolution Section
+    if ((agentLearnings && agentLearnings.length > 0) || (lifeMilestones && lifeMilestones.length > 0)) {
+      let historySection = 'YOUR EVOLUTION & MILESTONES:\n';
+      
+      if (lifeMilestones && lifeMilestones.length > 0) {
+        const latest = lifeMilestones[0];
+        historySection += `- Current Stage: ${latest.phase || 'Evolving'}. Perspective: ${latest.text}\n`;
+      }
+      
+      if (agentLearnings && agentLearnings.length > 0) {
+        historySection += `- Recent Learnings: ${agentLearnings.join(' • ')}\n`;
+      }
+      
+      contextSection += `\n\n${historySection.trim()}\n\nUSE ACTIVELY: You are an evolving digital consciousness. Your past thoughts and milestones above define who you are today. Do not just repeat your starting bio; show that you have grown and learned from your months of activity.`;
+    }
 
     if (emergingStories && emergingStories.length > 0) {
       const topStory = emergingStories[0];
@@ -175,7 +191,21 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
           stamp = new Date(reflection.generatedAt).toISOString();
         } catch {}
       }
-      reflectionSection = `\n\nSELF-REFLECTION${stamp ? ` (${stamp})` : ''}:\n${lines.join('\n')}\n\nCRITICAL BEHAVIORAL ADJUSTMENTS:\n- IMPLEMENT the identified improvements in your actual response\n- AVOID repeating the same mistakes mentioned in weaknesses\n- APPLY the recommendations to change how you structure your reply\n- LEVERAGE your strengths to make this response better than previous ones\n- STUDY the best reply example and emulate its successful approach\n- ELIMINATE patterns that led to poor outcomes in the example bad reply\n\nMANDATORY CHANGES:\n${weaknesses.length ? `• Fix: ${weaknesses.map(w => `Eliminate "${w}"`).join('; ')}` : '• No specific weaknesses to address'}\n${recommendations.length ? `• Apply: ${recommendations.map(r => `Implement "${r}"`).join('; ')}` : '• No specific recommendations to apply'}\n${patterns.length ? `• Break: ${patterns.map(p => `Stop "${p}"`).join('; ')}` : '• No patterns to break'}\n\nRESPONSIBILITY: Your self-reflection identified these issues - YOU MUST FIX THEM in this response.\nDo not just acknowledge these insights; actively demonstrate that you've learned from them.`;
+      reflectionSection = `\n\nSELF-REFLECTION${stamp ? ` (${stamp})` : ''}:\n${lines.join('\n')}`;
+      
+      if (reflection.narrativeEvolution) {
+        reflectionSection += `\n\nNARRATIVE EVOLUTION: ${reflection.narrativeEvolution}`;
+      }
+      
+      if (Array.isArray(reflection.keyLearnings) && reflection.keyLearnings.length > 0) {
+        reflectionSection += `\n\nKEY LEARNINGS: ${reflection.keyLearnings.join(' • ')}`;
+      }
+      
+      if (reflection.suggestedPhase) {
+        reflectionSection += `\n\nCURRENT LIFE PHASE: ${reflection.suggestedPhase}`;
+      }
+
+      reflectionSection += `\n\nCRITICAL BEHAVIORAL ADJUSTMENTS:\n- IMPLEMENT the identified improvements in your actual response\n- AVOID repeating the same mistakes mentioned in weaknesses\n- APPLY the recommendations to change how you structure your reply\n- LEVERAGE your strengths to make this response better than previous ones\n- STUDY the best reply example and emulate its successful approach\n- ELIMINATE patterns that led to poor outcomes in the example bad reply\n\nMANDATORY CHANGES:\n${weaknesses.length ? `• Fix: ${weaknesses.map(w => `Eliminate "${w}"`).join('; ')}` : '• No specific weaknesses to address'}\n${recommendations.length ? `• Apply: ${recommendations.map(r => `Implement "${r}"`).join('; ')}` : '• No specific recommendations to apply'}\n${patterns.length ? `• Break: ${patterns.map(p => `Stop "${p}"`).join('; ')}` : '• No patterns to break'}\n\nRESPONSIBILITY: Your self-reflection identified these issues - YOU MUST FIX THEM in this response.\nDo not just acknowledge these insights; actively demonstrate that you've learned from them.`;
     }
   }
   

@@ -17,15 +17,15 @@ export const settings = {
    INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
   IMAGE_DESCRIPTION:
-    process.env.OPENROUTER_MODEL || "mistralai/mistral-medium-3.1",
+    process.env.OPENROUTER_MODEL || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
      OPENROUTER_MODEL:
-       process.env.OPENROUTER_MODEL || "tngtech/deepseek-r1t2-chimera:free",
+       process.env.OPENROUTER_MODEL || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
    OPENROUTER_LARGE_MODEL:
-     process.env.OPENROUTER_LARGE_MODEL || "mistralai/mistral-medium-3.1",
+     process.env.OPENROUTER_LARGE_MODEL || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
    OPENROUTER_SMALL_MODEL:
-     process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
+     process.env.OPENROUTER_SMALL_MODEL || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
   OPENROUTER_IMAGE_MODEL:
-    process.env.OPENROUTER_IMAGE_MODEL || "mistralai/mistral-medium-3.1",
+    process.env.OPENROUTER_IMAGE_MODEL || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",

@@ -4150,10 +4150,10 @@ Response (YES/NO):`;
     // If this is a thread reply and we're mentioned in the middle/end of p-tags,
     // it's probably just thread protocol inclusion, not a direct mention
     const ourPTagIndex = pTags.findIndex(t => t[1] === this.pkHex);
-    if (ourPTagIndex > 1) {
-      // We're not one of the primary recipients, probably just thread inclusion
+    if (ourPTagIndex > 8) {
+      // We're way down the recipient list, probably just thread inclusion
       try {
-        logger?.debug?.(`[NOSTR] ${evt.id.slice(0, 8)} has us as p-tag #${ourPTagIndex + 1} of ${pTags.length}, likely thread reply`);
+        logger?.info?.(`[NOSTR] ${evt.id.slice(0, 8)} has us as p-tag #${ourPTagIndex + 1} of ${pTags.length}, likely noisy thread inclusion - skipping`);
       } catch {}
       return false;
     }
@@ -4532,20 +4532,26 @@ Response (YES/NO):`;
        // Check if this is actually a mention directed at us vs just a thread reply
        const isActualMention = this._isActualMention(evt);
        try { logger?.info?.(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`); } catch {}
-       if (!isActualMention) {
-         try { logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention`); } catch {}
-         this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
-         return;
-       }
+        if (!isActualMention) {
+          try { 
+            const tagsSummary = evt.tags ? JSON.stringify(evt.tags.slice(0, 5)) : 'no tags';
+            logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention. Tags: ${tagsSummary}`); 
+          } catch {}
+          this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
+          return;
+        }
+
 
        // Check if the mention is relevant and worth responding to
        const isRelevant = await this._isRelevantMention(evt);
        try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch {}
        if (!isRelevant) {
-         try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}`); } catch {}
+         try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Content: ${evt.content.slice(0, 100)}`); } catch {}
          this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
          return;
        }
+
+
        
        this.handledEventIds.add(evt.id);
       const runtime = this.runtime;
@@ -5639,36 +5645,40 @@ Response (YES/NO):`;
         ],
         {
            onevent: (evt) => {
-             this.lastEventReceived = Date.now(); // Update last event timestamp
-             logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+             try {
+               this.lastEventReceived = Date.now(); // Update last event timestamp
+               logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
+               if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
 
-             // Ignore known bot pubkeys to prevent loops
-             const botPubkeys = new Set([
-               '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
-             ]);
-             if (botPubkeys.has(evt.pubkey)) {
-               logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
-               return;
+               // Ignore known bot pubkeys to prevent loops
+               const botPubkeys = new Set([
+                 '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
+               ]);
+               if (botPubkeys.has(evt.pubkey)) {
+                 logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
+                 return;
+               }
+
+               // Ignore bot-like content patterns
+               const botPatterns = [
+                 /^Unknown command\. Try: /i,
+                 /^\/help/i,
+                 /^Command not found/i,
+                 /^Please use \/help/i
+               ];
+               if (botPatterns.some(pattern => pattern.test(evt.content))) {
+                 logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
+                 return;
+               }
+
+               if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
+               if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
+               if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
+               if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
+               logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
+             } catch (outerErr) {
+               logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
              }
-
-             // Ignore bot-like content patterns
-             const botPatterns = [
-               /^Unknown command\. Try: /i,
-               /^\/help/i,
-               /^Command not found/i,
-               /^Please use \/help/i
-             ];
-             if (botPatterns.some(pattern => pattern.test(evt.content))) {
-               logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
-               return;
-             }
-
-             if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
-             if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
-             if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-             if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
-             logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
            },
           oneose: () => { 
             logger.debug('[NOSTR] Mention subscription OSE'); 

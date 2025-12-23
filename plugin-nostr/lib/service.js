@@ -902,7 +902,7 @@ Response (YES/NO):`;
     if (svc.pool && svc.pkHex) {
       try {
         await svc._loadMuteList();
-        logger.info(`[NOSTR] Loaded mute list with ${svc.mutedUsers.size} muted users`);
+        logger.debug(`[NOSTR] Loaded mute list with ${svc.mutedUsers.size} muted users`); // Downgrade startup logs
         
         // Optionally unfollow any currently followed muted users
         const unfollowMuted = String(runtime.getSetting('NOSTR_UNFOLLOW_MUTED_USERS') ?? 'true').toLowerCase() === 'true';
@@ -914,7 +914,7 @@ Response (YES/NO):`;
               const newContacts = new Set([...contacts].filter(pubkey => !svc.mutedUsers.has(pubkey)));
               const unfollowSuccess = await svc._publishContacts(newContacts);
               if (unfollowSuccess) {
-                logger.info(`[NOSTR] Unfollowed ${mutedFollows.length} muted users on startup`);
+                logger.debug(`[NOSTR] Unfollowed ${mutedFollows.length} muted users on startup`); // Downgrade startup logs
               }
             }
           } catch (err) {
@@ -1823,7 +1823,7 @@ Response (YES/NO):`;
     const { buildMuteList } = require('./eventFactory');
     try {
       const ok = await publishMuteList(this.pool, this.relays, this.sk, newSet, buildMuteList, finalizeEvent);
-      if (ok) logger.info(`[NOSTR] Published mute list with ${newSet.size} muted users`);
+      if (ok) logger.debug(`[NOSTR] Published mute list with ${newSet.size} muted users`); // Downgrade to debug as not valuable
       else logger.warn('[NOSTR] Failed to publish mute list (unknown error)');
       return ok;
     } catch (err) {
@@ -1860,7 +1860,7 @@ Response (YES/NO):`;
               newContacts.delete(pubkey);
               const unfollowSuccess = await this._publishContacts(newContacts);
               if (unfollowSuccess) {
-                logger.info(`[NOSTR] Unfollowed muted user ${pubkey.slice(0, 8)}`);
+                logger.debug(`[NOSTR] Unfollowed muted user ${pubkey.slice(0, 8)}`); // Downgrade to debug
               }
             }
           } catch (err) {
@@ -2071,7 +2071,7 @@ Response (YES/NO):`;
 
       // Check if user is muted
       if (await this._isUserMuted(evt.pubkey)) {
-        logger.debug(`[NOSTR] Discovery skipping muted user ${evt.pubkey.slice(0, 8)}`);
+        // Removed low-value debug log for muted user skipping
         continue;
       }
 
@@ -4008,7 +4008,7 @@ Response (YES/NO):`;
           return out;
         }
       } catch (error) {
-        logger.warn(`[NOSTR] LLM generation attempt ${attempt} failed: ${error.message}`);
+        if (attempt >= maxRetries) logger.warn(`[NOSTR] LLM generation failed after ${maxRetries} attempts`); // Only log final failure
         if (attempt < maxRetries) {
           // Exponential backoff: wait 1s, 2s, 4s, 8s, 16s
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt - 1) * 1000));
@@ -4611,7 +4611,7 @@ Response (YES/NO):`;
 
       // Check if user is muted
       if (await this._isUserMuted(evt.pubkey)) {
-        try { logger?.debug?.(`[NOSTR] Skipping reply to muted user ${evt.pubkey.slice(0, 8)}`); } catch {}
+        // Removed low-value debug log
         return;
       }
 
@@ -4635,7 +4635,7 @@ Response (YES/NO):`;
               const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
               if (now2 - lastNow < this.replyThrottleSec * 1000) { try { logger?.info?.(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch {} return; }
                // Check if user is muted before scheduled reply
-               if (await this._isUserMuted(pubkey)) { try { logger?.debug?.(`[NOSTR] Skipping scheduled reply to muted user ${pubkey.slice(0, 8)}`); } catch {} return; }
+               if (await this._isUserMuted(pubkey)) { return; } // Removed log
                 this.lastReplyByUser.set(pubkey, now2);
                 // Retrieve stored image context for scheduled reply
                 const storedImageContext = this._getStoredImageContext(parentEvt.id);
@@ -4986,7 +4986,7 @@ Response (YES/NO):`;
 
       // Check if sender is muted
       if (await this._isUserMuted(sender)) {
-        logger.debug(`[NOSTR] Skipping zap thanks to muted user ${sender.slice(0, 8)}`);
+        // Removed low-value debug log
         return;
       }
 
@@ -5131,7 +5131,7 @@ Response (YES/NO):`;
               }
               // Check if user is muted before scheduled DM reply
               if (await this._isUserMuted(pubkey)) {
-                try { logger?.debug?.(`[NOSTR] Skipping scheduled DM reply to muted user ${pubkey.slice(0, 8)}`); } catch {}
+                // Removed low-value debug log
                 return;
               }
               this.lastReplyByUser.set(pubkey, now2);
@@ -5216,7 +5216,7 @@ Response (YES/NO):`;
 
       // Check if user is muted before sending DM reply
       if (await this._isUserMuted(evt.pubkey)) {
-        logger.debug(`[NOSTR] Skipping DM reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        // Removed low-value debug log
         return;
       }
 
@@ -5390,7 +5390,7 @@ Response (YES/NO):`;
               }
               // Check if user is muted before scheduled sealed DM reply
               if (await this._isUserMuted(pubkey)) {
-                logger.debug(`[NOSTR] Skipping scheduled sealed DM reply to muted user ${pubkey.slice(0, 8)}`);
+                // Removed low-value debug log
                 return;
               }
               this.lastReplyByUser.set(pubkey, now2);
@@ -5448,7 +5448,7 @@ Response (YES/NO):`;
 
       // Check if user is muted before sending sealed DM reply
       if (await this._isUserMuted(evt.pubkey)) {
-        logger.debug(`[NOSTR] Skipping sealed DM reply to muted user ${evt.pubkey.slice(0, 8)}`);
+        // Removed low-value debug log
         return;
       }
 
@@ -5767,7 +5767,7 @@ Response (YES/NO):`;
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
             // Filter out muted users at the earliest stage
             if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) {
-              logger.debug(`[NOSTR] Skipping muted user event ${evt.pubkey?.slice(0, 8) || 'unknown'}`);
+              // Removed low-value debug log
               return;
             }
             // Real-time event handling for quality tracking only
@@ -5844,7 +5844,7 @@ Response (YES/NO):`;
 
         // Check if user is muted
         if (await this._isUserMuted(evt.pubkey)) {
-          logger.debug(`[NOSTR] Skipping home feed interaction with muted user ${evt.pubkey.slice(0, 8)}`);
+          // Removed low-value debug log
           continue;
         }
 

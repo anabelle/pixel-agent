@@ -8,6 +8,6 @@ export const plugins = [
   "@elizaos/plugin-knowledge",
   // "@elizaos/plugin-shell",
   // '@elizaos/plugin-twitter',
-  "@pixel/plugin-nostr",
+  "pixel-plugin-nostr",
   "@elizaos/client-instagram",
 ];

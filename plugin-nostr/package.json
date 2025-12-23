@@ -16,7 +16,7 @@
   "dependencies": {
     "@elizaos/core": "^1.4.5",
     "@noble/hashes": "^2.0.0",
-    "@nostr/tools": "^2.16.2",
+    "nostr-tools": "^2.19.4",
     "node-fetch": "^2.7.0",
     "socket.io-client": "^4.7.5",
     "ws": "^8.18.0"

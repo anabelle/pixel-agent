@@ -27,7 +27,7 @@
     "@elizaos/plugin-telegram": "1.0.10",
     "@elizaos/plugin-twitter": "^1.2.21",
     "@noble/hashes": "^2.0.0",
-    "@nostr/tools": "^2.16.2",
+    "nostr-tools": "^2.19.4",
     "pixel-plugin-nostr": "file:./plugin-nostr",
     "dotenv": "^16.3.1",
     "node-fetch": "^2.7.0",

@@ -78,7 +78,7 @@ function buildRepost(parentEvt) {
   };
 }
 
-function buildQuoteRepost(parentEvt, quoteText, relays = []) {
+async function buildQuoteRepost(parentEvt, quoteText, relays = []) {
   if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return null;
   const created_at = Math.floor(Date.now() / 1000);
 
@@ -86,7 +86,7 @@ function buildQuoteRepost(parentEvt, quoteText, relays = []) {
   const { generateNostrUri } = require('./utils');
 
   // Generate NIP-21 URI for the quoted event
-  const ref = generateNostrUri(parentEvt.id, parentEvt.pubkey, relays);
+  const ref = await generateNostrUri(parentEvt.id, parentEvt.pubkey, relays);
 
   const arrow = '↪️';
   const content = quoteText ? `${String(quoteText)}\n\n${arrow} ${ref}` : `${arrow} ${ref}`;

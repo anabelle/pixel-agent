@@ -45,7 +45,13 @@ function pickRangeWithJitter(minSec, maxSec) {
 function generateNostrUri(eventId, authorPubkey, relays = []) {
   try {
     // Lazy require to avoid hard dependency during simple tests
-    const { nip19 } = require('@nostr/tools');
+    let nip19 = null;
+    try {
+      const tools = require('@nostr/tools');
+      nip19 = tools.nip19;
+    } catch (e) {
+      // ES module issue, fallback
+    }
 
     if (authorPubkey && nip19?.neventEncode) {
       // Generate nevent (includes author and optional relays)
@@ -71,7 +77,13 @@ function generateNostrUri(eventId, authorPubkey, relays = []) {
 function generateNostrProfileUri(pubkey, relays = []) {
   try {
     // Lazy require to avoid hard dependency during simple tests
-    const { nip19 } = require('@nostr/tools');
+    let nip19 = null;
+    try {
+      const tools = require('@nostr/tools');
+      nip19 = tools.nip19;
+    } catch (e) {
+      // ES module issue, fallback
+    }
 
     if (nip19?.nprofileEncode) {
       const nprofileData = { pubkey };
@@ -98,9 +110,15 @@ function parseNostrUri(uri) {
 
   try {
     // Lazy require to avoid hard dependency during simple tests
-    const { nip19 } = require('@nostr/tools');
+    let nip19 = null;
+    try {
+      const tools = require('@nostr/tools');
+      nip19 = tools.nip19;
+    } catch (e) {
+      // ES module issue, fallback
+    }
 
-    if (uri.startsWith('nostr:')) {
+    if (nip19 && uri.startsWith('nostr:')) {
       const bech32 = uri.slice(6); // Remove 'nostr:' prefix
       const decoded = nip19.decode(bech32);
 

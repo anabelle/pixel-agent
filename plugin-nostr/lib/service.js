@@ -4581,11 +4581,11 @@ Response (YES/NO):`;
        // Check if the mention is relevant and worth responding to
        const isRelevant = await this._isRelevantMention(evt);
        try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch {}
-       if (!isRelevant) {
-         try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Content: ${evt.content.slice(0, 100)}`); } catch {}
-         this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
-         return;
-       }
+        if (!isRelevant) {
+          try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Full content: ${evt.content}`); } catch {}
+          this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+          return;
+        }
 
 
        
@@ -4866,7 +4866,7 @@ Response (YES/NO):`;
   const signed = this._finalizeEvent(evtTemplate);
         await this.pool.publish(this.relays, signed);
         const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-         this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content.slice(0, 100)}${evtTemplate.content.length > 100 ? '…' : ''}"`);
+         this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content}"`);
 
        // Increment interaction count if not a mention
        if (parentAuthorPk && !isMention) {
@@ -5035,7 +5035,7 @@ Response (YES/NO):`;
         return;
       }
 
-      try { logger?.info?.(`[DM] Received from ${evt.pubkey.slice(0, 8)}: "${decryptedContent.slice(0, 100)}${decryptedContent.length > 100 ? '…' : ''}"`); } catch {}
+      try { logger?.info?.(`[DM] Received from ${evt.pubkey.slice(0, 8)}: "${decryptedContent}"`); } catch {}
       // Debug DM prompt meta (no CoT)
       try {
         const dbg = (

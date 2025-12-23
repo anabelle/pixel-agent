@@ -50,9 +50,7 @@
   "license": "MIT",
   "overrides": {
     "@elizaos/plugin-ollama": {
-      "scripts": {
-        "postinstall": "exit 0"
-      }
+      "postinstall": "echo 'Skipping @elizaos/plugin-ollama postinstall'"
     }
   }
 }

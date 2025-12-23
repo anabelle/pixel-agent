@@ -51,7 +51,7 @@ class StorylineTracker {
     this.maxStorylinesPerTopic = 5; // Limit concurrent storylines per topic
     this.storylineTTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-    this.logger.info(`[STORYLINE-TRACKER] Initialized (LLM: ${this.llmEnabled ? 'ON' : 'OFF'})`);
+    this.logger.debug(`[STORYLINE-TRACKER] Initialized (LLM: ${this.llmEnabled ? 'ON' : 'OFF'})`);
   }
 
   /**
@@ -631,7 +631,7 @@ RESPONSE FORMAT (JSON):
       }
     }
 
-    this.logger.info(`[STORYLINE-TRACKER] Models refreshed: ${this.topicModels.size} topic models, ${this.activeStorylines.size} active storylines`);
+    this.logger.debug(`[STORYLINE-TRACKER] Models refreshed: ${this.topicModels.size} topic models, ${this.activeStorylines.size} active storylines`);
   }
 
   /**

@@ -91,7 +91,7 @@ class PostingQueue {
       return a.queuedAt - b.queuedAt;
     });
 
-    logger.info(`[QUEUE] Enqueued ${type} post (id: ${id.slice(0, 8)}, priority: ${priority}, queue: ${this.queue.length})`);
+    logger.debug(`[QUEUE] Enqueued ${type} post (id: ${id.slice(0, 8)}, priority: ${priority}, queue: ${this.queue.length})`);
 
     // Start processing if not already running
     this._ensureProcessingScheduled();
@@ -139,20 +139,20 @@ class PostingQueue {
         // Wait if needed
         if (timeSinceLastPost < requiredDelay) {
           const waitTime = requiredDelay - timeSinceLastPost;
-          logger.info(`[QUEUE] Waiting ${Math.round(waitTime / 1000)}s before posting (natural spacing)`);
+          logger.debug(`[QUEUE] Waiting ${Math.round(waitTime / 1000)}s before posting (natural spacing)`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         }
 
         // Execute the post action
         const idLabel = task.id ? task.id.slice(0, 8) : 'unknown';
-        logger.info(`[QUEUE] Processing ${task.type} post (id: ${idLabel}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
+        logger.debug(`[QUEUE] Processing ${task.type} post (id: ${idLabel}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
         
         const result = await task.action();
         
         if (result) {
           this.lastPostTime = Date.now();
           this.stats.processed++;
-          logger.info(`[QUEUE] Successfully posted ${task.type} (id: ${idLabel}, total processed: ${this.stats.processed})`);
+          logger.debug(`[QUEUE] Successfully posted ${task.type} (id: ${idLabel}, total processed: ${this.stats.processed})`);
         } else {
           logger.warn(`[QUEUE] Post action failed for ${task.type} (id: ${idLabel})`);
         }

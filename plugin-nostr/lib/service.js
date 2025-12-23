@@ -365,7 +365,7 @@ class NostrService {
     const contextEnabled = String(runtime.getSetting('NOSTR_CONTEXT_ACCUMULATOR_ENABLED') ?? 'true').toLowerCase() === 'true';
     if (contextEnabled) {
       this.contextAccumulator.enable();
-      this.logger.info(`[NOSTR] Context accumulator enabled (LLM analysis: ${llmAnalysisEnabled ? 'ON' : 'OFF'})`);
+      this.logger.debug(`[NOSTR] Context accumulator enabled (LLM analysis: ${llmAnalysisEnabled ? 'ON' : 'OFF'})`);
     } else {
       this.contextAccumulator.disable();
     }
@@ -373,17 +373,17 @@ class NostrService {
     // Semantic Analyzer - LLM-powered semantic understanding beyond keywords
     const { SemanticAnalyzer } = require('./semanticAnalyzer');
     this.semanticAnalyzer = new SemanticAnalyzer(runtime, this.logger);
-    this.logger.info(`[NOSTR] Semantic analyzer initialized (LLM: ${this.semanticAnalyzer.llmSemanticEnabled ? 'ON' : 'OFF'})`);
+    this.logger.debug(`[NOSTR] Semantic analyzer initialized (LLM: ${this.semanticAnalyzer.llmSemanticEnabled ? 'ON' : 'OFF'})`);
     
     // User Profile Manager - Persistent per-user learning and tracking
     const { UserProfileManager } = require('./userProfileManager');
     this.userProfileManager = new UserProfileManager(runtime, this.logger);
-    this.logger.info(`[NOSTR] User profile manager initialized`);
+    this.logger.debug(`[NOSTR] User profile manager initialized`);
     
     // Narrative Memory - Historical narrative storage and temporal analysis
     const { NarrativeMemory } = require('./narrativeMemory');
     this.narrativeMemory = new NarrativeMemory(runtime, this.logger);
-    this.logger.info(`[NOSTR] Narrative memory initialized`);
+    this.logger.debug(`[NOSTR] Narrative memory initialized`);
     
     // Topic Evolution - small-LLM subtopic labeling + phase detection for contextual scoring
     try {
@@ -392,7 +392,7 @@ class NostrService {
         narrativeMemory: this.narrativeMemory,
         semanticAnalyzer: this.semanticAnalyzer
       });
-      this.logger.info(`[NOSTR] Topic evolution initialized (enabled: ${this.topicEvolution?.enabled ? 'ON' : 'OFF'})`);
+      this.logger.debug(`[NOSTR] Topic evolution initialized (enabled: ${this.topicEvolution?.enabled ? 'ON' : 'OFF'})`);
     } catch (err) {
       this.topicEvolution = null;
       this.logger?.debug?.('[NOSTR] Topic evolution init failed:', err?.message || err);
@@ -404,13 +404,13 @@ class NostrService {
       this.contextAccumulator,
       this.logger
     );
-    this.logger.info(`[NOSTR] Narrative context provider initialized`);
+    this.logger.debug(`[NOSTR] Narrative context provider initialized`);
     
     // Connect managers to context accumulator for integrated intelligence
     if (this.contextAccumulator) {
       this.contextAccumulator.userProfileManager = this.userProfileManager;
       this.contextAccumulator.narrativeMemory = this.narrativeMemory;
-      this.logger.info(`[NOSTR] Long-term memory systems connected to context accumulator`);
+      this.logger.debug(`[NOSTR] Long-term memory systems connected to context accumulator`);
     }
 
     // Self Reflection Engine - periodic learning loops
@@ -536,7 +536,7 @@ class NostrService {
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
       if (latest && latest.content?.counts) {
          this.userInteractionCount = new Map(Object.entries(latest.content.counts));
-         this.logger.info(`[NOSTR] Loaded ${this.userInteractionCount.size} interaction counts from memory`);
+         this.logger.debug(`[NOSTR] Loaded ${this.userInteractionCount.size} interaction counts from memory`);
        }
      } catch (err) {
        this.logger.debug('[NOSTR] Failed to load interaction counts:', err?.message || err);
@@ -551,7 +551,7 @@ class NostrService {
         .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
       if (latest?.content?.data?.date) {
         this.lastDailyDigestPostDate = latest.content.data.date;
-        this.logger.info(`[NOSTR] Last daily digest post on record: ${this.lastDailyDigestPostDate}`);
+        this.logger.debug(`[NOSTR] Last daily digest post on record: ${this.lastDailyDigestPostDate}`);
       }
     } catch (err) {
       this.logger.debug('[NOSTR] Failed to load last daily digest post date:', err?.message || err);
@@ -563,7 +563,7 @@ class NostrService {
     setInterval(async () => {
       this.userInteractionCount.clear();
       await this._saveInteractionCounts();
-      logger.info('[NOSTR] Weekly interaction counts reset');
+      logger.debug('[NOSTR] Weekly interaction counts reset');
     }, weekMs);
   }
 
@@ -1102,7 +1102,7 @@ Response (YES/NO):`;
     const jitter = this.discoveryMinSec + Math.floor(Math.random() * Math.max(1, this.discoveryMaxSec - this.discoveryMinSec));
     if (this.discoveryTimer) clearTimeout(this.discoveryTimer);
     this.discoveryTimer = setTimeout(() => this.discoverOnce().finally(() => this.scheduleNextDiscovery()), jitter * 1000);
-    logger.info(`[NOSTR] Next discovery in ~${jitter}s`);
+    logger.debug(`[NOSTR] Next discovery in ~${jitter}s`);
   }
 
   _pickDiscoveryTopics() { return pickDiscoveryTopics(); }
@@ -1127,7 +1127,7 @@ Response (YES/NO):`;
     }, delayMs);
     
     const minutesUntil = Math.round(delayMs / (60 * 1000));
-    this.logger.info(`[NOSTR] Next hourly digest in ~${minutesUntil} minutes`);
+    this.logger.debug(`[NOSTR] Next hourly digest in ~${minutesUntil} minutes`);
   }
 
   scheduleDailyReport() {
@@ -1156,7 +1156,7 @@ Response (YES/NO):`;
     }, delayMs);
     
     const hoursUntil = Math.round(delayMs / (60 * 60 * 1000));
-    this.logger.info(`[NOSTR] Next daily report in ~${hoursUntil} hours`);
+    this.logger.debug(`[NOSTR] Next daily report in ~${hoursUntil} hours`);
   }
 
   scheduleSelfReflection() {
@@ -1197,7 +1197,7 @@ Response (YES/NO):`;
     }, delayMs);
 
     const minutesUntil = Math.round(delayMs / (60 * 1000));
-    this.logger.info(`[NOSTR] Next self-reflection in ~${minutesUntil} minutes`);
+    this.logger.debug(`[NOSTR] Next self-reflection in ~${minutesUntil} minutes`);
   }
 
   async runSelfReflectionNow(options = {}) {
@@ -4081,7 +4081,7 @@ Response (YES/NO):`;
     const priority = isScheduledPost ? this.postingQueue.priorities.LOW : this.postingQueue.priorities.CRITICAL;
     const postType = isScheduledPost ? 'scheduled' : 'external';
     
-    logger.info(`[NOSTR] Queuing ${postType} post (${text.length} chars, priority: ${priority})`);
+    this.logger.debug(`[NOSTR] Queuing ${postType} post (${text.length} chars, priority: ${priority})`);
     
     return await this.postingQueue.enqueue({
       type: postType,
@@ -4091,29 +4091,30 @@ Response (YES/NO):`;
       action: async () => {
         const evtTemplate = buildTextNote(text);
         try {
-          const signed = this._finalizeEvent(evtTemplate);
-          await this.pool.publish(this.relays, signed);
-          this.logger.info(`[NOSTR] Posted note (${text.length} chars)`);
-          
-          try {
-            const runtime = this.runtime;
-            const id = createUniqueUuid(runtime, `nostr:post:${Date.now()}:${Math.random()}`);
-            const roomId = createUniqueUuid(runtime, 'nostr:posts');
-            // Ensure posts room exists (avoid default type issues in some adapters)
-            try {
-              const worldId = createUniqueUuid(runtime, 'nostr');
-              await runtime.ensureWorldExists({ id: worldId, name: 'Nostr', agentId: runtime.agentId, serverId: 'nostr', metadata: { system: true } }).catch(() => {});
-              await runtime.ensureRoomExists({ id: roomId, name: 'Nostr Posts', source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'nostr:posts', serverId: 'nostr', worldId }).catch(() => {});
-            } catch {}
-            const entityId = createUniqueUuid(runtime, this.pkHex || 'nostr');
-            await this._createMemorySafe({ id, entityId, agentId: runtime.agentId, roomId, content: { text, source: 'nostr', channelType: ChannelType ? ChannelType.FEED : undefined }, createdAt: Date.now(), }, 'messages');
-          } catch {}
-          
-          return true;
-        } catch (err) { 
-          logger.error('[NOSTR] Post failed:', err?.message || err); 
-          return false; 
-        }
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[REPOST] Published repost for ${parentEvt.id.slice(0, 8)} (Author: ${parentEvt.pubkey.slice(0, 8)})`);
+      return true;
+    } catch (err) {
+      this.logger.debug('[NOSTR] Repost failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  async postQuoteRepost(parentEvt, text) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      const evtTemplate = buildQuoteRepost(parentEvt, text);
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[QUOTE] Published for ${parentEvt.id.slice(0, 8)}: "${text.slice(0, 50)}…"`);
+      return true;
+    } catch (err) {
+      this.logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
+      return false;
+    }
+  }
       }
     });
   }

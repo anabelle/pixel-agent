@@ -507,9 +507,36 @@ Respond with ONLY the topics, comma-separated:`;
         // Remove or reduce "general"
         newTopics.delete('general');
         
-        this.logger.info(`[CONTEXT] 🎯 Refined ${generalCount} "general" topics into: ${refinedTopics.join(', ')}`);
-        return newTopics;
+        this.logger.debug(`[CONTEXT] 🎯 Refined ${generalCount} "general" topics into: ${refinedTopics.join(', ')}`);
       }
+    } catch (err) {
+      this.logger.debug('[CONTEXT] Failed to refine general topics:', err.message);
+    }
+  }
+
+  _checkEmergingStory(topic, story) {
+    if (!this.emergingStoriesEnabled) return;
+    
+    // Check thresholds
+    const isEmerging = (
+      story.users.size >= this.emergingStoryThreshold &&
+      story.mentions >= this.emergingStoryMentionThreshold
+    );
+
+    if (isEmerging) {
+      const existing = this.emergingStories.get(topic);
+      if (!existing) {
+        this.logger.info(`[TREND] 🔥 EMERGING STORY: "${topic}" (${story.mentions} mentions, ${story.users.size} users)`);
+        this.emergingStories.set(topic, {
+          firstSeen: Date.now(),
+          mentions: story.mentions,
+          users: story.users,
+          lastUpdated: Date.now()
+        });
+      }
+    }
+  }
+
 
       return digest.topics;
       
@@ -876,14 +903,22 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     
     // NEW: Generate LLM-powered narrative summary
     if (this.llmAnalysisEnabled) {
-      const narrative = await this._generateLLMNarrativeSummary(digest);
+      const narrative = await this._generateDailyNarrativeSummary(report, topTopics);
       if (narrative) {
-        summary.narrative = narrative;
-        this.logger.info(`[CONTEXT] 🎭 HOURLY NARRATIVE:\n${narrative.summary}`);
+        report.narrative = narrative;
+        this.logger.info(`[NARRATIVE] DAILY:\n${narrative.summary}`);
       }
     }
     
-  this.logger.info(`[CONTEXT] 📊 HOURLY DIGEST (${summary.hourLabel}): ${digest.eventCount} events, ${digest.users.size} users, top topics: ${topTopics.slice(0, this.displayTopTopicsLimit).map(t => t.topic).join(', ')}`);
+    this.logger.info(`[REPORT] DAILY: ${report.summary.totalEvents} events from ${report.summary.activeUsers} users. Top: ${topTopics.slice(0, 5).map(t => `${t.topic}(${t.count})`).join(', ')}`);
+    
+    if (emergingStories.length > 0) {
+      this.logger.info(`[TREND] Emerging stories: ${emergingStories.map(s => s.topic).join(', ')}`);
+    }
+
+    }
+    
+  this.logger.info(`[DIGEST] HOURLY (${summary.hourLabel}): ${digest.eventCount} events, ${digest.users.size} users. Top: ${topTopics.slice(0, 5).map(t => t.topic).join(', ')}`);
     
     // Store to memory
     await this._storeDigestToMemory(summary);
@@ -1583,7 +1618,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       return;
     }
 
-    this.logger.info('[CONTEXT] 🚀 Starting real-time analysis system');
+    this.logger.debug('[CONTEXT] 🚀 Starting real-time analysis system');
 
     // Quarter-hour analysis (every 15 minutes)
     if (this.quarterHourAnalysisEnabled) {
@@ -1628,7 +1663,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       clearInterval(this.trendDetectionInterval);
       this.trendDetectionInterval = null;
     }
-    this.logger.info('[CONTEXT] Real-time analysis stopped');
+    this.logger.debug('[CONTEXT] Real-time analysis stopped');
   }
 
   async performQuarterHourAnalysis() {
@@ -1822,10 +1857,10 @@ OUTPUT JSON:
         };
       }
 
-      this.logger.info(`[CONTEXT] 🔄 ROLLING WINDOW: ${analysis.acceleration} activity, emerging: ${analysis.emergingTopics.join(', ') || 'none'}`);
-      if (analysis.momentum.length > 0) {
-        this.logger.info(`[CONTEXT] ⚡ Momentum: ${analysis.momentum.join(', ')}`);
-      }
+    this.logger.debug(`[CONTEXT] 🔄 ROLLING WINDOW: ${analysis.acceleration} activity, emerging: ${analysis.emergingTopics.join(', ') || 'none'}`);
+    if (analysis.momentum.length > 0) {
+      this.logger.debug(`[CONTEXT] ⚡ Momentum: ${analysis.momentum.join(', ')}`);
+    }
 
       // Store rolling window analysis
       await this._storeRealtimeAnalysis('rolling-window', analysis, {
@@ -1911,11 +1946,10 @@ OUTPUT JSON:
         timestamp: now
       };
 
-      this.logger.info(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
-
-      if (topicSpikes.length > 0) {
-        this.logger.info(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
-      }
+    this.logger.debug(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
+    if (topicSpikes.length > 0) {
+      this.logger.debug(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
+    }
 
       // Store trend detection
       await this._storeRealtimeAnalysis('trend-detection', trends, {
@@ -1939,7 +1973,7 @@ OUTPUT JSON:
               const dev = (t.development ?? 0).toFixed(2);
               return `${t.topic} (score ${score}, vel ${vel}, nov ${nov}, dev ${dev})`;
             }).join(' | ');
-            this.logger.info(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
+            this.logger.debug(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
           }
         } else if (this._lastTrendingSignature) {
           // Reset signature when no trending topics

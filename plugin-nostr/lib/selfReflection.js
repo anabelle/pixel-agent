@@ -143,7 +143,10 @@ class SelfReflectionEngine {
 
     if (parsed) {
       const highlight = parsed.strengths?.[0] || parsed.recommendations?.[0] || 'analysis complete';
-      this.logger.info(`[SELF-REFLECTION] Completed analysis on ${interactions.length} interactions → ${highlight}`);
+      this.logger.info(`[REFLECTION] Goal: ${parsed.suggestedPhase || 'Evolution'}`);
+      if (parsed.strengths?.length) this.logger.info(`[REFLECTION] Strengths: ${parsed.strengths.slice(0, 3).join('; ')}`);
+      if (parsed.weaknesses?.length) this.logger.info(`[REFLECTION] Weaknesses: ${parsed.weaknesses.slice(0, 3).join('; ')}`);
+      if (parsed.narrativeEvolution) this.logger.info(`[REFLECTION] Narrative: ${parsed.narrativeEvolution.slice(0, 150)}…`);
     }
 
     return parsed;

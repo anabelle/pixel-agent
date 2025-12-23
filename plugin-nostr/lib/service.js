@@ -3275,12 +3275,12 @@ Response (YES/NO):`;
         const fullPrompt = `${prompt}${debugHeader}${debugBody}`;
 
         const samplePrompt = String(fullPrompt || '').replace(/\s+/g, ' ').slice(0, 320);
-        this.logger.info(`[AWARENESS-DRYRUN] Prompt (len=${(fullPrompt||'').length}): "${samplePrompt}${fullPrompt && fullPrompt.length > samplePrompt.length ? '…' : ''}"`);
+        this.logger.debug(`[AWARENESS-DRYRUN] Prompt (len=${(fullPrompt||'').length}): "${samplePrompt}${fullPrompt && fullPrompt.length > samplePrompt.length ? '…' : ''}"`);
       } catch (err) {
         this.logger.warn('[AWARENESS-DRYRUN] Failed:', err?.message || err);
       }
     }, intervalMs);
-    this.logger.info(`[AWARENESS-DRYRUN] Running every ${Math.round(intervalMs/1000)}s (no posting)`);
+    this.logger.debug(`[AWARENESS-DRYRUN] Running every ${Math.round(intervalMs/1000)}s (no posting)`);
   }
 
   async generateDailyDigestPostText(report) {
@@ -4865,7 +4865,7 @@ Response (YES/NO):`;
   const signed = this._finalizeEvent(evtTemplate);
         await this.pool.publish(this.relays, signed);
         const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-        this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}… (${evtTemplate.content.length} chars)`);
+         this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content.slice(0, 100)}${evtTemplate.content.length > 100 ? '…' : ''}"`);
 
        // Increment interaction count if not a mention
        if (parentAuthorPk && !isMention) {
@@ -4901,7 +4901,7 @@ Response (YES/NO):`;
   const evtTemplate = buildReaction(parentEvt, symbol);
   const signed = this._finalizeEvent(evtTemplate);
        await this.pool.publish(this.relays, signed);
-       this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}"`);
+        this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}" (original: "${parentEvt.content.slice(0, 50)}…")`);
        // Record reaction as a lightweight interaction for the author
        try {
          if (this.userProfileManager && parentEvt.pubkey) {
@@ -4996,9 +4996,9 @@ Response (YES/NO):`;
   const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
   const { buildZapThanksPost } = require('./zapHandler');
   const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
-  const parentLog = typeof prepared.parent === 'string' ? prepared.parent : prepared.parent?.id;
-  logger.info(`[NOSTR] Zap thanks: replying to ${String(parentLog||'').slice(0,8)} and mentioning giver ${sender.slice(0,8)}`);
-  await this.postReply(prepared.parent, prepared.text, prepared.options);
+   const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
+   logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0,8)}. Generating thanks reply to ${String(parentLog||'').slice(0,8)}.`);
+   await this.postReply(prepared.parent, prepared.text, prepared.options);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => {});
       // Record a zap interaction for the sender (improves history)
       try {
@@ -5034,7 +5034,7 @@ Response (YES/NO):`;
         return;
       }
 
-      try { logger?.info?.(`[NOSTR] DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`); } catch {}
+      try { logger?.info?.(`[DM] Received from ${evt.pubkey.slice(0, 8)}: "${decryptedContent.slice(0, 100)}${decryptedContent.length > 100 ? '…' : ''}"`); } catch {}
       // Debug DM prompt meta (no CoT)
       try {
         const dbg = (
@@ -6876,9 +6876,11 @@ CONTENT:
         await this.narrativeMemory.storeTimelineLore(entry);
       }
 
-      if (this.logger?.info) {
-        this.logger.info(`[NOSTR] Timeline lore captured (${batch.length} posts${entry?.headline ? ` • ${entry.headline}` : ''})`);
-      }
+        if (entry && entry.headline) {
+          this.logger.info(`[LORE] Captured: "${entry.headline}" (derived from ${batch.length} posts)`);
+        } else {
+          this.logger.info(`[LORE] Captured timeline signal from ${batch.length} posts`);
+        }
 
       const usedIds = new Set(batch.map((item) => item.id));
       this.timelineLoreBuffer = this.timelineLoreBuffer.filter((item) => !usedIds.has(item.id));

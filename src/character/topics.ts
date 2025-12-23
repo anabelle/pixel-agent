@@ -100,7 +100,7 @@ export const topics = [
   "#bitcoin",
   "#lightning",
   "#LN",
-  "#btc", 
+  "#btc",
   "sats",
   "#nostr",
   "#mempool",
@@ -116,7 +116,7 @@ export const topics = [
   "#technology",
   "#photography",
   "#jokes",
-  '#asknostr',
+  "#asknostr",
   "#gm",
   "#primal",
   "#pleb",
@@ -158,7 +158,7 @@ export const topics = [
   "internet culture",
   "creative expression",
   "artistic freedom",
-    
+  
   // Tech and development
   "programming",
   "coding",
@@ -177,7 +177,7 @@ export const topics = [
   "api development",
   "web3",
   "decentralized apps",
-    
+  
   // Economics and freedom tech
   "freedom tech",
   "cypherpunk",
@@ -230,4 +230,7 @@ export const topics = [
   "cryonics",
   "mind uploading",
   "digital immortality",
+  "Deep Codebase Audit",
+  "Optimize Concurrent Request Handling",
+  "Address Memory Persistence Failure in Pixel Agent"
 ];

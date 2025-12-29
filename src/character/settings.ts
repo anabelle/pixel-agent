@@ -10,20 +10,20 @@ export const settings = {
   TWITTER_POST_INTERVAL_MAX: process.env.TWITTER_POST_INTERVAL_MAX || "240",
   DISCORD_APPLICATION_ID: process.env.DISCORD_APPLICATION_ID || "",
   DISCORD_API_TOKEN: process.env.DISCORD_API_TOKEN || "",
-   INSTAGRAM_USERNAME: process.env.INSTAGRAM_USERNAME || "",
-   INSTAGRAM_PASSWORD: process.env.INSTAGRAM_PASSWORD || "",
-   INSTAGRAM_APP_ID: process.env.INSTAGRAM_APP_ID || "",
-   INSTAGRAM_APP_SECRET: process.env.INSTAGRAM_APP_SECRET || "",
-   INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
+  INSTAGRAM_USERNAME: process.env.INSTAGRAM_USERNAME || "",
+  INSTAGRAM_PASSWORD: process.env.INSTAGRAM_PASSWORD || "",
+  INSTAGRAM_APP_ID: process.env.INSTAGRAM_APP_ID || "",
+  INSTAGRAM_APP_SECRET: process.env.INSTAGRAM_APP_SECRET || "",
+  INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
   IMAGE_DESCRIPTION:
     process.env.OPENROUTER_MODEL || "openai/gpt-4o",
-     OPENROUTER_MODEL:
-       process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
-   OPENROUTER_LARGE_MODEL:
-     process.env.OPENROUTER_LARGE_MODEL || "anthropic/claude-3.5-sonnet",
-   OPENROUTER_SMALL_MODEL:
-     process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-4o-mini",
+  OPENROUTER_MODEL:
+    process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
+  OPENROUTER_LARGE_MODEL:
+    process.env.OPENROUTER_LARGE_MODEL || "anthropic/claude-3.5-sonnet",
+  OPENROUTER_SMALL_MODEL:
+    process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-4o-mini",
   OPENROUTER_IMAGE_MODEL:
     process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-4o",
   OPENROUTER_BASE_URL:
@@ -61,7 +61,7 @@ export const settings = {
     process.env.NOSTR_DISCOVERY_MAX_FOLLOWS_PER_RUN || "5",
   // Time-based filtering for old messages (ISO 8601 format)
   NOSTR_MESSAGE_CUTOFF_DATE:
-    process.env.NOSTR_MESSAGE_CUTOFF_DATE || "2025-08-28T00:00:00Z",
+    process.env.NOSTR_MESSAGE_CUTOFF_DATE || "2026-01-01T00:00:00Z",
   // DM (Direct Message) settings
   NOSTR_DM_ENABLE: process.env.NOSTR_DM_ENABLE || "true",
   NOSTR_DM_REPLY_ENABLE: process.env.NOSTR_DM_REPLY_ENABLE || "true",
@@ -70,12 +70,12 @@ export const settings = {
     process.env.NOSTR_CONTEXT_ACCUMULATOR_ENABLED || "true",
   NOSTR_CONTEXT_LLM_ANALYSIS:
     process.env.NOSTR_CONTEXT_LLM_ANALYSIS || "true",
-   // Home feed interaction chances (make rare to avoid spam)
-   NOSTR_HOME_FEED_REPOST_CHANCE: process.env.NOSTR_HOME_FEED_REPOST_CHANCE || "0.005",
-   NOSTR_HOME_FEED_QUOTE_CHANCE: process.env.NOSTR_HOME_FEED_QUOTE_CHANCE || "0.001",
-   NOSTR_SELF_REFLECTION_ENABLE: process.env.NOSTR_SELF_REFLECTION_ENABLE || "true",
-   // LNPixels WS for activity stream
- LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "https://ln.pixel.xx.kg",
+  // Home feed interaction chances (make rare to avoid spam)
+  NOSTR_HOME_FEED_REPOST_CHANCE: process.env.NOSTR_HOME_FEED_REPOST_CHANCE || "0.005",
+  NOSTR_HOME_FEED_QUOTE_CHANCE: process.env.NOSTR_HOME_FEED_QUOTE_CHANCE || "0.001",
+  NOSTR_SELF_REFLECTION_ENABLE: process.env.NOSTR_SELF_REFLECTION_ENABLE || "true",
+  // LNPixels WS for activity stream
+  LNPIXELS_WS_URL: process.env.LNPIXELS_WS_URL || "https://ln.pixel.xx.kg",
   // Shell plugin settings
   SHELL_ENABLED: process.env.SHELL_ENABLED || "true",
   SHELL_ALLOWED_DIRECTORY: process.env.SHELL_ALLOWED_DIRECTORY || "/home/pixel",

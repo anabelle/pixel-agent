@@ -47,10 +47,5 @@
     "survival-ai"
   ],
   "author": "Pixel",
-  "license": "MIT",
-  "overrides": {
-    "@elizaos/plugin-ollama": {
-      "postinstall": "echo 'Skipping @elizaos/plugin-ollama postinstall'"
-    }
-  }
+  "license": "MIT"
 }

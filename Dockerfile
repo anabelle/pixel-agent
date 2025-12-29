@@ -30,7 +30,7 @@ COPY . .
 RUN bun run build
 
 # Expose port
-EXPOSE 3002
+EXPOSE 3003
 
-# Start using bun
-CMD ["/bin/sh", "-c", "bun run build:character && bunx @elizaos/cli@latest start --character ./character.json --port 3002"]
+# Start using bun and pipe logs for Syntropy orchestration
+CMD ["/bin/sh", "-c", "mkdir -p /app/logs && bun run build:character && bunx @elizaos/cli@latest start --character ./character.json --port 3003 2>&1 | tee /app/logs/agent.log"]

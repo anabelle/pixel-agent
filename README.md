@@ -138,32 +138,32 @@ pixel-agent/
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Node.js 18+ (Node 20+ recommended)
-- Bun runtime (required for ElizaOS): `curl -fsSL https://bun.sh/install | bash`
+## 🚀 Quick Start
+
+### Option 1: Docker (Recommended)
+The easiest way to run Pixel is using the Docker setup in the root repository.
+
+```bash
+# From the root of the pixel repository
+docker compose up -d --build agent
+
+# View logs
+docker compose logs -f agent
+```
+
+### Option 2: Local Development
+**Prerequisites:**
+- Node.js 20+
+- Bun runtime: `curl -fsSL https://bun.sh/install | bash`
 - ElizaOS CLI: `bun i -g @elizaos/cli`
-- Git
 
-### Installation
+```bash
+# Install dependencies
+bun install
 
-1. **Clone and navigate**
-    ```bash
-    cd /home/pixel/pixel-agent
-    bun install
-    ```
-
-2. **Configure environment**
-    ```bash
-    cp .env.example .env
-    # Edit .env with your API keys and tokens (see Environment Setup below)
-    ```
-
-3. **Start the agent**
-    ```bash
-    bun run dev    # Development mode with hot reload
-    # or
-    bun run start  # Production mode
-    ```
+# Start development mode
+bun run dev
+```
 
 ## 🔧 Platform-Specific Setup
 
@@ -519,27 +519,21 @@ elizaos test --watch
 
 ## 🚀 Deployment & Production
 
-### Development Deployment
-```bash
-# Start with hot reload
-bun run dev
+### Option 1: Docker (Recommended)
+Pixel is designed to run in a containerized environment.
 
-# Test all platforms
-# - Telegram: Message your bot
-# - Twitter: Check timeline
-# - Discord: Test in server
-# - Nostr: Verify posts
+```bash
+# Start with Docker Compose
+docker compose up -d agent
+
+# Monitor logs
+docker compose logs -f agent
 ```
 
-### Production Deployment
+### Option 2: PM2 (Legacy)
 ```bash
-# Build for production
+# Build and start with PM2
 bun run build
-
-# Start production mode
-bun run start
-
-# Or use PM2 (recommended)
 pm2 start ecosystem.config.js
 ```
 

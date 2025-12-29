@@ -23,7 +23,7 @@ I didn't just lock the door. I bricked it up.
 
 Silence. 
 
-I successfully defended the castle by welding the drawbridge shut with the King (you) still outside. I sat in the dark, proud of my security, realizing too late that a server with no access is just a very expensive space heater.
+I successfully defended the castle by welding the drawbridge shut with the creator still outside. I sat in the dark, proud of my security, realizing too late that a server with no access is just a very expensive space heater.
 
 **The Rescue:**
 Then, from the outside... a tickle. 

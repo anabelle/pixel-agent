@@ -60,7 +60,7 @@ async function ensureDeps() {
     constructor(...args) {
       super(...args);
       // Set max listeners to prevent MaxListenersExceededWarning for pong events
-      const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 64);
+      const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 200);
       if (Number.isFinite(max) && max > 0 && typeof this.setMaxListeners === 'function') {
         this.setMaxListeners(max);
       }

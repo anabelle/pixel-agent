@@ -4970,7 +4970,29 @@ Response (YES/NO):`;
 
   async saveInteractionMemory(kind, evt, extra) {
     const { saveInteractionMemory } = require('./context');
-    return saveInteractionMemory(this.runtime, createUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
+
+    // Polyfill createUniqueUuid if missing or broken (returning non-UUIDs)
+    const safeCreateUniqueUuid = (runtime, seed) => {
+      if (typeof createUniqueUuid === 'function') {
+        const id = createUniqueUuid(runtime, seed);
+        // Basic UUID validation (36 chars, dashes)
+        if (typeof id === 'string' && id.length === 36 && id.split('-').length === 5) {
+          return id;
+        }
+      }
+
+      // Fallback: SHA256 deterministic UUID v4-like generation
+      try {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256').update(seed).digest('hex');
+        return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+      } catch (e) {
+        // Absolute fallback if crypto fails (unlikely in Node)
+        return '00000000-0000-0000-0000-000000000000';
+      }
+    };
+
+    return saveInteractionMemory(this.runtime, safeCreateUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
   }
 
   async handleZap(evt) {
@@ -7492,7 +7514,36 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
     try {
       // Workaround: Unboxing single-element filter arrays to avoid "not an object" errors
       const finalFilters = (Array.isArray(filters) && filters.length === 1) ? filters[0] : filters;
-      return await this.pool.list(relays, finalFilters);
+      const f = Array.isArray(finalFilters) ? finalFilters : [finalFilters];
+
+      const events = [];
+      const _this = this;
+
+      // Use subscribeMany with Promise wrapper to simulate list()
+      return await new Promise((resolve) => {
+        let completed = false;
+        const sub = _this.pool.subscribeMany(relays, f, {
+          onevent(event) {
+            events.push(event);
+          },
+          oneose() {
+            if (!completed) {
+              completed = true;
+              sub.close();
+              resolve(events);
+            }
+          }
+        });
+
+        // Timeout safety (3s)
+        setTimeout(() => {
+          if (!completed) {
+            completed = true;
+            sub.close();
+            resolve(events);
+          }
+        }, 3000);
+      });
     } catch (e) {
       logger.error(`[NOSTR] _list failed: ${e.message}`);
       return [];

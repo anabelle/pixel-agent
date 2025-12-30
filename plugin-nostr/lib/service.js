@@ -36,7 +36,7 @@ const { SelfReflectionEngine } = require('./selfReflection');
 
 async function ensureDeps() {
   if (!SimplePool) {
-    const tools = await import('@nostr/tools');
+    const tools = await import('nostr-tools');
     SimplePool = tools.SimplePool;
     nip19 = tools.nip19;
     nip04 = tools.nip04;

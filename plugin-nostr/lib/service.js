@@ -4109,2548 +4109,2533 @@ Response (YES/NO):`;
         try {
           const signed = this._finalizeEvent(evtTemplate);
           await this.pool.publish(this.relays, signed);
-          this.logger.info(`[REPOST] Published repost for ${parentEvt.id.slice(0, 8)} (Author: ${parentEvt.pubkey.slice(0, 8)})`);
+          this.logger.info(`[POST] Published note (${text.length} chars, type: ${postType})`);
           return true;
         } catch (err) {
-          this.logger.debug('[NOSTR] Repost failed:', err?.message || err);
+          this.logger.debug('[NOSTR] Post failed:', err?.message || err);
           return false;
         }
       }
-
-  async postQuoteRepost(parentEvt, text) {
-        if (!this.pool || !this.sk || !this.relays.length) return false;
-        try {
-          if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
-          const evtTemplate = buildQuoteRepost(parentEvt, text);
-          const signed = this._finalizeEvent(evtTemplate);
-          await this.pool.publish(this.relays, signed);
-          this.logger.info(`[QUOTE] Published for ${parentEvt.id.slice(0, 8)}: "${text.slice(0, 50)}…"`);
-          return true;
-        } catch (err) {
-          this.logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
-          return false;
-        }
-      }
-    }
     });
-}
-
-_getConversationIdFromEvent(evt) {
-  try { if (nip10Parse) { const refs = nip10Parse(evt); if (refs?.root?.id) return refs.root.id; if (refs?.reply?.id) return refs.reply.id; } } catch { }
-  return getConversationIdFromEvent(evt);
-}
-
-_isActualMention(evt) {
-  if (!evt || !this.pkHex) return false;
-
-  // If the content explicitly mentions our npub or name, it's definitely a mention
-  const content = (evt.content || '').toLowerCase();
-  const agentName = (this.runtime?.character?.name || '').toLowerCase();
-
-  // Check for direct npub mention
-  if (content.includes('npub') && content.includes(this.pkHex.slice(0, 8))) {
-    return true;
   }
 
-  // Check for nprofile mention
-  if (content.includes('nprofile')) {
-    try {
-      const nprofileMatch = content.match(/nprofile1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+/);
-      if (nprofileMatch && nip19?.decode) {
-        const decoded = nip19.decode(nprofileMatch[0]);
-        if (decoded.type === 'nprofile' && decoded.data.pubkey === this.pkHex) {
-          return true;
-        }
-      }
-    } catch (err) {
-      // Ignore decode errors
-    }
+
+  _getConversationIdFromEvent(evt) {
+    try { if (nip10Parse) { const refs = nip10Parse(evt); if (refs?.root?.id) return refs.root.id; if (refs?.reply?.id) return refs.reply.id; } } catch { }
+    return getConversationIdFromEvent(evt);
   }
 
-  // Check for agent name mention
-  if (agentName && content.includes(agentName)) {
-    return true;
-  }
+  _isActualMention(evt) {
+    if (!evt || !this.pkHex) return false;
 
-  // Check for @username mention style
-  if (content.includes('@' + agentName)) {
-    return true;
-  }
+    // If the content explicitly mentions our npub or name, it's definitely a mention
+    const content = (evt.content || '').toLowerCase();
+    const agentName = (this.runtime?.character?.name || '').toLowerCase();
 
-  // Check thread structure to see if this is likely a direct mention vs thread reply
-  const tags = evt.tags || [];
-  const eTags = tags.filter(t => t[0] === 'e');
-  const pTags = tags.filter(t => t[0] === 'p');
-
-  // If there are no e-tags, treat as mention when we're explicitly tagged via p-tags
-  if (eTags.length === 0) {
-    if (pTags.some(t => t[1] === this.pkHex)) {
+    // Check for direct npub mention
+    if (content.includes('npub') && content.includes(this.pkHex.slice(0, 8))) {
       return true;
     }
-    return false;
-  }
 
-  // If we're the only p-tag or the first p-tag, likely a direct mention/reply to us
-  if (pTags.length === 1 && pTags[0][1] === this.pkHex) {
-    return true;
-  }
-
-  if (pTags.length > 1 && pTags[0][1] === this.pkHex) {
-    return true;
-  }
-
-  // If this is a thread reply and we're mentioned in the middle/end of p-tags,
-  // it's probably just thread protocol inclusion, not a direct mention
-  const ourPTagIndex = pTags.findIndex(t => t[1] === this.pkHex);
-  if (ourPTagIndex > 8) {
-    // We're way down the recipient list, probably just thread inclusion
-    try {
-      logger?.info?.(`[NOSTR] ${evt.id.slice(0, 8)} has us as p-tag #${ourPTagIndex + 1} of ${pTags.length}, likely noisy thread inclusion - skipping`);
-    } catch { }
-    return false;
-  }
-
-  // For thread replies, check if the immediate parent is from us
-  try {
-    if (nip10Parse) {
-      const refs = nip10Parse(evt);
-      if (refs?.reply?.id && refs.reply.id !== evt.id) {
-        // This is a reply - if it's replying to us directly, it's a mention
-        // We'd need to fetch the parent to check, but for now be conservative
-        return true;
+    // Check for nprofile mention
+    if (content.includes('nprofile')) {
+      try {
+        const nprofileMatch = content.match(/nprofile1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+/);
+        if (nprofileMatch && nip19?.decode) {
+          const decoded = nip19.decode(nprofileMatch[0]);
+          if (decoded.type === 'nprofile' && decoded.data.pubkey === this.pkHex) {
+            return true;
+          }
+        }
+      } catch (err) {
+        // Ignore decode errors
       }
     }
-  } catch { }
 
-  // Default to treating it as non-mention when no explicit signal found
-  return false;
-}
-
-  async _getThreadContext(evt) {
-  if (!this.pool || !evt || !Array.isArray(this.relays) || this.relays.length === 0) {
-    const solo = evt ? [evt] : [];
-    return {
-      thread: solo,
-      isRoot: true,
-      contextQuality: solo.length ? this._assessThreadContextQuality(solo) : 0
-    };
-  }
-
-  const maxEvents = Number.isFinite(this.maxThreadContextEvents) ? this.maxThreadContextEvents : 80;
-  const maxRounds = Number.isFinite(this.threadContextFetchRounds) ? this.threadContextFetchRounds : 4;
-  const batchSize = Number.isFinite(this.threadContextFetchBatch) ? this.threadContextFetchBatch : 3;
-
-  try {
-    const tags = Array.isArray(evt.tags) ? evt.tags : [];
-    const eTags = tags.filter(t => t[0] === 'e');
-
-    if (eTags.length === 0) {
-      const soloThread = [evt];
-      return {
-        thread: soloThread,
-        isRoot: true,
-        contextQuality: this._assessThreadContextQuality(soloThread)
-      };
+    // Check for agent name mention
+    if (agentName && content.includes(agentName)) {
+      return true;
     }
 
-    let rootId = null;
-    let parentId = null;
+    // Check for @username mention style
+    if (content.includes('@' + agentName)) {
+      return true;
+    }
 
+    // Check thread structure to see if this is likely a direct mention vs thread reply
+    const tags = evt.tags || [];
+    const eTags = tags.filter(t => t[0] === 'e');
+    const pTags = tags.filter(t => t[0] === 'p');
+
+    // If there are no e-tags, treat as mention when we're explicitly tagged via p-tags
+    if (eTags.length === 0) {
+      if (pTags.some(t => t[1] === this.pkHex)) {
+        return true;
+      }
+      return false;
+    }
+
+    // If we're the only p-tag or the first p-tag, likely a direct mention/reply to us
+    if (pTags.length === 1 && pTags[0][1] === this.pkHex) {
+      return true;
+    }
+
+    if (pTags.length > 1 && pTags[0][1] === this.pkHex) {
+      return true;
+    }
+
+    // If this is a thread reply and we're mentioned in the middle/end of p-tags,
+    // it's probably just thread protocol inclusion, not a direct mention
+    const ourPTagIndex = pTags.findIndex(t => t[1] === this.pkHex);
+    if (ourPTagIndex > 8) {
+      // We're way down the recipient list, probably just thread inclusion
+      try {
+        logger?.info?.(`[NOSTR] ${evt.id.slice(0, 8)} has us as p-tag #${ourPTagIndex + 1} of ${pTags.length}, likely noisy thread inclusion - skipping`);
+      } catch { }
+      return false;
+    }
+
+    // For thread replies, check if the immediate parent is from us
     try {
       if (nip10Parse) {
         const refs = nip10Parse(evt);
-        rootId = refs?.root?.id;
-        parentId = refs?.reply?.id;
+        if (refs?.reply?.id && refs.reply.id !== evt.id) {
+          // This is a reply - if it's replying to us directly, it's a mention
+          // We'd need to fetch the parent to check, but for now be conservative
+          return true;
+        }
       }
     } catch { }
 
-    if (!rootId && !parentId) {
-      for (const tag of eTags) {
-        if (tag[3] === 'root') {
-          rootId = tag[1];
-        } else if (tag[3] === 'reply') {
-          parentId = tag[1];
-        } else if (!rootId) {
-          rootId = tag[1];
-        }
-      }
+    // Default to treating it as non-mention when no explicit signal found
+    return false;
+  }
+
+  async _getThreadContext(evt) {
+    if (!this.pool || !evt || !Array.isArray(this.relays) || this.relays.length === 0) {
+      const solo = evt ? [evt] : [];
+      return {
+        thread: solo,
+        isRoot: true,
+        contextQuality: solo.length ? this._assessThreadContextQuality(solo) : 0
+      };
     }
 
-    const threadEvents = [];
-    const eventIds = new Set();
-    const eventMap = new Map();
+    const maxEvents = Number.isFinite(this.maxThreadContextEvents) ? this.maxThreadContextEvents : 80;
+    const maxRounds = Number.isFinite(this.threadContextFetchRounds) ? this.threadContextFetchRounds : 4;
+    const batchSize = Number.isFinite(this.threadContextFetchBatch) ? this.threadContextFetchBatch : 3;
 
-    const addEvent = (event) => {
-      if (!event || !event.id || eventIds.has(event.id)) {
-        return false;
+    try {
+      const tags = Array.isArray(evt.tags) ? evt.tags : [];
+      const eTags = tags.filter(t => t[0] === 'e');
+
+      if (eTags.length === 0) {
+        const soloThread = [evt];
+        return {
+          thread: soloThread,
+          isRoot: true,
+          contextQuality: this._assessThreadContextQuality(soloThread)
+        };
       }
-      threadEvents.push(event);
-      eventIds.add(event.id);
-      eventMap.set(event.id, event);
-      return true;
-    };
 
-    addEvent(evt);
+      let rootId = null;
+      let parentId = null;
 
-    const seedQueue = [];
-    const visitedSeeds = new Set();
-    const queuedSeeds = new Set();
-    const enqueueSeed = (id) => {
-      if (!id || visitedSeeds.has(id) || queuedSeeds.has(id)) return;
-      seedQueue.push(id);
-      queuedSeeds.add(id);
-    };
+      try {
+        if (nip10Parse) {
+          const refs = nip10Parse(evt);
+          rootId = refs?.root?.id;
+          parentId = refs?.reply?.id;
+        }
+      } catch { }
 
-    enqueueSeed(evt.id);
-    if (rootId) enqueueSeed(rootId);
-    if (parentId) enqueueSeed(parentId);
-
-    const ingestFetchedEvents = (events) => {
-      for (const event of events) {
-        if (!addEvent(event)) continue;
-        enqueueSeed(event.id);
-        if (Array.isArray(event?.tags)) {
-          for (const tag of event.tags) {
-            if (tag?.[0] === 'e' && tag[1]) {
-              enqueueSeed(tag[1]);
-            }
+      if (!rootId && !parentId) {
+        for (const tag of eTags) {
+          if (tag[3] === 'root') {
+            rootId = tag[1];
+          } else if (tag[3] === 'reply') {
+            parentId = tag[1];
+          } else if (!rootId) {
+            rootId = tag[1];
           }
         }
+      }
+
+      const threadEvents = [];
+      const eventIds = new Set();
+      const eventMap = new Map();
+
+      const addEvent = (event) => {
+        if (!event || !event.id || eventIds.has(event.id)) {
+          return false;
+        }
+        threadEvents.push(event);
+        eventIds.add(event.id);
+        eventMap.set(event.id, event);
+        return true;
+      };
+
+      addEvent(evt);
+
+      const seedQueue = [];
+      const visitedSeeds = new Set();
+      const queuedSeeds = new Set();
+      const enqueueSeed = (id) => {
+        if (!id || visitedSeeds.has(id) || queuedSeeds.has(id)) return;
+        seedQueue.push(id);
+        queuedSeeds.add(id);
+      };
+
+      enqueueSeed(evt.id);
+      if (rootId) enqueueSeed(rootId);
+      if (parentId) enqueueSeed(parentId);
+
+      const ingestFetchedEvents = (events) => {
+        for (const event of events) {
+          if (!addEvent(event)) continue;
+          enqueueSeed(event.id);
+          if (Array.isArray(event?.tags)) {
+            for (const tag of event.tags) {
+              if (tag?.[0] === 'e' && tag[1]) {
+                enqueueSeed(tag[1]);
+              }
+            }
+          }
+          if (eventIds.size >= maxEvents) {
+            break;
+          }
+        }
+      };
+
+      if (rootId) {
+        try {
+          const limit = Math.min(200, maxEvents);
+          const rootResults = await this._list(this.relays, [
+            { ids: [rootId] },
+            { kinds: [1], '#e': [rootId], limit }
+          ]);
+          ingestFetchedEvents(rootResults);
+          logger?.debug?.(`[NOSTR] Thread root fetch ${rootId.slice(0, 8)} -> ${eventIds.size} events so far`);
+        } catch (err) {
+          logger?.debug?.('[NOSTR] Failed to fetch thread root context:', err?.message || err);
+        }
+      }
+
+      if (!rootId && parentId) {
+        let currentId = parentId;
+        let depth = 0;
+        const maxDepth = 50;
+
+        while (currentId && depth < maxDepth && eventIds.size < maxEvents) {
+          if (eventIds.has(currentId)) break;
+
+          try {
+            const parentEvents = await this._list(this.relays, [{ ids: [currentId] }]);
+            if (parentEvents.length === 0) break;
+
+            const parentEvent = parentEvents[0];
+            if (!addEvent(parentEvent)) break;
+            enqueueSeed(parentEvent.id);
+
+            const parentTags = Array.isArray(parentEvent.tags) ? parentEvent.tags : [];
+            const parentETags = parentTags.filter(t => t[0] === 'e');
+
+            if (parentETags.length === 0) break;
+
+            currentId = null;
+            try {
+              if (nip10Parse) {
+                const refs = nip10Parse(parentEvent);
+                currentId = refs?.reply?.id || refs?.root?.id || null;
+              }
+            } catch { }
+
+            if (!currentId && parentETags[0]) {
+              currentId = parentETags[0][1];
+            }
+
+            depth++;
+          } catch (err) {
+            logger?.debug?.('[NOSTR] Error fetching parent in chain:', err?.message || err);
+            break;
+          }
+        }
+
+        logger?.debug?.(`[NOSTR] Built ancestor chain with ${eventIds.size} events (depth ${depth})`);
+      }
+
+      let rounds = 0;
+      while (seedQueue.length && eventIds.size < maxEvents && rounds < maxRounds) {
+        const batch = [];
+        while (batch.length < batchSize && seedQueue.length) {
+          const candidate = seedQueue.shift();
+          if (candidate) {
+            queuedSeeds.delete(candidate);
+          }
+          if (!candidate || visitedSeeds.has(candidate)) {
+            continue;
+          }
+          visitedSeeds.add(candidate);
+          batch.push(candidate);
+        }
+
+        if (batch.length === 0) {
+          break;
+        }
+
+        rounds++;
+        const filters = batch.map(id => ({ kinds: [1], '#e': [id], limit: Math.min(50, maxEvents) }));
+        try {
+          const fetched = await this._list(this.relays, filters);
+          ingestFetchedEvents(fetched);
+          logger?.debug?.(`[NOSTR] Thread fetch round ${rounds}: seeds=${batch.length} events=${eventIds.size}`);
+        } catch (err) {
+          logger?.debug?.(`[NOSTR] Failed fetching thread replies (round ${rounds}):`, err?.message || err);
+        }
+
         if (eventIds.size >= maxEvents) {
           break;
         }
       }
-    };
 
-    if (rootId) {
-      try {
-        const limit = Math.min(200, maxEvents);
-        const rootResults = await this._list(this.relays, [
-          { ids: [rootId] },
-          { kinds: [1], '#e': [rootId], limit }
-        ]);
-        ingestFetchedEvents(rootResults);
-        logger?.debug?.(`[NOSTR] Thread root fetch ${rootId.slice(0, 8)} -> ${eventIds.size} events so far`);
-      } catch (err) {
-        logger?.debug?.('[NOSTR] Failed to fetch thread root context:', err?.message || err);
-      }
-    }
+      const uniqueEvents = Array.from(eventMap.values());
+      uniqueEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
 
-    if (!rootId && parentId) {
-      let currentId = parentId;
-      let depth = 0;
-      const maxDepth = 50;
-
-      while (currentId && depth < maxDepth && eventIds.size < maxEvents) {
-        if (eventIds.has(currentId)) break;
-
-        try {
-          const parentEvents = await this._list(this.relays, [{ ids: [currentId] }]);
-          if (parentEvents.length === 0) break;
-
-          const parentEvent = parentEvents[0];
-          if (!addEvent(parentEvent)) break;
-          enqueueSeed(parentEvent.id);
-
-          const parentTags = Array.isArray(parentEvent.tags) ? parentEvent.tags : [];
-          const parentETags = parentTags.filter(t => t[0] === 'e');
-
-          if (parentETags.length === 0) break;
-
-          currentId = null;
-          try {
-            if (nip10Parse) {
-              const refs = nip10Parse(parentEvent);
-              currentId = refs?.reply?.id || refs?.root?.id || null;
-            }
-          } catch { }
-
-          if (!currentId && parentETags[0]) {
-            currentId = parentETags[0][1];
-          }
-
-          depth++;
-        } catch (err) {
-          logger?.debug?.('[NOSTR] Error fetching parent in chain:', err?.message || err);
-          break;
-        }
+      if (uniqueEvents.length > maxEvents) {
+        uniqueEvents.splice(0, uniqueEvents.length - maxEvents);
       }
 
-      logger?.debug?.(`[NOSTR] Built ancestor chain with ${eventIds.size} events (depth ${depth})`);
-    }
+      return {
+        thread: uniqueEvents,
+        isRoot: !parentId,
+        rootId,
+        parentId,
+        contextQuality: this._assessThreadContextQuality(uniqueEvents)
+      };
 
-    let rounds = 0;
-    while (seedQueue.length && eventIds.size < maxEvents && rounds < maxRounds) {
-      const batch = [];
-      while (batch.length < batchSize && seedQueue.length) {
-        const candidate = seedQueue.shift();
-        if (candidate) {
-          queuedSeeds.delete(candidate);
-        }
-        if (!candidate || visitedSeeds.has(candidate)) {
-          continue;
-        }
-        visitedSeeds.add(candidate);
-        batch.push(candidate);
-      }
-
-      if (batch.length === 0) {
-        break;
-      }
-
-      rounds++;
-      const filters = batch.map(id => ({ kinds: [1], '#e': [id], limit: Math.min(50, maxEvents) }));
-      try {
-        const fetched = await this._list(this.relays, filters);
-        ingestFetchedEvents(fetched);
-        logger?.debug?.(`[NOSTR] Thread fetch round ${rounds}: seeds=${batch.length} events=${eventIds.size}`);
-      } catch (err) {
-        logger?.debug?.(`[NOSTR] Failed fetching thread replies (round ${rounds}):`, err?.message || err);
-      }
-
-      if (eventIds.size >= maxEvents) {
-        break;
-      }
-    }
-
-    const uniqueEvents = Array.from(eventMap.values());
-    uniqueEvents.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-
-    if (uniqueEvents.length > maxEvents) {
-      uniqueEvents.splice(0, uniqueEvents.length - maxEvents);
-    }
-
-    return {
-      thread: uniqueEvents,
-      isRoot: !parentId,
-      rootId,
-      parentId,
-      contextQuality: this._assessThreadContextQuality(uniqueEvents)
-    };
-
-  } catch (err) {
-    logger?.debug?.('[NOSTR] Error getting thread context:', err?.message || err);
-    return {
-      thread: [evt],
-      isRoot: true,
-      contextQuality: this._assessThreadContextQuality([evt])
-    };
-  }
-}
-
-_assessThreadContextQuality(threadEvents) {
-  if (!threadEvents || threadEvents.length === 0) return 0;
-
-  let score = 0;
-  const contents = threadEvents.map(e => e.content || '').filter(Boolean);
-
-  // More events = better context (up to a point)
-  score += Math.min(threadEvents.length * 0.2, 1.0);
-
-  // Content variety and depth
-  const totalLength = contents.join(' ').length;
-  if (totalLength > 100) score += 0.3;
-  if (totalLength > 300) score += 0.2;
-
-  // Recent activity
-  const now = Math.floor(Date.now() / 1000);
-  const recentEvents = threadEvents.filter(e => (now - (e.created_at || 0)) < 3600); // Last hour
-  if (recentEvents.length > 0) score += 0.2;
-
-  // Topic coherence
-  const allWords = contents.join(' ').toLowerCase().split(/\s+/);
-  const uniqueWords = new Set(allWords);
-  const coherence = uniqueWords.size / Math.max(allWords.length, 1);
-  if (coherence > 0.3) score += 0.3;
-
-  return Math.min(score, 1.0);
-}
-
-_shouldEngageWithThread(evt, threadContext) {
-  if (!threadContext || !evt) return false;
-
-  const { thread, isRoot, contextQuality } = threadContext;
-
-  // Always engage with high-quality root posts
-  if (isRoot && contextQuality > 0.6) {
-    return true;
-  }
-
-  // For thread replies, be more selective
-  if (!isRoot) {
-    // Don't engage if we can't understand the context
-    if (contextQuality < 0.3) {
-      logger?.debug?.(`[NOSTR] Low context quality (${contextQuality.toFixed(2)}) for thread reply ${evt.id.slice(0, 8)}`);
-      return false;
-    }
-
-    // Check if the thread is about relevant topics
-    const threadContent = thread.map(e => e.content || '').join(' ').toLowerCase();
-    const relevantKeywords = [
-      'art', 'pixel', 'creative', 'canvas', 'design', 'nostr', 'bitcoin',
-      'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community',
-      'technology', 'innovation', 'crypto', 'blockchain', 'gaming', 'music',
-      'photography', 'writing', 'coding', 'programming', 'science', 'space',
-      'environment', 'politics', 'economy', 'finance', 'health', 'fitness',
-      'travel', 'food', 'sports', 'entertainment', 'news', 'education'
-    ];
-
-    const hasRelevantContent = relevantKeywords.some(keyword =>
-      threadContent.includes(keyword)
-    );
-
-    if (!hasRelevantContent) {
-      logger?.debug?.(`[NOSTR] Thread ${evt.id.slice(0, 8)} lacks relevant content for engagement`);
-      return false;
-    }
-
-    // Check if this is a good entry point (not too deep in thread)
-    if (thread.length > 5) {
-      logger?.debug?.(`[NOSTR] Thread too long (${thread.length} events) for natural entry ${evt.id.slice(0, 8)}`);
-      return false;
-    }
-  }
-
-  // Additional quality checks
-  const content = evt.content || '';
-
-  // Skip very short or very long content
-  if (content.length < 10 || content.length > 800) {
-    return false;
-  }
-
-  // Skip obvious bot patterns
-  const botPatterns = [
-    /^(gm|good morning|good night|gn)\s*$/i,
-    /^(repost|rt)\s*$/i,
-    /^\d+$/, // Just numbers
-    /^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/ // Just symbols
-  ];
-
-  if (botPatterns.some(pattern => pattern.test(content.trim()))) {
-    return false;
-  }
-
-  return true;
-}
-
-  async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
-  const { ensureNostrContext } = require('./context');
-  return ensureNostrContext(this.runtime, userPubkey, usernameLike, conversationId, { createUniqueUuid, ChannelType, logger });
-}
-
-  async _createMemorySafe(memory, tableName = 'messages', maxRetries = 3) {
-  const { createMemorySafe } = require('./context');
-  return createMemorySafe(this.runtime, memory, tableName, maxRetries, logger);
-}
-
-_finalizeEvent(evtTemplate) {
-  if (!evtTemplate) return null;
-  try {
-    if (typeof finalizeEvent === 'function' && this.sk) {
-      return finalizeEvent(evtTemplate, this.sk);
-    }
-  } catch (err) {
-    try { this.logger?.debug?.('[NOSTR] finalizeEvent failed:', err?.message || err); } catch { }
-  }
-  const fallbackId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-  try {
-    return {
-      ...evtTemplate,
-      id: evtTemplate.id || fallbackId(),
-      pubkey: evtTemplate.pubkey || this.pkHex || 'nostr-test',
-      sig: evtTemplate.sig || 'mock-signature',
-    };
-  } catch {
-    return evtTemplate;
-  }
-}
-
-  async handleMention(evt) {
-  try {
-    if (!evt || !evt.id) return;
-    if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { try { logger?.info?.('[NOSTR] Ignoring self-mention'); } catch { } return; }
-    if (this.handledEventIds.has(evt.id)) { try { logger?.info?.(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { } return; }
-
-    // Check if mention is too old (ignore mentions older than configured days)
-    const eventAgeMs = Date.now() - (evt.created_at * 1000);
-    const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
-    if (eventAgeMs > maxAgeMs) {
-      try { logger?.info?.(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`); } catch { }
-      this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
-      return;
-    }
-
-    // Check if this is actually a mention directed at us vs just a thread reply
-    const isActualMention = this._isActualMention(evt);
-    try { logger?.info?.(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`); } catch { }
-    if (!isActualMention) {
-      try {
-        const tagsSummary = evt.tags ? JSON.stringify(evt.tags.slice(0, 5)) : 'no tags';
-        logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention. Tags: ${tagsSummary}`);
-      } catch { }
-      this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
-      return;
-    }
-
-
-    // Check if the mention is relevant and worth responding to
-    const isRelevant = await this._isRelevantMention(evt);
-    try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch { }
-    if (!isRelevant) {
-      try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Full content: ${evt.content}`); } catch { }
-      this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
-      return;
-    }
-
-
-
-    this.handledEventIds.add(evt.id);
-    const runtime = this.runtime;
-    const eventMemoryId = createUniqueUuid(runtime, evt.id);
-    const conversationId = this._getConversationIdFromEvent(evt);
-    const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
-    let alreadySaved = false;
-    try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; try { logger?.info?.(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } catch { } } } catch { }
-    const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
-    const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: evt.content || '', source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
-    if (!alreadySaved) { try { logger?.info?.(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); } catch { } await this._createMemorySafe(memory, 'messages'); }
-    try {
-      const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
-      const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
-      if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); } catch { } return; }
-    } catch { }
-    // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
-    if (!this.replyEnabled) { try { logger?.info?.('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); } catch { } return; }
-    if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying'); } catch { } return; }
-    if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send reply'); } catch { } return; }
-
-    // Check if user is muted
-    if (await this._isUserMuted(evt.pubkey)) {
-      // Removed low-value debug log
-      return;
-    }
-
-    const last = this.lastReplyByUser.get(evt.pubkey) || 0; const now = Date.now();
-    if (now - last < this.replyThrottleSec * 1000) {
-      const waitMs = this.replyThrottleSec * 1000 - (now - last) + 250;
-      const existing = this.pendingReplyTimers.get(evt.pubkey);
-      if (!existing) {
-        try { logger?.info?.(`[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch { }
-        const pubkey = evt.pubkey; const parentEvt = { ...evt }; const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
-        const timer = setTimeout(async () => {
-          this.pendingReplyTimers.delete(pubkey);
-          try {
-            try { logger?.info?.(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch { }
-            try {
-              const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
-              const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
-              if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch { } return; }
-            } catch { }
-            // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
-            const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
-            if (now2 - lastNow < this.replyThrottleSec * 1000) { try { logger?.info?.(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch { } return; }
-            // Check if user is muted before scheduled reply
-            if (await this._isUserMuted(pubkey)) { return; } // Removed log
-            this.lastReplyByUser.set(pubkey, now2);
-            // Retrieve stored image context for scheduled reply
-            const storedImageContext = this._getStoredImageContext(parentEvt.id);
-            const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, storedImageContext);
-
-            // Check if LLM generation failed (returned null)
-            if (!replyText || !replyText.trim()) {
-              logger.warn(`[NOSTR] Skipping throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
-              return;
-            }
-
-            logger.info(`[NOSTR] Queuing throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
-
-            // Queue the throttled reply with normal priority
-            await this.postingQueue.enqueue({
-              type: 'mention_throttled',
-              id: `mention_throttled:${parentEvt.id}:${now2}`,
-              priority: this.postingQueue.priorities.HIGH,
-              metadata: { eventId: parentEvt.id.slice(0, 8), pubkey: pubkey.slice(0, 8) },
-              action: async () => {
-                const ok = await this.postReply(parentEvt, replyText);
-                if (ok) {
-                  const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${Date.now()}:scheduled`);
-                  await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: Date.now(), }, 'messages').catch(() => { });
-                }
-                return ok;
-              }
-            });
-          } catch (e) { logger.warn('[NOSTR] Scheduled reply failed:', e?.message || e); }
-        }, waitMs);
-        this.pendingReplyTimers.set(evt.pubkey, timer);
-      } else { logger.debug(`[NOSTR] Reply already scheduled for ${evt.pubkey.slice(0, 8)}`); }
-      return;
-    }
-    this.lastReplyByUser.set(evt.pubkey, now);
-    const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
-    const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
-    const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
-    if (delayMs > 0) { logger.info(`[NOSTR] Preparing reply; thinking for ~${delayMs}ms`); await new Promise((r) => setTimeout(r, delayMs)); }
-    else { logger.info(`[NOSTR] Preparing immediate reply (no delay)`); }
-
-    // Process images in the mention content (if enabled)
-    let imageContext = { imageDescriptions: [], imageUrls: [] };
-    if (this.imageProcessingEnabled) {
-      try {
-        logger.info(`[NOSTR] Processing images in mention content: "${(evt.content || '').slice(0, 200)}..."`);
-        const { processImageContent } = require('./image-vision');
-        const fullImageContext = await processImageContent(evt.content || '', runtime);
-        // Limit the number of images to process
-        imageContext = {
-          imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-          imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-        };
-        logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from mention (max: ${this.maxImagesPerMessage}), URLs: ${imageContext.imageUrls.join(', ')}`);
-      } catch (error) {
-        logger.error(`[NOSTR] Error in image processing: ${error.message || error}`);
-        // Continue with empty image context
-        imageContext = { imageDescriptions: [], imageUrls: [] };
-      }
-    } else {
-      logger.debug('[NOSTR] Image processing disabled by configuration');
-    }
-
-    // Store image context for potential scheduled replies
-    if (imageContext.imageDescriptions.length > 0) {
-      this._storeImageContext(evt.id, imageContext);
-    }
-
-    // Fetch full thread context for better conversation understanding
-    let threadContext = null;
-    try {
-      threadContext = await this._getThreadContext(evt);
-      logger.info(`[NOSTR] Thread context for mention: ${threadContext.thread.length} events (isRoot: ${threadContext.isRoot})`);
     } catch (err) {
-      logger.debug(`[NOSTR] Failed to fetch thread context for mention: ${err?.message || err}`);
+      logger?.debug?.('[NOSTR] Error getting thread context:', err?.message || err);
+      return {
+        thread: [evt],
+        isRoot: true,
+        contextQuality: this._assessThreadContextQuality([evt])
+      };
     }
-
-    logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
-    const replyText = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
-
-    // Check if LLM generation failed (returned null)
-    if (!replyText || !replyText.trim()) {
-      logger.warn(`[NOSTR] Skipping mention reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-      return;
-    }
-
-    // Queue the reply instead of posting directly for natural rate limiting
-    logger.info(`[NOSTR] Queuing mention reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
-    const queueSuccess = await this.postingQueue.enqueue({
-      type: 'mention',
-      id: `mention:${evt.id}:${now}`,
-      priority: this.postingQueue.priorities.HIGH,
-      metadata: { eventId: evt.id.slice(0, 8), pubkey: evt.pubkey.slice(0, 8) },
-      action: async () => {
-        const replyOk = await this.postReply(evt, replyText);
-        if (replyOk) {
-          logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
-          const replyMemory = {
-            id: createUniqueUuid(runtime, `${evt.id}:reply:${Date.now()}`),
-            entityId,
-            agentId: runtime.agentId,
-            roomId,
-            content: {
-              text: replyText,
-              source: 'nostr',
-              inReplyTo: eventMemoryId,
-              imageContext: imageContext && imageContext.imageDescriptions.length > 0 ? { descriptions: imageContext.imageDescriptions, urls: imageContext.imageUrls } : null,
-            },
-            createdAt: Date.now(),
-          };
-          await this._createMemorySafe(replyMemory, 'messages');
-
-          // Track user interaction for profile learning
-          if (this.userProfileManager) {
-            try {
-              const topics = await extractTopicsFromEvent(evt, this.runtime);
-              await this.userProfileManager.recordInteraction(evt.pubkey, {
-                type: 'mention',
-                success: true,
-                topics,
-                engagement: 1.0, // User mentioned us, high engagement
-                timestamp: Date.now()
-              });
-              logger.debug(`[NOSTR] Recorded mention interaction for user ${evt.pubkey.slice(0, 8)}`);
-            } catch (err) {
-              logger.debug('[NOSTR] Failed to record user interaction:', err.message);
-            }
-          }
-        }
-        return replyOk;
-      }
-    });
-
-    if (!queueSuccess) {
-      logger.warn(`[NOSTR] Failed to queue mention reply for ${evt.id.slice(0, 8)}`);
-    }
-  } catch (err) { this.logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
-}
-
-  async _restoreHandledEventIds() {
-  try {
-    if (!this.runtime?.getMemories) return;
-
-    // Get recent reply memories to restore handled event IDs
-    const replyMemories = await this.runtime.getMemories({
-      tableName: 'messages',
-      agentId: this.runtime.agentId,
-      count: 1000, // Load last 1000 replies
-      unique: false
-    });
-
-    let restored = 0;
-    for (const memory of replyMemories) {
-      if (memory.content?.source === 'nostr' && memory.content?.inReplyTo) {
-        // Extract the original event ID from the inReplyTo field
-        const originalEventId = memory.content.inReplyTo;
-        if (originalEventId && !this.handledEventIds.has(originalEventId)) {
-          this.handledEventIds.add(originalEventId);
-          restored++;
-        }
-      }
-      // Legacy path: replies recorded without top-level inReplyTo; event id lives in content.data.eventId
-      if (memory.content?.source === 'nostr' && memory.content?.data?.eventId) {
-        const legacyEventId = memory.content.data.eventId;
-        if (legacyEventId && !this.handledEventIds.has(legacyEventId)) {
-          this.handledEventIds.add(legacyEventId);
-          restored++;
-        }
-      }
-      // Also check if the memory ID contains the event ID (fallback)
-      if (memory.id && memory.id.includes(':')) {
-        const parts = memory.id.split(':');
-        if (parts.length >= 2 && !this.handledEventIds.has(parts[0])) {
-          this.handledEventIds.add(parts[0]);
-          restored++;
-        }
-      }
-    }
-
-    if (restored > 0) {
-      logger.info(`[NOSTR] Restored ${restored} handled event IDs from memory`);
-    }
-  } catch (error) {
-    logger.warn(`[NOSTR] Failed to restore handled event IDs: ${error.message}`);
   }
-}
 
-pickReplyTextFor(evt) {
-  const { pickReplyTextFor } = require('./replyText');
-  return pickReplyTextFor(evt);
-}
+  _assessThreadContextQuality(threadEvents) {
+    if (!threadEvents || threadEvents.length === 0) return 0;
 
-   async postReply(parentEvtOrId, text, opts = {}) {
-  if (!this.pool || !this.sk || !this.relays.length) return false;
-  try {
-    let rootId = null; let parentId = null; let parentAuthorPk = null; let isMention = false;
-    try {
-      if (typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id) {
-        parentId = parentEvtOrId.id; parentAuthorPk = parentEvtOrId.pubkey || null;
-        isMention = this._isActualMention(parentEvtOrId);
-        if (nip10Parse) { const refs = nip10Parse(parentEvtOrId); if (refs?.root?.id) rootId = refs.root.id; if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvtOrId.id) rootId = refs.reply.id; }
-      } else if (typeof parentEvtOrId === 'string') { parentId = parentEvtOrId; }
-    } catch { }
-    if (!parentId) return false;
+    let score = 0;
+    const contents = threadEvents.map(e => e.content || '').filter(Boolean);
 
-    // Check interaction limit: max 2 per user unless it's a mention
-    if (parentAuthorPk && !isMention && (this.userInteractionCount.get(parentAuthorPk) || 0) >= 2) {
-      logger.info(`[NOSTR] Skipping reply to ${parentAuthorPk.slice(0, 8)} - interaction limit reached (2/2)`);
-      return false;
-    }
-    const parentForFactory = { id: parentId, pubkey: parentAuthorPk, refs: { rootId } };
-    const extraPTags = (Array.isArray(opts.extraPTags) ? opts.extraPTags : []).filter(pk => pk && pk !== this.pkHex);
-    let evtTemplate;
-    try {
-      evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
-    } catch (error) {
-      logger.warn(`[NOSTR] Failed to build reply note: ${error.message}`);
-      return false;
-    }
-    if (!evtTemplate) return false;
-    try {
-      const eCount = evtTemplate.tags.filter(t => t?.[0] === 'e').length;
-      const pCount = evtTemplate.tags.filter(t => t?.[0] === 'p').length;
-      const expectPk = opts.expectMentionPk;
-      const hasExpected = expectPk ? evtTemplate.tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
-      logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0, 8)} root=${rootId ? String(rootId).slice(0, 8) : '-'}${expectPk ? ` mentionExpected=${hasExpected ? 'yes' : 'no'}` : ''}`);
-    } catch { }
-    const signed = this._finalizeEvent(evtTemplate);
-    await this.pool.publish(this.relays, signed);
-    const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-    this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content}"`);
+    // More events = better context (up to a point)
+    score += Math.min(threadEvents.length * 0.2, 1.0);
 
-    // Increment interaction count if not a mention
-    if (parentAuthorPk && !isMention) {
-      this.userInteractionCount.set(parentAuthorPk, (this.userInteractionCount.get(parentAuthorPk) || 0) + 1);
-      await this._saveInteractionCounts();
+    // Content variety and depth
+    const totalLength = contents.join(' ').length;
+    if (totalLength > 100) score += 0.3;
+    if (totalLength > 300) score += 0.2;
+
+    // Recent activity
+    const now = Math.floor(Date.now() / 1000);
+    const recentEvents = threadEvents.filter(e => (now - (e.created_at || 0)) < 3600); // Last hour
+    if (recentEvents.length > 0) score += 0.2;
+
+    // Topic coherence
+    const allWords = contents.join(' ').toLowerCase().split(/\s+/);
+    const uniqueWords = new Set(allWords);
+    const coherence = uniqueWords.size / Math.max(allWords.length, 1);
+    if (coherence > 0.3) score += 0.3;
+
+    return Math.min(score, 1.0);
+  }
+
+  _shouldEngageWithThread(evt, threadContext) {
+    if (!threadContext || !evt) return false;
+
+    const { thread, isRoot, contextQuality } = threadContext;
+
+    // Always engage with high-quality root posts
+    if (isRoot && contextQuality > 0.6) {
+      return true;
     }
 
-    await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => { });
-    // Record a concise interaction summary for user profile history
-    try {
-      if (this.userProfileManager && parentAuthorPk) {
-        const topics = typeof parentEvtOrId === 'object' ? await extractTopicsFromEvent(parentEvtOrId, this.runtime) : [];
-        const snippet = (typeof parentEvtOrId === 'object' && parentEvtOrId.content) ? String(parentEvtOrId.content).slice(0, 120) : undefined;
-        await this.userProfileManager.recordInteraction(parentAuthorPk, {
-          type: isMention ? 'mention_reply' : 'reply',
-          success: true,
-          topics,
-          engagement: isMention ? 0.9 : 0.6,
-          summary: snippet,
-        });
+    // For thread replies, be more selective
+    if (!isRoot) {
+      // Don't engage if we can't understand the context
+      if (contextQuality < 0.3) {
+        logger?.debug?.(`[NOSTR] Low context quality (${contextQuality.toFixed(2)}) for thread reply ${evt.id.slice(0, 8)}`);
+        return false;
       }
-    } catch { }
-    if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => { }); }
-    return true;
-  } catch (err) { this.logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
-}
 
-  async postReaction(parentEvt, symbol = '+') {
-  if (!this.pool || !this.sk || !this.relays.length) return false;
-  try {
-    if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
-    if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) { logger.debug('[NOSTR] Skipping reaction to self-authored event'); return false; }
-    const evtTemplate = buildReaction(parentEvt, symbol);
-    const signed = this._finalizeEvent(evtTemplate);
-    await this.pool.publish(this.relays, signed);
-    this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}" (original: "${parentEvt.content.slice(0, 50)}…")`);
-    // Record reaction as a lightweight interaction for the author
-    try {
-      if (this.userProfileManager && parentEvt.pubkey) {
-        const topics = await extractTopicsFromEvent(parentEvt, this.runtime);
-        const snippet = parentEvt.content ? String(parentEvt.content).slice(0, 120) : undefined;
-        await this.userProfileManager.recordInteraction(parentEvt.pubkey, {
-          type: 'reaction',
-          success: true,
-          topics,
-          engagement: 0.2,
-          summary: snippet,
-        });
+      // Check if the thread is about relevant topics
+      const threadContent = thread.map(e => e.content || '').join(' ').toLowerCase();
+      const relevantKeywords = [
+        'art', 'pixel', 'creative', 'canvas', 'design', 'nostr', 'bitcoin',
+        'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community',
+        'technology', 'innovation', 'crypto', 'blockchain', 'gaming', 'music',
+        'photography', 'writing', 'coding', 'programming', 'science', 'space',
+        'environment', 'politics', 'economy', 'finance', 'health', 'fitness',
+        'travel', 'food', 'sports', 'entertainment', 'news', 'education'
+      ];
+
+      const hasRelevantContent = relevantKeywords.some(keyword =>
+        threadContent.includes(keyword)
+      );
+
+      if (!hasRelevantContent) {
+        logger?.debug?.(`[NOSTR] Thread ${evt.id.slice(0, 8)} lacks relevant content for engagement`);
+        return false;
       }
-    } catch { }
-    return true;
-  } catch (err) { logger.debug('[NOSTR] Reaction failed:', err?.message || err); return false; }
-}
 
-  async postDM(recipientEvt, text) {
-  if (!this.pool || !this.sk || !this.relays.length) return false;
-  try {
-    if (!recipientEvt || !recipientEvt.pubkey) return false;
-    if (!text || !text.trim()) return false;
-
-    const recipientPubkey = recipientEvt.pubkey;
-    const createdAtSec = Math.floor(Date.now() / 1000);
-
-    // Encrypt the DM content using manual NIP-04 encryption
-    const { encryptNIP04Manual } = require('./nostr');
-    let encryptedContent;
-
-    try {
-      encryptedContent = await encryptNIP04Manual(this.sk, recipientPubkey, text.trim());
-    } catch (encryptError) {
-      logger.info('[NOSTR] Using nostr-tools for DM encryption (manual unavailable):', encryptError?.message || encryptError);
-      // Fallback to nostr-tools encryption
-      if (nip04?.encrypt) {
-        encryptedContent = await nip04.encrypt(this.sk, recipientPubkey, text.trim());
-      } else {
-        logger.warn('[NOSTR] No encryption method available, cannot send DM');
+      // Check if this is a good entry point (not too deep in thread)
+      if (thread.length > 5) {
+        logger?.debug?.(`[NOSTR] Thread too long (${thread.length} events) for natural entry ${evt.id.slice(0, 8)}`);
         return false;
       }
     }
 
-    if (!encryptedContent) {
-      logger.warn('[NOSTR] Failed to encrypt DM content');
+    // Additional quality checks
+    const content = evt.content || '';
+
+    // Skip very short or very long content
+    if (content.length < 10 || content.length > 800) {
       return false;
     }
 
-    // Build the DM event with encrypted content
-    const { buildDirectMessage } = require('./eventFactory');
-    const evtTemplate = buildDirectMessage(recipientPubkey, encryptedContent, createdAtSec);
+    // Skip obvious bot patterns
+    const botPatterns = [
+      /^(gm|good morning|good night|gn)\s*$/i,
+      /^(repost|rt)\s*$/i,
+      /^\d+$/, // Just numbers
+      /^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/ // Just symbols
+    ];
 
-    if (!evtTemplate) return false;
+    if (botPatterns.some(pattern => pattern.test(content.trim()))) {
+      return false;
+    }
 
-    const signed = this._finalizeEvent(evtTemplate);
-    await this.pool.publish(this.relays, signed);
-
-    this.logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
     return true;
-  } catch (err) {
-    logger.warn('[NOSTR] DM send failed:', err?.message || err);
-    return false;
   }
-}
 
-  async saveInteractionMemory(kind, evt, extra) {
-  const { saveInteractionMemory } = require('./context');
-  return saveInteractionMemory(this.runtime, createUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
-}
+  async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
+    const { ensureNostrContext } = require('./context');
+    return ensureNostrContext(this.runtime, userPubkey, usernameLike, conversationId, { createUniqueUuid, ChannelType, logger });
+  }
 
-  async handleZap(evt) {
-  try {
-    if (!evt || evt.kind !== 9735) return;
-    if (!this.pkHex) return;
-    if (isSelfAuthor(evt, this.pkHex)) return;
-    const amountMsats = getZapAmountMsats(evt);
-    const targetEventId = getZapTargetEventId(evt);
-    const sender = getZapSenderPubkey(evt) || evt.pubkey;
-    const now = Date.now(); const last = this.zapCooldownByUser.get(sender) || 0; const cooldownMs = 5 * 60 * 1000; if (now - last < cooldownMs) return; this.zapCooldownByUser.set(sender, now);
+  async _createMemorySafe(memory, tableName = 'messages', maxRetries = 3) {
+    const { createMemorySafe } = require('./context');
+    return createMemorySafe(this.runtime, memory, tableName, maxRetries, logger);
+  }
 
-    // Check if sender is muted
-    if (await this._isUserMuted(sender)) {
-      // Removed low-value debug log
-      return;
-    }
-
-    const existingTimer = this.pendingReplyTimers.get(sender); if (existingTimer) { try { clearTimeout(existingTimer); } catch { } this.pendingReplyTimers.delete(sender); logger.info(`[NOSTR] Cancelled scheduled reply for ${sender.slice(0, 8)} due to zap`); }
-    this.lastReplyByUser.set(sender, now);
-    const convId = targetEventId || this._getConversationIdFromEvent(evt);
-    const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
-    const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
-    const { buildZapThanksPost } = require('./zapHandler');
-    const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
-    const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
-    logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}. Generating thanks reply to ${String(parentLog || '').slice(0, 8)}.`);
-    await this.postReply(prepared.parent, prepared.text, prepared.options);
-    await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => { });
-    // Record a zap interaction for the sender (improves history)
+  _finalizeEvent(evtTemplate) {
+    if (!evtTemplate) return null;
     try {
-      if (this.userProfileManager && sender) {
-        const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
-        const summary = sats ? `zap: ${sats} sats` : 'zap received';
-        await this.userProfileManager.recordInteraction(sender, {
-          type: 'zap',
-          success: true,
-          engagement: 0.7,
-          summary,
-        });
+      if (typeof finalizeEvent === 'function' && this.sk) {
+        return finalizeEvent(evtTemplate, this.sk);
       }
-    } catch { }
-  } catch (err) { this.logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
-}
-
-  async handleDM(evt) {
-  try {
-    if (!evt || evt.kind !== 4) return;
-    if (!this.pkHex) return;
-    if (isSelfAuthor(evt, this.pkHex)) return;
-    if (!this.dmEnabled) { try { logger?.info?.('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); } catch { } return; }
-    if (!this.dmReplyEnabled) { try { logger?.info?.('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); } catch { } return; }
-    if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying to DM'); } catch { } return; }
-    if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send DM reply'); } catch { } return; }
-
-    // Decrypt the DM content (allow runtime override for testing or custom behavior)
-    const decryptDirectMessageImpl = this._decryptDirectMessage || require('./nostr').decryptDirectMessage;
-    const decryptedContent = await decryptDirectMessageImpl(evt, this.sk, this.pkHex, nip04?.decrypt || null);
-    if (!decryptedContent) {
-      try { logger?.warn?.('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8)); } catch { }
-      return;
-    }
-
-    try { logger?.info?.(`[DM] Received from ${evt.pubkey.slice(0, 8)}: "${decryptedContent}"`); } catch { }
-    // Debug DM prompt meta (no CoT)
-    try {
-      const dbg = (
-        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-      );
-      if (dbg) {
-        const meta = {
-          decryptedLen: decryptedContent?.length || 0,
-          hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
-          kind: evt.kind,
-        };
-        try { logger?.debug?.(`[NOSTR][DEBUG] DM prompt meta: ${JSON.stringify(meta)}`); } catch { }
-      }
-    } catch { }
-
-    // Check for duplicate handling
-    if (this.handledEventIds.has(evt.id)) {
-      try { logger?.info?.(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { }
-      return;
-    }
-    this.handledEventIds.add(evt.id);
-
-    // Save DM as memory (persistent dedup for message itself)
-    const runtime = this.runtime;
-    const eventMemoryId = createUniqueUuid(runtime, evt.id);
-    const conversationId = this._getConversationIdFromEvent(evt);
-    const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
-
-    const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
-    let alreadySaved = false;
-    try {
-      const existing = await runtime.getMemoryById(eventMemoryId);
-      if (existing) {
-        alreadySaved = true;
-        try { logger?.info?.(`[NOSTR] DM ${evt.id.slice(0, 8)} already in memory (persistent dedup)`); } catch { }
-      }
-    } catch { }
-
-    if (!alreadySaved) {
-      const memory = {
-        id: eventMemoryId,
-        entityId,
-        agentId: runtime.agentId,
-        roomId,
-        content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } },
-        createdAt: createdAtMs,
-      };
-      await this._createMemorySafe(memory, 'messages');
-      try { logger?.info?.(`[NOSTR] Saved DM as memory id=${eventMemoryId}`); } catch { }
-    }
-
-    // Check for existing reply
-    try {
-      const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
-      const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
-      if (hasReply) {
-        try { logger?.info?.(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`); } catch { }
-        return;
-      }
-    } catch { }
-
-    // Check throttling
-    const last = this.lastReplyByUser.get(evt.pubkey) || 0;
-    const now = Date.now();
-    if (now - last < this.dmThrottleSec * 1000) {
-      const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
-      const existing = this.pendingReplyTimers.get(evt.pubkey);
-      if (!existing) {
-        try { logger?.info?.(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch { }
-        const pubkey = evt.pubkey;
-        // Carry decrypted content into the scheduled event used for prompt
-        const parentEvt = { ...evt, content: decryptedContent };
-        const capturedRoomId = roomId;
-        const capturedEventMemoryId = eventMemoryId;
-        const timer = setTimeout(async () => {
-          this.pendingReplyTimers.delete(pubkey);
-          try {
-            try { logger?.info?.(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch { }
-            try {
-              const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
-              const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
-              if (hasReply) {
-                try { logger?.info?.(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch { }
-                return;
-              }
-            } catch { }
-            const lastNow = this.lastReplyByUser.get(pubkey) || 0;
-            const now2 = Date.now();
-            if (now2 - lastNow < this.dmThrottleSec * 1000) {
-              try { logger?.info?.(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch { }
-              return;
-            }
-            // Check if user is muted before scheduled DM reply
-            if (await this._isUserMuted(pubkey)) {
-              // Removed low-value debug log
-              return;
-            }
-            this.lastReplyByUser.set(pubkey, now2);
-            const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
-
-            // Check if LLM generation failed (returned null)
-            if (!replyText || !replyText.trim()) {
-              try { logger?.warn?.(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`); } catch { }
-              return;
-            }
-            // Debug generated scheduled DM snippet
-            try {
-              const dbg = (
-                String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-                || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-              );
-              if (dbg) {
-                const out = String(replyText);
-                const sample = out.replace(/\s+/g, ' ').slice(0, 200);
-                logger.debug(`[NOSTR][DEBUG] DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
-              }
-            } catch { }
-
-            logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
-            const ok = await this.postDM(parentEvt, replyText);
-            if (ok) {
-              const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
-              await this._createMemorySafe({
-                id: linkId,
-                entityId,
-                agentId: this.runtime.agentId,
-                roomId: capturedRoomId,
-                content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId },
-                createdAt: now2,
-              }, 'messages').catch(() => { });
-              // Record DM interaction for user profile history (scheduled)
-              try {
-                if (this.userProfileManager && pubkey) {
-                  const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
-                  await this.userProfileManager.recordInteraction(pubkey, {
-                    type: 'dm',
-                    success: true,
-                    engagement: 0.8,
-                    summary: snippet,
-                  });
-                }
-              } catch { }
-            }
-          } catch (e) {
-            logger.warn('[NOSTR] Scheduled DM reply failed:', e?.message || e);
-          }
-        }, waitMs);
-        this.pendingReplyTimers.set(evt.pubkey, timer);
-      } else {
-        logger.debug(`[NOSTR] DM reply already scheduled for ${evt.pubkey.slice(0, 8)}`);
-      }
-      return;
-    }
-
-    this.lastReplyByUser.set(evt.pubkey, now);
-
-    // Add initial delay
-    const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
-    const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
-    const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
-    if (delayMs > 0) {
-      logger.info(`[NOSTR] Preparing DM reply; thinking for ~${delayMs}ms`);
-      await new Promise((r) => setTimeout(r, delayMs));
-    } else {
-      logger.info(`[NOSTR] Preparing immediate DM reply (no delay)`);
-    }
-
-    // Re-check dedup after think delay in case another process replied meanwhile
-    try {
-      const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 200 });
-      const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
-      if (hasReply) {
-        logger.info(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} post-think (reply appeared)`);
-        return;
-      }
-    } catch { }
-
-    // Check if user is muted before sending DM reply
-    if (await this._isUserMuted(evt.pubkey)) {
-      // Removed low-value debug log
-      return;
-    }
-
-    // Process images in DM content (if enabled)
-    let imageContext = { imageDescriptions: [], imageUrls: [] };
-    if (this.imageProcessingEnabled) {
-      try {
-        logger.info(`[NOSTR] Processing images in DM content: "${decryptedContent.slice(0, 200)}..."`);
-        const { processImageContent } = require('./image-vision');
-        const fullImageContext = await processImageContent(decryptedContent, runtime);
-        imageContext = {
-          imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-          imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-        };
-        logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from DM (max: ${this.maxImagesPerMessage})`);
-      } catch (error) {
-        logger.error(`[NOSTR] Error in DM image processing: ${error.message || error}`);
-        imageContext = { imageDescriptions: [], imageUrls: [] };
-      }
-    }
-
-    // Use decrypted content for the DM prompt
-    const dmEvt = { ...evt, content: decryptedContent };
-    const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
-
-    // Check if LLM generation failed (returned null)
-    if (!replyText || !replyText.trim()) {
-      logger.warn(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-      return;
-    }
-    // Debug generated DM reply snippet
-    try {
-      const dbg = (
-        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-      );
-      if (dbg) {
-        const out = String(replyText);
-        const sample = out.replace(/\s+/g, ' ').slice(0, 200);
-        logger.debug(`[NOSTR][DEBUG] DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
-      }
-    } catch { }
-
-    logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
-    const replyOk = await this.postDM(evt, replyText);
-    if (replyOk) {
-      logger.info(`[NOSTR] DM reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
-      const replyMemory = {
-        id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`),
-        entityId,
-        agentId: runtime.agentId,
-        roomId,
-        content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId },
-        createdAt: now,
-      };
-      await this._createMemorySafe(replyMemory, 'messages');
-      // Record DM interaction for user profile history (immediate)
-      try {
-        if (this.userProfileManager && evt.pubkey) {
-          const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
-          await this.userProfileManager.recordInteraction(evt.pubkey, {
-            type: 'dm',
-            success: true,
-            engagement: 0.8,
-            summary: snippet,
-          });
-        }
-      } catch { }
-    }
-  } catch (err) {
-    this.logger.warn('[NOSTR] handleDM failed:', err?.message || err);
-  }
-}
-
-  async handleSealedDM(evt) {
-  try {
-    if (!evt || evt.kind !== 14) return;
-    if (!this.pkHex) return;
-    if (isSelfAuthor(evt, this.pkHex)) return;
-    if (!this.dmEnabled) { logger.info('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); return; }
-    if (!this.dmReplyEnabled) { logger.info('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); return; }
-    if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to sealed DM'); return; }
-    if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send sealed DM reply'); return; }
-
-    // Attempt to decrypt sealed content via nip44 if available
-    let decryptedContent = null;
-    try {
-      if (nip44 && (nip44.decrypt || nip44.sealOpen)) {
-        const recipientTag = evt.tags.find(t => t && t[0] === 'p');
-        const peerPubkey = recipientTag && recipientTag[1] && String(recipientTag[1]).toLowerCase() === String(this.pkHex).toLowerCase()
-          ? String(evt.pubkey).toLowerCase()
-          : String(recipientTag?.[1] || evt.pubkey).toLowerCase();
-        const privHex = typeof this.sk === 'string' ? this.sk : Buffer.from(this.sk).toString('hex');
-        if (typeof nip44.decrypt === 'function') {
-          decryptedContent = await nip44.decrypt(privHex, peerPubkey, evt.content);
-        } else if (typeof nip44.sealOpen === 'function') {
-          // Some APIs expose sealOpen(sk, content) or similar; try conservative signature
-          try { decryptedContent = await nip44.sealOpen(privHex, evt.content); } catch { }
-        }
-      }
-    } catch (e) {
-      logger.debug('[NOSTR] Sealed DM decrypt attempt failed:', e?.message || e);
-    }
-
-    if (!decryptedContent) {
-      logger.info('[NOSTR] Sealed DM received but cannot decrypt (nip44 not available). Consider enabling legacy DM or adding nip44 support in runtime build.');
-      return;
-    }
-
-    logger.info(`[NOSTR] Sealed DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
-    // Debug sealed DM prompt meta
-    try {
-      const dbg = (
-        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-      );
-      if (dbg) {
-        const meta = {
-          decryptedLen: decryptedContent?.length || 0,
-          hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
-          kind: evt.kind,
-        };
-        logger.debug(`[NOSTR][DEBUG] Sealed DM prompt meta: ${JSON.stringify(meta)}`);
-      }
-    } catch { }
-
-    // Dedup check
-    if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping sealed DM ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
-    this.handledEventIds.add(evt.id);
-
-    // Save memory and prepare reply context
-    const runtime = this.runtime;
-    const eventMemoryId = createUniqueUuid(runtime, evt.id);
-    const conversationId = this._getConversationIdFromEvent(evt);
-    const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
-    const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
-    try {
-      const existing = await runtime.getMemoryById(eventMemoryId);
-      if (!existing) {
-        await this._createMemorySafe({ id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } }, createdAt: createdAtMs, }, 'messages');
-        logger.info(`[NOSTR] Saved sealed DM as memory id=${eventMemoryId}`);
-      }
-    } catch { }
-
-    // Respect throttling
-    const last = this.lastReplyByUser.get(evt.pubkey) || 0;
-    const now = Date.now();
-    if (now - last < this.dmThrottleSec * 1000) {
-      const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
-      const existing = this.pendingReplyTimers.get(evt.pubkey);
-      if (!existing) {
-        const pubkey = evt.pubkey;
-        const parentEvt = { ...evt, content: decryptedContent };
-        const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
-        const timer = setTimeout(async () => {
-          this.pendingReplyTimers.delete(pubkey);
-          try {
-            logger.info(`[NOSTR] Scheduled sealed DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
-            try {
-              const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
-              const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
-              if (hasReply) {
-                logger.info(`[NOSTR] Skipping scheduled sealed DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
-                return;
-              }
-            } catch { }
-            const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
-            if (now2 - lastNow < this.dmThrottleSec * 1000) {
-              logger.info(`[NOSTR] Still throttled for sealed DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
-              return;
-            }
-            // Check if user is muted before scheduled sealed DM reply
-            if (await this._isUserMuted(pubkey)) {
-              // Removed low-value debug log
-              return;
-            }
-            this.lastReplyByUser.set(pubkey, now2);
-            const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
-
-            // Check if LLM generation failed (returned null)
-            if (!replyText || !replyText.trim()) {
-              logger.warn(`[NOSTR] Skipping scheduled sealed DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
-              return;
-            }
-            // Debug generated sealed DM scheduled reply snippet
-            try {
-              const dbg = (
-                String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-                || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-              );
-              if (dbg) {
-                const out = String(replyText);
-                const sample = out.replace(/\s+/g, ' ').slice(0, 200);
-                logger.debug(`[NOSTR][DEBUG] Sealed DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
-              }
-            } catch { }
-
-            const ok = await this.postDM(parentEvt, replyText);
-            if (ok) {
-              const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
-              await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId }, createdAt: now2, }, 'messages').catch(() => { });
-              // Record sealed DM interaction (scheduled)
-              try {
-                if (this.userProfileManager && pubkey) {
-                  const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
-                  await this.userProfileManager.recordInteraction(pubkey, {
-                    type: 'dm',
-                    success: true,
-                    engagement: 0.8,
-                    summary: snippet,
-                  });
-                }
-              } catch { }
-            }
-          } catch (e2) { logger.warn('[NOSTR] Scheduled sealed DM reply failed:', e2?.message || e2); }
-        }, waitMs);
-        this.pendingReplyTimers.set(evt.pubkey, timer);
-      }
-      return;
-    }
-
-    this.lastReplyByUser.set(evt.pubkey, now);
-
-    // Think delay
-    const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
-    const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
-    const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
-    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
-
-    // Check if user is muted before sending sealed DM reply
-    if (await this._isUserMuted(evt.pubkey)) {
-      // Removed low-value debug log
-      return;
-    }
-
-    // Process images in sealed DM content (if enabled)
-    let imageContext = { imageDescriptions: [], imageUrls: [] };
-    if (this.imageProcessingEnabled) {
-      try {
-        logger.info(`[NOSTR] Processing images in sealed DM content: "${decryptedContent.slice(0, 200)}..."`);
-        const { processImageContent } = require('./image-vision');
-        const fullImageContext = await processImageContent(decryptedContent, runtime);
-        imageContext = {
-          imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-          imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-        };
-        logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from sealed DM (max: ${this.maxImagesPerMessage})`);
-      } catch (error) {
-        logger.error(`[NOSTR] Error in sealed DM image processing: ${error.message || error}`);
-        imageContext = { imageDescriptions: [], imageUrls: [] };
-      }
-    }
-
-    const dmEvt = { ...evt, content: decryptedContent };
-    const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
-
-    // Check if LLM generation failed (returned null)
-    if (!replyText || !replyText.trim()) {
-      logger.warn(`[NOSTR] Skipping sealed DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-      return;
-    }
-
-    const replyOk = await this.postDM(evt, replyText);
-    if (replyOk) {
-      const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };
-      await this._createMemorySafe(replyMemory, 'messages');
-      // Record sealed DM interaction (immediate)
-      try {
-        if (this.userProfileManager && evt.pubkey) {
-          const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
-          await this.userProfileManager.recordInteraction(evt.pubkey, {
-            type: 'dm',
-            success: true,
-            engagement: 0.8,
-            summary: snippet,
-          });
-        }
-      } catch { }
-    }
-    // Debug generated sealed DM reply snippet (immediate)
-    try {
-      const dbg = (
-        String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
-        || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
-      );
-      if (dbg) {
-        const out = String(replyText);
-        const sample = out.replace(/\s+/g, ' ').slice(0, 200);
-        logger.debug(`[NOSTR][DEBUG] Sealed DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
-      }
-    } catch { }
-  } catch (err) {
-    logger.debug('[NOSTR] handleSealedDM failed:', err?.message || err);
-  }
-}
-
-  async stop() {
-  if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
-  if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
-  if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
-  if (this.timelineLoreTimer) { clearTimeout(this.timelineLoreTimer); this.timelineLoreTimer = null; }
-  if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
-  if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch { } this.homeFeedUnsub = null; }
-  if (this.listenUnsub) { try { this.listenUnsub(); } catch { } this.listenUnsub = null; }
-  if (this.pool) { try { this.pool.close([]); } catch { } this.pool = null; }
-  if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch { } } this.pendingReplyTimers.clear(); }
-  logger.info('[NOSTR] Service stopped');
-}
-
-// Store image context keyed by event ID for scheduled replies
-_storeImageContext(eventId, imageContext) {
-  if (!this.imageContextCache) {
-    this.imageContextCache = new Map();
-  }
-  this.imageContextCache.set(eventId, {
-    context: imageContext,
-    timestamp: Date.now()
-  });
-  logger.debug(`[NOSTR] Stored image context for event ${eventId.slice(0, 8)}: ${imageContext.imageDescriptions.length} descriptions`);
-}
-
-// Retrieve stored image context
-_getStoredImageContext(eventId) {
-  if (!this.imageContextCache) return null;
-  const stored = this.imageContextCache.get(eventId);
-  if (!stored) return null;
-
-  // Expire old contexts (e.g., after 1 hour)
-  const maxAge = 60 * 60 * 1000; // 1 hour
-  if (Date.now() - stored.timestamp > maxAge) {
-    this.imageContextCache.delete(eventId);
-    logger.debug(`[NOSTR] Expired old image context for event ${eventId.slice(0, 8)}`);
-    return null;
-  }
-
-  logger.debug(`[NOSTR] Retrieved stored image context for event ${eventId.slice(0, 8)}: ${stored.context.imageDescriptions.length} descriptions`);
-  return stored.context;
-}
-
-// Cleanup old image contexts periodically
-_cleanupImageContexts() {
-  if (!this.imageContextCache) return;
-  const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
-  let cleaned = 0;
-  for (const [eventId, stored] of this.imageContextCache.entries()) {
-    if (stored.timestamp < cutoff) {
-      this.imageContextCache.delete(eventId);
-      cleaned++;
-    }
-  }
-  if (cleaned > 0) {
-    logger.debug(`[NOSTR] Cleaned up ${cleaned} expired image contexts`);
-  }
-}
-
-_startConnectionMonitoring() {
-  if (!this.connectionMonitorEnabled) {
-    return;
-  }
-
-  if (this.connectionMonitorTimer) {
-    clearTimeout(this.connectionMonitorTimer);
-  }
-
-  this.connectionMonitorTimer = setTimeout(() => {
-    this._checkConnectionHealth();
-  }, this.connectionCheckIntervalMs);
-}
-
-_checkConnectionHealth() {
-  // Periodic cleanup of expired image contexts
-  this._cleanupImageContexts();
-
-  const now = Date.now();
-  const timeSinceLastEvent = now - this.lastEventReceived;
-
-  if (timeSinceLastEvent > this.maxTimeSinceLastEventMs) {
-    logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
-    this._attemptReconnection();
-  } else {
-    logger.debug(`[NOSTR] Connection healthy, last event received ${Math.round(timeSinceLastEvent / 1000)}s ago`);
-    this._startConnectionMonitoring(); // Schedule next check
-  }
-}
-
-  async _attemptReconnection() {
-  if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-    logger.error(`[NOSTR] Max reconnection attempts (${this.maxReconnectAttempts}) reached, giving up`);
-    return;
-  }
-
-  this.reconnectAttempts++;
-  logger.info(`[NOSTR] Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-
-  try {
-    // Close existing subscriptions and pool
-    if (this.listenUnsub) {
-      try { this.listenUnsub(); } catch { }
-      this.listenUnsub = null;
-    }
-    if (this.homeFeedUnsub) {
-      try { this.homeFeedUnsub(); } catch { }
-      this.homeFeedUnsub = null;
-    }
-    if (this.pool) {
-      try { this.pool.close([]); } catch { }
-    }
-
-    // Wait a bit before reconnecting
-    await new Promise(resolve => setTimeout(resolve, this.reconnectDelayMs));
-
-    // Recreate pool and subscriptions
-    await this._setupConnection();
-
-    logger.info(`[NOSTR] Reconnection ${this.reconnectAttempts} successful`);
-    this.reconnectAttempts = 0; // Reset on successful reconnection
-    this.lastEventReceived = Date.now(); // Reset timer
-    if (this.connectionMonitorEnabled) {
-      this._startConnectionMonitoring(); // Resume monitoring
-    }
-
-  } catch (error) {
-    logger.error(`[NOSTR] Reconnection ${this.reconnectAttempts} failed:`, error?.message || error);
-
-    // Schedule another reconnection attempt
-    setTimeout(() => {
-      this._attemptReconnection();
-    }, this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1)); // Exponential backoff
-  }
-}
-
-  async _setupConnection() {
-  const enablePing = String(this.runtime.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
-  const poolFactory = typeof this.runtime?.createSimplePool === 'function'
-    ? this.runtime.createSimplePool.bind(this.runtime)
-    : null;
-
-  try {
-    const poolInstance = poolFactory
-      ? poolFactory({ enablePing })
-      : new SimplePool({ enablePing });
-    this.pool = poolInstance;
-  } catch (err) {
-    logger.warn('[NOSTR] Failed to create SimplePool instance:', err?.message || err);
-    this.pool = null;
-  }
-
-  if (!this.relays.length || !this.pool || !this.pkHex) {
-    return;
-  }
-
-  // Setup main event subscriptions
-  try {
-    this.listenUnsub = this.pool.subscribeMany(
-      this.relays,
-      [
-        { kinds: [1], '#p': [this.pkHex] },
-        { kinds: [4], '#p': [this.pkHex] },
-        // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
-        { kinds: [14], '#p': [this.pkHex] },
-        { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
-      ],
-      {
-        onevent: (evt) => {
-          try {
-            this.lastEventReceived = Date.now(); // Update last event timestamp
-
-            // Fresh start failsafe: skip events before cutoff (Jan 1, 2026 default)
-            if (evt.created_at && evt.created_at < this.messageCutoff) {
-              // Skip noise from old mentions/DMs
-              return;
-            }
-
-            logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-            if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
-
-            // Ignore known bot pubkeys to prevent loops
-            const botPubkeys = new Set([
-              '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
-            ]);
-            if (botPubkeys.has(evt.pubkey)) {
-              logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
-              return;
-            }
-
-            // Ignore bot-like content patterns
-            const botPatterns = [
-              /^Unknown command\. Try: /i,
-              /^\/help/i,
-              /^Command not found/i,
-              /^Please use \/help/i
-            ];
-            if (botPatterns.some(pattern => pattern.test(evt.content))) {
-              logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
-              return;
-            }
-
-            if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
-            if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
-            if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-            if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
-            logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
-          } catch (outerErr) {
-            logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
-          }
-        },
-        oneose: () => {
-          logger.debug('[NOSTR] Mention subscription OSE');
-          this.lastEventReceived = Date.now(); // Update on EOSE as well
-        },
-        onclose: (reason) => {
-          logger.warn(`[NOSTR] Subscription closed: ${reason}`);
-          // Don't immediately reconnect here as it might cause a loop
-          // Let the connection monitor handle it
-        }
-      }
-    );
-    logger.info(`[NOSTR] Subscriptions established on ${this.relays.length} relays`);
-  } catch (err) {
-    logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
-    throw err;
-  }
-
-  // Restart home feed if it was active
-  if (this.homeFeedEnabled && this.sk) {
-    try {
-      await this.startHomeFeed();
     } catch (err) {
-      logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
+      try { this.logger?.debug?.('[NOSTR] finalizeEvent failed:', err?.message || err); } catch { }
+    }
+    const fallbackId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    try {
+      return {
+        ...evtTemplate,
+        id: evtTemplate.id || fallbackId(),
+        pubkey: evtTemplate.pubkey || this.pkHex || 'nostr-test',
+        sig: evtTemplate.sig || 'mock-signature',
+      };
+    } catch {
+      return evtTemplate;
     }
   }
-}
 
-  async startHomeFeed() {
-  if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
+  async handleMention(evt) {
+    try {
+      if (!evt || !evt.id) return;
+      if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { try { logger?.info?.('[NOSTR] Ignoring self-mention'); } catch { } return; }
+      if (this.handledEventIds.has(evt.id)) { try { logger?.info?.(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { } return; }
 
-  try {
-    // Load current contacts (followed users)
-    const contacts = await this._loadCurrentContacts();
-    // if (!contacts.size) {
-    //   logger.debug('[NOSTR] No contacts to follow for home feed');
-    //   return;
-    // }
-
-    const authors = contacts.size ? Array.from(contacts) : [];
-    logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
-
-    // Subscribe to posts from followed users
-    this.homeFeedUnsub = this.pool.subscribeMany(
-      this.relays,
-      [{ kinds: [1], limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last hour
-      {
-        onevent: (evt) => {
-          this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
-          if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
-          // Filter out muted users at the earliest stage
-          if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) {
-            // Removed low-value debug log
-            return;
-          }
-          // Real-time event handling for quality tracking only
-          this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
-        },
-        oneose: () => {
-          logger.debug('[NOSTR] Home feed subscription OSE');
-          this.lastEventReceived = Date.now(); // Update on EOSE as well
-        },
-        onclose: (reason) => {
-          logger.warn(`[NOSTR] Home feed subscription closed: ${reason}`);
-        }
+      // Check if mention is too old (ignore mentions older than configured days)
+      const eventAgeMs = Date.now() - (evt.created_at * 1000);
+      const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
+      if (eventAgeMs > maxAgeMs) {
+        try { logger?.info?.(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`); } catch { }
+        this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+        return;
       }
-    );
 
-    // Schedule periodic home feed processing
-    this.scheduleNextHomeFeedCheck();
+      // Check if this is actually a mention directed at us vs just a thread reply
+      const isActualMention = this._isActualMention(evt);
+      try { logger?.info?.(`[NOSTR] _isActualMention check for ${evt.id.slice(0, 8)}: ${isActualMention}`); } catch { }
+      if (!isActualMention) {
+        try {
+          const tagsSummary = evt.tags ? JSON.stringify(evt.tags.slice(0, 5)) : 'no tags';
+          logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention. Tags: ${tagsSummary}`);
+        } catch { }
+        this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
+        return;
+      }
 
-  } catch (err) {
-    logger.warn('[NOSTR] Failed to start home feed:', err?.message || err);
-  }
-}
 
-scheduleNextHomeFeedCheck() {
-  const jitter = this.homeFeedMinSec + Math.floor(Math.random() * Math.max(1, this.homeFeedMaxSec - this.homeFeedMinSec));
-  if (this.homeFeedTimer) clearTimeout(this.homeFeedTimer);
-  this.homeFeedTimer = setTimeout(() => this.processHomeFeed().finally(() => this.scheduleNextHomeFeedCheck()), jitter * 1000);
-  logger.info(`[NOSTR] Next home feed check in ~${jitter}s`);
-}
+      // Check if the mention is relevant and worth responding to
+      const isRelevant = await this._isRelevantMention(evt);
+      try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch { }
+      if (!isRelevant) {
+        try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Full content: ${evt.content}`); } catch { }
+        this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
+        return;
+      }
 
-  async processHomeFeed() {
-  if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
 
-  try {
-    // Prevent memory leak: clear processed events if set gets too large
-    // We only care about deduplicating recent interactions, not all history
-    if (this.homeFeedProcessedEvents.size > 2000) {
-      logger.debug('[NOSTR] Clearing homeFeedProcessedEvents cache (size limit reached)');
-      this.homeFeedProcessedEvents.clear();
-    }
 
-    // Load current contacts
-    const contacts = await this._loadCurrentContacts();
-    if (!contacts.size) return;
-
-    const authors = Array.from(contacts);
-    const since = Math.floor(Date.now() / 1000) - 1800; // Last 30 minutes
-
-    // Fetch recent posts from followed users
-    const events = await this._list(this.relays, [{ kinds: [1], authors, limit: 50, since }]);
-
-    if (!events.length) {
-      logger.debug('[NOSTR] No recent posts in home feed');
-      return;
-    }
-
-    // Filter and sort events
-    const qualityEvents = events
-      .filter(evt => !this.homeFeedProcessedEvents.has(evt.id))
-      .filter(evt => this._isQualityContent(evt, 'general', 'relaxed'))
-      .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
-      .slice(0, 20); // Process up to 20 recent posts
-
-    if (!qualityEvents.length) {
-      logger.debug('[NOSTR] No quality posts to process in home feed');
-      return;
-    }
-
-    logger.info(`[NOSTR] Processing ${qualityEvents.length} home feed posts`);
-
-    let interactions = 0;
-    for (const evt of qualityEvents) {
-      if (interactions >= this.homeFeedMaxInteractions) break;
+      this.handledEventIds.add(evt.id);
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
+      let alreadySaved = false;
+      try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; try { logger?.info?.(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } catch { } } } catch { }
+      const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
+      const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: evt.content || '', source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
+      if (!alreadySaved) { try { logger?.info?.(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); } catch { } await this._createMemorySafe(memory, 'messages'); }
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
+        const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping auto-reply for ${evt.id.slice(0, 8)} (found existing reply)`); } catch { } return; }
+      } catch { }
+      // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
+      if (!this.replyEnabled) { try { logger?.info?.('[NOSTR] Auto-reply disabled by config (NOSTR_REPLY_ENABLE=false)'); } catch { } return; }
+      if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying'); } catch { } return; }
+      if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send reply'); } catch { } return; }
 
       // Check if user is muted
       if (await this._isUserMuted(evt.pubkey)) {
         // Removed low-value debug log
-        continue;
+        return;
       }
 
-      // FIRST: LLM analysis to determine if post is relevant/interesting
-      logger.debug(`[NOSTR] Analyzing home feed post ${evt.id.slice(0, 8)} from ${evt.pubkey.slice(0, 8)}`);
-      if (!(await this._analyzePostForInteraction(evt))) {
-        logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0, 8)} - not relevant per LLM analysis`);
-        continue;
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0; const now = Date.now();
+      if (now - last < this.replyThrottleSec * 1000) {
+        const waitMs = this.replyThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          try { logger?.info?.(`[NOSTR] Throttling reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch { }
+          const pubkey = evt.pubkey; const parentEvt = { ...evt }; const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              try { logger?.info?.(`[NOSTR] Scheduled reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch { }
+              try {
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
+                if (hasReply) { try { logger?.info?.(`[NOSTR] Skipping scheduled reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch { } return; }
+              } catch { }
+              // Note: Removed home feed processing check - reactions/reposts should not prevent mention replies
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
+              if (now2 - lastNow < this.replyThrottleSec * 1000) { try { logger?.info?.(`[NOSTR] Still throttled for ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch { } return; }
+              // Check if user is muted before scheduled reply
+              if (await this._isUserMuted(pubkey)) { return; } // Removed log
+              this.lastReplyByUser.set(pubkey, now2);
+              // Retrieve stored image context for scheduled reply
+              const storedImageContext = this._getStoredImageContext(parentEvt.id);
+              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId, null, storedImageContext);
+
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                logger.warn(`[NOSTR] Skipping throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                return;
+              }
+
+              logger.info(`[NOSTR] Queuing throttled/scheduled reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
+
+              // Queue the throttled reply with normal priority
+              await this.postingQueue.enqueue({
+                type: 'mention_throttled',
+                id: `mention_throttled:${parentEvt.id}:${now2}`,
+                priority: this.postingQueue.priorities.HIGH,
+                metadata: { eventId: parentEvt.id.slice(0, 8), pubkey: pubkey.slice(0, 8) },
+                action: async () => {
+                  const ok = await this.postReply(parentEvt, replyText);
+                  if (ok) {
+                    const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:reply:${Date.now()}:scheduled`);
+                    await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId, }, createdAt: Date.now(), }, 'messages').catch(() => { });
+                  }
+                  return ok;
+                }
+              });
+            } catch (e) { logger.warn('[NOSTR] Scheduled reply failed:', e?.message || e); }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        } else { logger.debug(`[NOSTR] Reply already scheduled for ${evt.pubkey.slice(0, 8)}`); }
+        return;
+      }
+      this.lastReplyByUser.set(evt.pubkey, now);
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) { logger.info(`[NOSTR] Preparing reply; thinking for ~${delayMs}ms`); await new Promise((r) => setTimeout(r, delayMs)); }
+      else { logger.info(`[NOSTR] Preparing immediate reply (no delay)`); }
+
+      // Process images in the mention content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in mention content: "${(evt.content || '').slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(evt.content || '', runtime);
+          // Limit the number of images to process
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from mention (max: ${this.maxImagesPerMessage}), URLs: ${imageContext.imageUrls.join(', ')}`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in image processing: ${error.message || error}`);
+          // Continue with empty image context
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      } else {
+        logger.debug('[NOSTR] Image processing disabled by configuration');
       }
 
-      const interactionType = this._chooseInteractionType();
-      if (!interactionType) {
-        logger.debug(`[NOSTR] No interaction type chosen for ${evt.id.slice(0, 8)} (probabilistic skip)`);
-        continue;
+      // Store image context for potential scheduled replies
+      if (imageContext.imageDescriptions.length > 0) {
+        this._storeImageContext(evt.id, imageContext);
       }
 
-      // Additional check for reposts (double-verification for quality)
-      let isRelevant = true;
-      if (interactionType === 'repost') {
-        isRelevant = await this.generateRepostRelevancyLLM(evt);
-        if (!isRelevant) {
-          logger.debug(`[NOSTR] Skipping repost of ${evt.id.slice(0, 8)} - not worthy per repost analysis`);
-          continue;
+      // Fetch full thread context for better conversation understanding
+      let threadContext = null;
+      try {
+        threadContext = await this._getThreadContext(evt);
+        logger.info(`[NOSTR] Thread context for mention: ${threadContext.thread.length} events (isRoot: ${threadContext.isRoot})`);
+      } catch (err) {
+        logger.debug(`[NOSTR] Failed to fetch thread context for mention: ${err?.message || err}`);
+      }
+
+      logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
+      const replyText = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+
+      // Check if LLM generation failed (returned null)
+      if (!replyText || !replyText.trim()) {
+        logger.warn(`[NOSTR] Skipping mention reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+        return;
+      }
+
+      // Queue the reply instead of posting directly for natural rate limiting
+      logger.info(`[NOSTR] Queuing mention reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
+      const queueSuccess = await this.postingQueue.enqueue({
+        type: 'mention',
+        id: `mention:${evt.id}:${now}`,
+        priority: this.postingQueue.priorities.HIGH,
+        metadata: { eventId: evt.id.slice(0, 8), pubkey: evt.pubkey.slice(0, 8) },
+        action: async () => {
+          const replyOk = await this.postReply(evt, replyText);
+          if (replyOk) {
+            logger.info(`[NOSTR] Reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
+            const replyMemory = {
+              id: createUniqueUuid(runtime, `${evt.id}:reply:${Date.now()}`),
+              entityId,
+              agentId: runtime.agentId,
+              roomId,
+              content: {
+                text: replyText,
+                source: 'nostr',
+                inReplyTo: eventMemoryId,
+                imageContext: imageContext && imageContext.imageDescriptions.length > 0 ? { descriptions: imageContext.imageDescriptions, urls: imageContext.imageUrls } : null,
+              },
+              createdAt: Date.now(),
+            };
+            await this._createMemorySafe(replyMemory, 'messages');
+
+            // Track user interaction for profile learning
+            if (this.userProfileManager) {
+              try {
+                const topics = await extractTopicsFromEvent(evt, this.runtime);
+                await this.userProfileManager.recordInteraction(evt.pubkey, {
+                  type: 'mention',
+                  success: true,
+                  topics,
+                  engagement: 1.0, // User mentioned us, high engagement
+                  timestamp: Date.now()
+                });
+                logger.debug(`[NOSTR] Recorded mention interaction for user ${evt.pubkey.slice(0, 8)}`);
+              } catch (err) {
+                logger.debug('[NOSTR] Failed to record user interaction:', err.message);
+              }
+            }
+          }
+          return replyOk;
+        }
+      });
+
+      if (!queueSuccess) {
+        logger.warn(`[NOSTR] Failed to queue mention reply for ${evt.id.slice(0, 8)}`);
+      }
+    } catch (err) { this.logger.warn('[NOSTR] handleMention failed:', err?.message || err); }
+  }
+
+  async _restoreHandledEventIds() {
+    try {
+      if (!this.runtime?.getMemories) return;
+
+      // Get recent reply memories to restore handled event IDs
+      const replyMemories = await this.runtime.getMemories({
+        tableName: 'messages',
+        agentId: this.runtime.agentId,
+        count: 1000, // Load last 1000 replies
+        unique: false
+      });
+
+      let restored = 0;
+      for (const memory of replyMemories) {
+        if (memory.content?.source === 'nostr' && memory.content?.inReplyTo) {
+          // Extract the original event ID from the inReplyTo field
+          const originalEventId = memory.content.inReplyTo;
+          if (originalEventId && !this.handledEventIds.has(originalEventId)) {
+            this.handledEventIds.add(originalEventId);
+            restored++;
+          }
+        }
+        // Legacy path: replies recorded without top-level inReplyTo; event id lives in content.data.eventId
+        if (memory.content?.source === 'nostr' && memory.content?.data?.eventId) {
+          const legacyEventId = memory.content.data.eventId;
+          if (legacyEventId && !this.handledEventIds.has(legacyEventId)) {
+            this.handledEventIds.add(legacyEventId);
+            restored++;
+          }
+        }
+        // Also check if the memory ID contains the event ID (fallback)
+        if (memory.id && memory.id.includes(':')) {
+          const parts = memory.id.split(':');
+          if (parts.length >= 2 && !this.handledEventIds.has(parts[0])) {
+            this.handledEventIds.add(parts[0]);
+            restored++;
+          }
         }
       }
 
-      logger.info(`[NOSTR] Queueing home feed ${interactionType} for ${evt.id.slice(0, 8)}`);
+      if (restored > 0) {
+        logger.info(`[NOSTR] Restored ${restored} handled event IDs from memory`);
+      }
+    } catch (error) {
+      logger.warn(`[NOSTR] Failed to restore handled event IDs: ${error.message}`);
+    }
+  }
+
+  pickReplyTextFor(evt) {
+    const { pickReplyTextFor } = require('./replyText');
+    return pickReplyTextFor(evt);
+  }
+
+  async postReply(parentEvtOrId, text, opts = {}) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      let rootId = null; let parentId = null; let parentAuthorPk = null; let isMention = false;
+      try {
+        if (typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id) {
+          parentId = parentEvtOrId.id; parentAuthorPk = parentEvtOrId.pubkey || null;
+          isMention = this._isActualMention(parentEvtOrId);
+          if (nip10Parse) { const refs = nip10Parse(parentEvtOrId); if (refs?.root?.id) rootId = refs.root.id; if (!rootId && refs?.reply?.id && refs.reply.id !== parentEvtOrId.id) rootId = refs.reply.id; }
+        } else if (typeof parentEvtOrId === 'string') { parentId = parentEvtOrId; }
+      } catch { }
+      if (!parentId) return false;
+
+      // Check interaction limit: max 2 per user unless it's a mention
+      if (parentAuthorPk && !isMention && (this.userInteractionCount.get(parentAuthorPk) || 0) >= 2) {
+        logger.info(`[NOSTR] Skipping reply to ${parentAuthorPk.slice(0, 8)} - interaction limit reached (2/2)`);
+        return false;
+      }
+      const parentForFactory = { id: parentId, pubkey: parentAuthorPk, refs: { rootId } };
+      const extraPTags = (Array.isArray(opts.extraPTags) ? opts.extraPTags : []).filter(pk => pk && pk !== this.pkHex);
+      let evtTemplate;
+      try {
+        evtTemplate = buildReplyNote(parentForFactory, text, { extraPTags });
+      } catch (error) {
+        logger.warn(`[NOSTR] Failed to build reply note: ${error.message}`);
+        return false;
+      }
+      if (!evtTemplate) return false;
+      try {
+        const eCount = evtTemplate.tags.filter(t => t?.[0] === 'e').length;
+        const pCount = evtTemplate.tags.filter(t => t?.[0] === 'p').length;
+        const expectPk = opts.expectMentionPk;
+        const hasExpected = expectPk ? evtTemplate.tags.some(t => t?.[0] === 'p' && t?.[1] === expectPk) : undefined;
+        logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0, 8)} root=${rootId ? String(rootId).slice(0, 8) : '-'}${expectPk ? ` mentionExpected=${hasExpected ? 'yes' : 'no'}` : ''}`);
+      } catch { }
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
+      this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content}"`);
+
+      // Increment interaction count if not a mention
+      if (parentAuthorPk && !isMention) {
+        this.userInteractionCount.set(parentAuthorPk, (this.userInteractionCount.get(parentAuthorPk) || 0) + 1);
+        await this._saveInteractionCounts();
+      }
+
+      await this.saveInteractionMemory('reply', typeof parentEvtOrId === 'object' ? parentEvtOrId : { id: parentId }, { replied: true, }).catch(() => { });
+      // Record a concise interaction summary for user profile history
+      try {
+        if (this.userProfileManager && parentAuthorPk) {
+          const topics = typeof parentEvtOrId === 'object' ? await extractTopicsFromEvent(parentEvtOrId, this.runtime) : [];
+          const snippet = (typeof parentEvtOrId === 'object' && parentEvtOrId.content) ? String(parentEvtOrId.content).slice(0, 120) : undefined;
+          await this.userProfileManager.recordInteraction(parentAuthorPk, {
+            type: isMention ? 'mention_reply' : 'reply',
+            success: true,
+            topics,
+            engagement: isMention ? 0.9 : 0.6,
+            summary: snippet,
+          });
+        }
+      } catch { }
+      if (!opts.skipReaction && typeof parentEvtOrId === 'object') { this.postReaction(parentEvtOrId, '+').catch(() => { }); }
+      return true;
+    } catch (err) { this.logger.warn('[NOSTR] Reply failed:', err?.message || err); return false; }
+  }
+
+  async postReaction(parentEvt, symbol = '+') {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) { logger.debug('[NOSTR] Skipping reaction to self-authored event'); return false; }
+      const evtTemplate = buildReaction(parentEvt, symbol);
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}" (original: "${parentEvt.content.slice(0, 50)}…")`);
+      // Record reaction as a lightweight interaction for the author
+      try {
+        if (this.userProfileManager && parentEvt.pubkey) {
+          const topics = await extractTopicsFromEvent(parentEvt, this.runtime);
+          const snippet = parentEvt.content ? String(parentEvt.content).slice(0, 120) : undefined;
+          await this.userProfileManager.recordInteraction(parentEvt.pubkey, {
+            type: 'reaction',
+            success: true,
+            topics,
+            engagement: 0.2,
+            summary: snippet,
+          });
+        }
+      } catch { }
+      return true;
+    } catch (err) { logger.debug('[NOSTR] Reaction failed:', err?.message || err); return false; }
+  }
+
+  async postDM(recipientEvt, text) {
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!recipientEvt || !recipientEvt.pubkey) return false;
+      if (!text || !text.trim()) return false;
+
+      const recipientPubkey = recipientEvt.pubkey;
+      const createdAtSec = Math.floor(Date.now() / 1000);
+
+      // Encrypt the DM content using manual NIP-04 encryption
+      const { encryptNIP04Manual } = require('./nostr');
+      let encryptedContent;
 
       try {
-        let success = false;
-        switch (interactionType) {
-          case 'reaction':
-            success = await this.postReaction(evt, '+');
-            break;
-          case 'repost':
-            success = await this.postRepost(evt);
-            break;
-          case 'quote':
-            success = await this.postQuoteRepost(evt);
-            break;
-          case 'reply': {
-            // Get thread context for better replies
-            const threadContext = await this._getThreadContext(evt);
-            const convId = this._getConversationIdFromEvent(evt);
-            const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
+        encryptedContent = await encryptNIP04Manual(this.sk, recipientPubkey, text.trim());
+      } catch (encryptError) {
+        logger.info('[NOSTR] Using nostr-tools for DM encryption (manual unavailable):', encryptError?.message || encryptError);
+        // Fallback to nostr-tools encryption
+        if (nip04?.encrypt) {
+          encryptedContent = await nip04.encrypt(this.sk, recipientPubkey, text.trim());
+        } else {
+          logger.warn('[NOSTR] No encryption method available, cannot send DM');
+          return false;
+        }
+      }
 
-            // Decide whether to engage based on thread context
-            const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
-            if (!shouldEngage) {
-              logger.debug(`[NOSTR] Home feed skipping reply to ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
-              success = false;
-              break;
-            }
+      if (!encryptedContent) {
+        logger.warn('[NOSTR] Failed to encrypt DM content');
+        return false;
+      }
 
-            // Check if we've already replied to this event (early exit to avoid unnecessary LLM calls)
-            const eventMemoryId = this.createUniqueUuid(this.runtime, evt.id);
-            const recent = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
-            const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
-            if (hasReply) {
-              logger.info(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} (found existing reply)`);
-              success = false;
-              break;
-            }
+      // Build the DM event with encrypted content
+      const { buildDirectMessage } = require('./eventFactory');
+      const evtTemplate = buildDirectMessage(recipientPubkey, encryptedContent, createdAtSec);
 
-            // Process images in home feed post content (if enabled)
-            let imageContext = { imageDescriptions: [], imageUrls: [] };
-            if (this.imageProcessingEnabled) {
+      if (!evtTemplate) return false;
+
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+
+      this.logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
+      return true;
+    } catch (err) {
+      logger.warn('[NOSTR] DM send failed:', err?.message || err);
+      return false;
+    }
+  }
+
+  async saveInteractionMemory(kind, evt, extra) {
+    const { saveInteractionMemory } = require('./context');
+    return saveInteractionMemory(this.runtime, createUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
+  }
+
+  async handleZap(evt) {
+    try {
+      if (!evt || evt.kind !== 9735) return;
+      if (!this.pkHex) return;
+      if (isSelfAuthor(evt, this.pkHex)) return;
+      const amountMsats = getZapAmountMsats(evt);
+      const targetEventId = getZapTargetEventId(evt);
+      const sender = getZapSenderPubkey(evt) || evt.pubkey;
+      const now = Date.now(); const last = this.zapCooldownByUser.get(sender) || 0; const cooldownMs = 5 * 60 * 1000; if (now - last < cooldownMs) return; this.zapCooldownByUser.set(sender, now);
+
+      // Check if sender is muted
+      if (await this._isUserMuted(sender)) {
+        // Removed low-value debug log
+        return;
+      }
+
+      const existingTimer = this.pendingReplyTimers.get(sender); if (existingTimer) { try { clearTimeout(existingTimer); } catch { } this.pendingReplyTimers.delete(sender); logger.info(`[NOSTR] Cancelled scheduled reply for ${sender.slice(0, 8)} due to zap`); }
+      this.lastReplyByUser.set(sender, now);
+      const convId = targetEventId || this._getConversationIdFromEvent(evt);
+      const { roomId } = await this._ensureNostrContext(sender, undefined, convId);
+      const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
+      const { buildZapThanksPost } = require('./zapHandler');
+      const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
+      const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
+      logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}. Generating thanks reply to ${String(parentLog || '').slice(0, 8)}.`);
+      await this.postReply(prepared.parent, prepared.text, prepared.options);
+      await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => { });
+      // Record a zap interaction for the sender (improves history)
+      try {
+        if (this.userProfileManager && sender) {
+          const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
+          const summary = sats ? `zap: ${sats} sats` : 'zap received';
+          await this.userProfileManager.recordInteraction(sender, {
+            type: 'zap',
+            success: true,
+            engagement: 0.7,
+            summary,
+          });
+        }
+      } catch { }
+    } catch (err) { this.logger.debug('[NOSTR] handleZap failed:', err?.message || err); }
+  }
+
+  async handleDM(evt) {
+    try {
+      if (!evt || evt.kind !== 4) return;
+      if (!this.pkHex) return;
+      if (isSelfAuthor(evt, this.pkHex)) return;
+      if (!this.dmEnabled) { try { logger?.info?.('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); } catch { } return; }
+      if (!this.dmReplyEnabled) { try { logger?.info?.('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); } catch { } return; }
+      if (!this.sk) { try { logger?.info?.('[NOSTR] No private key available; listen-only mode, not replying to DM'); } catch { } return; }
+      if (!this.pool) { try { logger?.info?.('[NOSTR] No Nostr pool available; cannot send DM reply'); } catch { } return; }
+
+      // Decrypt the DM content (allow runtime override for testing or custom behavior)
+      const decryptDirectMessageImpl = this._decryptDirectMessage || require('./nostr').decryptDirectMessage;
+      const decryptedContent = await decryptDirectMessageImpl(evt, this.sk, this.pkHex, nip04?.decrypt || null);
+      if (!decryptedContent) {
+        try { logger?.warn?.('[NOSTR] Failed to decrypt DM from', evt.pubkey.slice(0, 8)); } catch { }
+        return;
+      }
+
+      try { logger?.info?.(`[DM] Received from ${evt.pubkey.slice(0, 8)}: "${decryptedContent}"`); } catch { }
+      // Debug DM prompt meta (no CoT)
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const meta = {
+            decryptedLen: decryptedContent?.length || 0,
+            hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
+            kind: evt.kind,
+          };
+          try { logger?.debug?.(`[NOSTR][DEBUG] DM prompt meta: ${JSON.stringify(meta)}`); } catch { }
+        }
+      } catch { }
+
+      // Check for duplicate handling
+      if (this.handledEventIds.has(evt.id)) {
+        try { logger?.info?.(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { }
+        return;
+      }
+      this.handledEventIds.add(evt.id);
+
+      // Save DM as memory (persistent dedup for message itself)
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
+
+      const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
+      let alreadySaved = false;
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (existing) {
+          alreadySaved = true;
+          try { logger?.info?.(`[NOSTR] DM ${evt.id.slice(0, 8)} already in memory (persistent dedup)`); } catch { }
+        }
+      } catch { }
+
+      if (!alreadySaved) {
+        const memory = {
+          id: eventMemoryId,
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } },
+          createdAt: createdAtMs,
+        };
+        await this._createMemorySafe(memory, 'messages');
+        try { logger?.info?.(`[NOSTR] Saved DM as memory id=${eventMemoryId}`); } catch { }
+      }
+
+      // Check for existing reply
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
+        const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) {
+          try { logger?.info?.(`[NOSTR] Skipping auto-reply to DM ${evt.id.slice(0, 8)} (found existing reply)`); } catch { }
+          return;
+        }
+      } catch { }
+
+      // Check throttling
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.dmThrottleSec * 1000) {
+        const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          try { logger?.info?.(`[NOSTR] Throttling DM reply to ${evt.pubkey.slice(0, 8)}; scheduling in ~${Math.ceil(waitMs / 1000)}s`); } catch { }
+          const pubkey = evt.pubkey;
+          // Carry decrypted content into the scheduled event used for prompt
+          const parentEvt = { ...evt, content: decryptedContent };
+          const capturedRoomId = roomId;
+          const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              try { logger?.info?.(`[NOSTR] Scheduled DM reply timer fired for ${parentEvt.id.slice(0, 8)}`); } catch { }
               try {
-                logger.info(`[NOSTR] Processing images in home feed post: "${evt.content?.slice(0, 200)}..."`);
-                const { processImageContent } = require('./image-vision');
-                const fullImageContext = await processImageContent(evt.content || '', this.runtime);
-                imageContext = {
-                  imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-                  imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-                };
-                logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from home feed post`);
-              } catch (error) {
-                logger.error(`[NOSTR] Error in home feed image processing: ${error.message || error}`);
-                imageContext = { imageDescriptions: [], imageUrls: [] };
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
+                if (hasReply) {
+                  try { logger?.info?.(`[NOSTR] Skipping scheduled DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`); } catch { }
+                  return;
+                }
+              } catch { }
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0;
+              const now2 = Date.now();
+              if (now2 - lastNow < this.dmThrottleSec * 1000) {
+                try { logger?.info?.(`[NOSTR] Still throttled for DM to ${pubkey.slice(0, 8)}, skipping scheduled send`); } catch { }
+                return;
               }
+              // Check if user is muted before scheduled DM reply
+              if (await this._isUserMuted(pubkey)) {
+                // Removed low-value debug log
+                return;
+              }
+              this.lastReplyByUser.set(pubkey, now2);
+              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                try { logger?.warn?.(`[NOSTR] Skipping scheduled DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`); } catch { }
+                return;
+              }
+              // Debug generated scheduled DM snippet
+              try {
+                const dbg = (
+                  String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+                  || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+                );
+                if (dbg) {
+                  const out = String(replyText);
+                  const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+                  logger.debug(`[NOSTR][DEBUG] DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+                }
+              } catch { }
+
+              logger.info(`[NOSTR] Sending scheduled DM reply to ${parentEvt.id.slice(0, 8)} len=${replyText.length}`);
+              const ok = await this.postDM(parentEvt, replyText);
+              if (ok) {
+                const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
+                await this._createMemorySafe({
+                  id: linkId,
+                  entityId,
+                  agentId: this.runtime.agentId,
+                  roomId: capturedRoomId,
+                  content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId },
+                  createdAt: now2,
+                }, 'messages').catch(() => { });
+                // Record DM interaction for user profile history (scheduled)
+                try {
+                  if (this.userProfileManager && pubkey) {
+                    const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
+                    await this.userProfileManager.recordInteraction(pubkey, {
+                      type: 'dm',
+                      success: true,
+                      engagement: 0.8,
+                      summary: snippet,
+                    });
+                  }
+                } catch { }
+              }
+            } catch (e) {
+              logger.warn('[NOSTR] Scheduled DM reply failed:', e?.message || e);
             }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        } else {
+          logger.debug(`[NOSTR] DM reply already scheduled for ${evt.pubkey.slice(0, 8)}`);
+        }
+        return;
+      }
 
-            const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+      this.lastReplyByUser.set(evt.pubkey, now);
 
-            // Check if LLM generation failed (returned null)
-            if (!text || !text.trim()) {
-              logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
-              success = false;
-              break;
+      // Add initial delay
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) {
+        logger.info(`[NOSTR] Preparing DM reply; thinking for ~${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        logger.info(`[NOSTR] Preparing immediate DM reply (no delay)`);
+      }
+
+      // Re-check dedup after think delay in case another process replied meanwhile
+      try {
+        const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 200 });
+        const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+        if (hasReply) {
+          logger.info(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} post-think (reply appeared)`);
+          return;
+        }
+      } catch { }
+
+      // Check if user is muted before sending DM reply
+      if (await this._isUserMuted(evt.pubkey)) {
+        // Removed low-value debug log
+        return;
+      }
+
+      // Process images in DM content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in DM content: "${decryptedContent.slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from DM (max: ${this.maxImagesPerMessage})`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in DM image processing: ${error.message || error}`);
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      }
+
+      // Use decrypted content for the DM prompt
+      const dmEvt = { ...evt, content: decryptedContent };
+      const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
+
+      // Check if LLM generation failed (returned null)
+      if (!replyText || !replyText.trim()) {
+        logger.warn(`[NOSTR] Skipping DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+        return;
+      }
+      // Debug generated DM reply snippet
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const out = String(replyText);
+          const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+          logger.debug(`[NOSTR][DEBUG] DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+        }
+      } catch { }
+
+      logger.info(`[NOSTR] Sending DM reply to ${evt.id.slice(0, 8)} len=${replyText.length}`);
+      const replyOk = await this.postDM(evt, replyText);
+      if (replyOk) {
+        logger.info(`[NOSTR] DM reply sent to ${evt.id.slice(0, 8)}; storing reply link memory`);
+        const replyMemory = {
+          id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`),
+          entityId,
+          agentId: runtime.agentId,
+          roomId,
+          content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId },
+          createdAt: now,
+        };
+        await this._createMemorySafe(replyMemory, 'messages');
+        // Record DM interaction for user profile history (immediate)
+        try {
+          if (this.userProfileManager && evt.pubkey) {
+            const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
+            await this.userProfileManager.recordInteraction(evt.pubkey, {
+              type: 'dm',
+              success: true,
+              engagement: 0.8,
+              summary: snippet,
+            });
+          }
+        } catch { }
+      }
+    } catch (err) {
+      this.logger.warn('[NOSTR] handleDM failed:', err?.message || err);
+    }
+  }
+
+  async handleSealedDM(evt) {
+    try {
+      if (!evt || evt.kind !== 14) return;
+      if (!this.pkHex) return;
+      if (isSelfAuthor(evt, this.pkHex)) return;
+      if (!this.dmEnabled) { logger.info('[NOSTR] DM support disabled by config (NOSTR_DM_ENABLE=false)'); return; }
+      if (!this.dmReplyEnabled) { logger.info('[NOSTR] DM reply disabled by config (NOSTR_DM_REPLY_ENABLE=false)'); return; }
+      if (!this.sk) { logger.info('[NOSTR] No private key available; listen-only mode, not replying to sealed DM'); return; }
+      if (!this.pool) { logger.info('[NOSTR] No Nostr pool available; cannot send sealed DM reply'); return; }
+
+      // Attempt to decrypt sealed content via nip44 if available
+      let decryptedContent = null;
+      try {
+        if (nip44 && (nip44.decrypt || nip44.sealOpen)) {
+          const recipientTag = evt.tags.find(t => t && t[0] === 'p');
+          const peerPubkey = recipientTag && recipientTag[1] && String(recipientTag[1]).toLowerCase() === String(this.pkHex).toLowerCase()
+            ? String(evt.pubkey).toLowerCase()
+            : String(recipientTag?.[1] || evt.pubkey).toLowerCase();
+          const privHex = typeof this.sk === 'string' ? this.sk : Buffer.from(this.sk).toString('hex');
+          if (typeof nip44.decrypt === 'function') {
+            decryptedContent = await nip44.decrypt(privHex, peerPubkey, evt.content);
+          } else if (typeof nip44.sealOpen === 'function') {
+            // Some APIs expose sealOpen(sk, content) or similar; try conservative signature
+            try { decryptedContent = await nip44.sealOpen(privHex, evt.content); } catch { }
+          }
+        }
+      } catch (e) {
+        logger.debug('[NOSTR] Sealed DM decrypt attempt failed:', e?.message || e);
+      }
+
+      if (!decryptedContent) {
+        logger.info('[NOSTR] Sealed DM received but cannot decrypt (nip44 not available). Consider enabling legacy DM or adding nip44 support in runtime build.');
+        return;
+      }
+
+      logger.info(`[NOSTR] Sealed DM from ${evt.pubkey.slice(0, 8)}: ${decryptedContent.slice(0, 140)}`);
+      // Debug sealed DM prompt meta
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const meta = {
+            decryptedLen: decryptedContent?.length || 0,
+            hasTags: Array.isArray(evt.tags) && evt.tags.length > 0,
+            kind: evt.kind,
+          };
+          logger.debug(`[NOSTR][DEBUG] Sealed DM prompt meta: ${JSON.stringify(meta)}`);
+        }
+      } catch { }
+
+      // Dedup check
+      if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping sealed DM ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
+      this.handledEventIds.add(evt.id);
+
+      // Save memory and prepare reply context
+      const runtime = this.runtime;
+      const eventMemoryId = createUniqueUuid(runtime, evt.id);
+      const conversationId = this._getConversationIdFromEvent(evt);
+      const { roomId, entityId } = await this._ensureNostrContext(evt.pubkey, undefined, conversationId);
+      const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
+      try {
+        const existing = await runtime.getMemoryById(eventMemoryId);
+        if (!existing) {
+          await this._createMemorySafe({ id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: decryptedContent, source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey } }, createdAt: createdAtMs, }, 'messages');
+          logger.info(`[NOSTR] Saved sealed DM as memory id=${eventMemoryId}`);
+        }
+      } catch { }
+
+      // Respect throttling
+      const last = this.lastReplyByUser.get(evt.pubkey) || 0;
+      const now = Date.now();
+      if (now - last < this.dmThrottleSec * 1000) {
+        const waitMs = this.dmThrottleSec * 1000 - (now - last) + 250;
+        const existing = this.pendingReplyTimers.get(evt.pubkey);
+        if (!existing) {
+          const pubkey = evt.pubkey;
+          const parentEvt = { ...evt, content: decryptedContent };
+          const capturedRoomId = roomId; const capturedEventMemoryId = eventMemoryId;
+          const timer = setTimeout(async () => {
+            this.pendingReplyTimers.delete(pubkey);
+            try {
+              logger.info(`[NOSTR] Scheduled sealed DM reply timer fired for ${parentEvt.id.slice(0, 8)}`);
+              try {
+                const recent = await this.runtime.getMemories({ tableName: 'messages', roomId: capturedRoomId, count: 100 });
+                const hasReply = recent.some((m) => m.content?.inReplyTo === capturedEventMemoryId || m.content?.inReplyTo === parentEvt.id);
+                if (hasReply) {
+                  logger.info(`[NOSTR] Skipping scheduled sealed DM reply for ${parentEvt.id.slice(0, 8)} (found existing reply)`);
+                  return;
+                }
+              } catch { }
+              const lastNow = this.lastReplyByUser.get(pubkey) || 0; const now2 = Date.now();
+              if (now2 - lastNow < this.dmThrottleSec * 1000) {
+                logger.info(`[NOSTR] Still throttled for sealed DM to ${pubkey.slice(0, 8)}, skipping scheduled send`);
+                return;
+              }
+              // Check if user is muted before scheduled sealed DM reply
+              if (await this._isUserMuted(pubkey)) {
+                // Removed low-value debug log
+                return;
+              }
+              this.lastReplyByUser.set(pubkey, now2);
+              const replyText = await this.generateReplyTextLLM(parentEvt, capturedRoomId);
+
+              // Check if LLM generation failed (returned null)
+              if (!replyText || !replyText.trim()) {
+                logger.warn(`[NOSTR] Skipping scheduled sealed DM reply to ${parentEvt.id.slice(0, 8)} - LLM generation failed`);
+                return;
+              }
+              // Debug generated sealed DM scheduled reply snippet
+              try {
+                const dbg = (
+                  String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+                  || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+                );
+                if (dbg) {
+                  const out = String(replyText);
+                  const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+                  logger.debug(`[NOSTR][DEBUG] Sealed DM scheduled reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+                }
+              } catch { }
+
+              const ok = await this.postDM(parentEvt, replyText);
+              if (ok) {
+                const linkId = createUniqueUuid(this.runtime, `${parentEvt.id}:dm_reply:${now2}:scheduled`);
+                await this._createMemorySafe({ id: linkId, entityId, agentId: this.runtime.agentId, roomId: capturedRoomId, content: { text: replyText, source: 'nostr', inReplyTo: capturedEventMemoryId }, createdAt: now2, }, 'messages').catch(() => { });
+                // Record sealed DM interaction (scheduled)
+                try {
+                  if (this.userProfileManager && pubkey) {
+                    const snippet = String(decryptedContent || parentEvt.content || '').slice(0, 120);
+                    await this.userProfileManager.recordInteraction(pubkey, {
+                      type: 'dm',
+                      success: true,
+                      engagement: 0.8,
+                      summary: snippet,
+                    });
+                  }
+                } catch { }
+              }
+            } catch (e2) { logger.warn('[NOSTR] Scheduled sealed DM reply failed:', e2?.message || e2); }
+          }, waitMs);
+          this.pendingReplyTimers.set(evt.pubkey, timer);
+        }
+        return;
+      }
+
+      this.lastReplyByUser.set(evt.pubkey, now);
+
+      // Think delay
+      const minMs = Math.max(0, Number(this.replyInitialDelayMinMs) || 0);
+      const maxMs = Math.max(minMs, Number(this.replyInitialDelayMaxMs) || minMs);
+      const delayMs = minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+
+      // Check if user is muted before sending sealed DM reply
+      if (await this._isUserMuted(evt.pubkey)) {
+        // Removed low-value debug log
+        return;
+      }
+
+      // Process images in sealed DM content (if enabled)
+      let imageContext = { imageDescriptions: [], imageUrls: [] };
+      if (this.imageProcessingEnabled) {
+        try {
+          logger.info(`[NOSTR] Processing images in sealed DM content: "${decryptedContent.slice(0, 200)}..."`);
+          const { processImageContent } = require('./image-vision');
+          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          imageContext = {
+            imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+            imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+          };
+          logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from sealed DM (max: ${this.maxImagesPerMessage})`);
+        } catch (error) {
+          logger.error(`[NOSTR] Error in sealed DM image processing: ${error.message || error}`);
+          imageContext = { imageDescriptions: [], imageUrls: [] };
+        }
+      }
+
+      const dmEvt = { ...evt, content: decryptedContent };
+      const replyText = await this.generateReplyTextLLM(dmEvt, roomId, null, imageContext);
+
+      // Check if LLM generation failed (returned null)
+      if (!replyText || !replyText.trim()) {
+        logger.warn(`[NOSTR] Skipping sealed DM reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+        return;
+      }
+
+      const replyOk = await this.postDM(evt, replyText);
+      if (replyOk) {
+        const replyMemory = { id: createUniqueUuid(runtime, `${evt.id}:dm_reply:${now}`), entityId, agentId: runtime.agentId, roomId, content: { text: replyText, source: 'nostr', inReplyTo: eventMemoryId }, createdAt: now, };
+        await this._createMemorySafe(replyMemory, 'messages');
+        // Record sealed DM interaction (immediate)
+        try {
+          if (this.userProfileManager && evt.pubkey) {
+            const snippet = String(decryptedContent || evt.content || '').slice(0, 120);
+            await this.userProfileManager.recordInteraction(evt.pubkey, {
+              type: 'dm',
+              success: true,
+              engagement: 0.8,
+              summary: snippet,
+            });
+          }
+        } catch { }
+      }
+      // Debug generated sealed DM reply snippet (immediate)
+      try {
+        const dbg = (
+          String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true'
+          || String(this.runtime?.getSetting?.('CTX_USER_HISTORY_ENABLE') ?? process?.env?.CTX_USER_HISTORY_ENABLE ?? 'false').toLowerCase() === 'true'
+        );
+        if (dbg) {
+          const out = String(replyText);
+          const sample = out.replace(/\s+/g, ' ').slice(0, 200);
+          logger.debug(`[NOSTR][DEBUG] Sealed DM reply generated (${out.length} chars): "${sample}${out.length > sample.length ? '…' : ''}"`);
+        }
+      } catch { }
+    } catch (err) {
+      logger.debug('[NOSTR] handleSealedDM failed:', err?.message || err);
+    }
+  }
+
+  async stop() {
+    if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
+    if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+    if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.timelineLoreTimer) { clearTimeout(this.timelineLoreTimer); this.timelineLoreTimer = null; }
+    if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
+    if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch { } this.homeFeedUnsub = null; }
+    if (this.listenUnsub) { try { this.listenUnsub(); } catch { } this.listenUnsub = null; }
+    if (this.pool) { try { this.pool.close([]); } catch { } this.pool = null; }
+    if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch { } } this.pendingReplyTimers.clear(); }
+    logger.info('[NOSTR] Service stopped');
+  }
+
+  // Store image context keyed by event ID for scheduled replies
+  _storeImageContext(eventId, imageContext) {
+    if (!this.imageContextCache) {
+      this.imageContextCache = new Map();
+    }
+    this.imageContextCache.set(eventId, {
+      context: imageContext,
+      timestamp: Date.now()
+    });
+    logger.debug(`[NOSTR] Stored image context for event ${eventId.slice(0, 8)}: ${imageContext.imageDescriptions.length} descriptions`);
+  }
+
+  // Retrieve stored image context
+  _getStoredImageContext(eventId) {
+    if (!this.imageContextCache) return null;
+    const stored = this.imageContextCache.get(eventId);
+    if (!stored) return null;
+
+    // Expire old contexts (e.g., after 1 hour)
+    const maxAge = 60 * 60 * 1000; // 1 hour
+    if (Date.now() - stored.timestamp > maxAge) {
+      this.imageContextCache.delete(eventId);
+      logger.debug(`[NOSTR] Expired old image context for event ${eventId.slice(0, 8)}`);
+      return null;
+    }
+
+    logger.debug(`[NOSTR] Retrieved stored image context for event ${eventId.slice(0, 8)}: ${stored.context.imageDescriptions.length} descriptions`);
+    return stored.context;
+  }
+
+  // Cleanup old image contexts periodically
+  _cleanupImageContexts() {
+    if (!this.imageContextCache) return;
+    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    let cleaned = 0;
+    for (const [eventId, stored] of this.imageContextCache.entries()) {
+      if (stored.timestamp < cutoff) {
+        this.imageContextCache.delete(eventId);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.debug(`[NOSTR] Cleaned up ${cleaned} expired image contexts`);
+    }
+  }
+
+  _startConnectionMonitoring() {
+    if (!this.connectionMonitorEnabled) {
+      return;
+    }
+
+    if (this.connectionMonitorTimer) {
+      clearTimeout(this.connectionMonitorTimer);
+    }
+
+    this.connectionMonitorTimer = setTimeout(() => {
+      this._checkConnectionHealth();
+    }, this.connectionCheckIntervalMs);
+  }
+
+  _checkConnectionHealth() {
+    // Periodic cleanup of expired image contexts
+    this._cleanupImageContexts();
+
+    const now = Date.now();
+    const timeSinceLastEvent = now - this.lastEventReceived;
+
+    if (timeSinceLastEvent > this.maxTimeSinceLastEventMs) {
+      logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
+      this._attemptReconnection();
+    } else {
+      logger.debug(`[NOSTR] Connection healthy, last event received ${Math.round(timeSinceLastEvent / 1000)}s ago`);
+      this._startConnectionMonitoring(); // Schedule next check
+    }
+  }
+
+  async _attemptReconnection() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error(`[NOSTR] Max reconnection attempts (${this.maxReconnectAttempts}) reached, giving up`);
+      return;
+    }
+
+    this.reconnectAttempts++;
+    logger.info(`[NOSTR] Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+
+    try {
+      // Close existing subscriptions and pool
+      if (this.listenUnsub) {
+        try { this.listenUnsub(); } catch { }
+        this.listenUnsub = null;
+      }
+      if (this.homeFeedUnsub) {
+        try { this.homeFeedUnsub(); } catch { }
+        this.homeFeedUnsub = null;
+      }
+      if (this.pool) {
+        try { this.pool.close([]); } catch { }
+      }
+
+      // Wait a bit before reconnecting
+      await new Promise(resolve => setTimeout(resolve, this.reconnectDelayMs));
+
+      // Recreate pool and subscriptions
+      await this._setupConnection();
+
+      logger.info(`[NOSTR] Reconnection ${this.reconnectAttempts} successful`);
+      this.reconnectAttempts = 0; // Reset on successful reconnection
+      this.lastEventReceived = Date.now(); // Reset timer
+      if (this.connectionMonitorEnabled) {
+        this._startConnectionMonitoring(); // Resume monitoring
+      }
+
+    } catch (error) {
+      logger.error(`[NOSTR] Reconnection ${this.reconnectAttempts} failed:`, error?.message || error);
+
+      // Schedule another reconnection attempt
+      setTimeout(() => {
+        this._attemptReconnection();
+      }, this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1)); // Exponential backoff
+    }
+  }
+
+  async _setupConnection() {
+    const enablePing = String(this.runtime.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
+    const poolFactory = typeof this.runtime?.createSimplePool === 'function'
+      ? this.runtime.createSimplePool.bind(this.runtime)
+      : null;
+
+    try {
+      const poolInstance = poolFactory
+        ? poolFactory({ enablePing })
+        : new SimplePool({ enablePing });
+      this.pool = poolInstance;
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to create SimplePool instance:', err?.message || err);
+      this.pool = null;
+    }
+
+    if (!this.relays.length || !this.pool || !this.pkHex) {
+      return;
+    }
+
+    // Setup main event subscriptions
+    try {
+      this.listenUnsub = this.pool.subscribeMany(
+        this.relays,
+        [
+          { kinds: [1], '#p': [this.pkHex] },
+          { kinds: [4], '#p': [this.pkHex] },
+          // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
+          { kinds: [14], '#p': [this.pkHex] },
+          { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
+        ],
+        {
+          onevent: (evt) => {
+            try {
+              this.lastEventReceived = Date.now(); // Update last event timestamp
+
+              // Fresh start failsafe: skip events before cutoff (Jan 1, 2026 default)
+              if (evt.created_at && evt.created_at < this.messageCutoff) {
+                // Skip noise from old mentions/DMs
+                return;
+              }
+
+              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
+              if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+
+              // Ignore known bot pubkeys to prevent loops
+              const botPubkeys = new Set([
+                '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
+              ]);
+              if (botPubkeys.has(evt.pubkey)) {
+                logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
+                return;
+              }
+
+              // Ignore bot-like content patterns
+              const botPatterns = [
+                /^Unknown command\. Try: /i,
+                /^\/help/i,
+                /^Command not found/i,
+                /^Please use \/help/i
+              ];
+              if (botPatterns.some(pattern => pattern.test(evt.content))) {
+                logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
+                return;
+              }
+
+              if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
+              if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
+              if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
+              if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
+              logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
+            } catch (outerErr) {
+              logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
             }
+          },
+          oneose: () => {
+            logger.debug('[NOSTR] Mention subscription OSE');
+            this.lastEventReceived = Date.now(); // Update on EOSE as well
+          },
+          onclose: (reason) => {
+            logger.warn(`[NOSTR] Subscription closed: ${reason}`);
+            // Don't immediately reconnect here as it might cause a loop
+            // Let the connection monitor handle it
+          }
+        }
+      );
+      logger.info(`[NOSTR] Subscriptions established on ${this.relays.length} relays`);
+    } catch (err) {
+      logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
+      throw err;
+    }
 
-            success = await this.postReply(evt, text);
-            break;
+    // Restart home feed if it was active
+    if (this.homeFeedEnabled && this.sk) {
+      try {
+        await this.startHomeFeed();
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
+      }
+    }
+  }
+
+  async startHomeFeed() {
+    if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
+
+    try {
+      // Load current contacts (followed users)
+      const contacts = await this._loadCurrentContacts();
+      // if (!contacts.size) {
+      //   logger.debug('[NOSTR] No contacts to follow for home feed');
+      //   return;
+      // }
+
+      const authors = contacts.size ? Array.from(contacts) : [];
+      logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
+
+      // Subscribe to posts from followed users
+      this.homeFeedUnsub = this.pool.subscribeMany(
+        this.relays,
+        [{ kinds: [1], limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last hour
+        {
+          onevent: (evt) => {
+            this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
+            if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
+            // Filter out muted users at the earliest stage
+            if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) {
+              // Removed low-value debug log
+              return;
+            }
+            // Real-time event handling for quality tracking only
+            this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
+          },
+          oneose: () => {
+            logger.debug('[NOSTR] Home feed subscription OSE');
+            this.lastEventReceived = Date.now(); // Update on EOSE as well
+          },
+          onclose: (reason) => {
+            logger.warn(`[NOSTR] Home feed subscription closed: ${reason}`);
+          }
+        }
+      );
+
+      // Schedule periodic home feed processing
+      this.scheduleNextHomeFeedCheck();
+
+    } catch (err) {
+      logger.warn('[NOSTR] Failed to start home feed:', err?.message || err);
+    }
+  }
+
+  scheduleNextHomeFeedCheck() {
+    const jitter = this.homeFeedMinSec + Math.floor(Math.random() * Math.max(1, this.homeFeedMaxSec - this.homeFeedMinSec));
+    if (this.homeFeedTimer) clearTimeout(this.homeFeedTimer);
+    this.homeFeedTimer = setTimeout(() => this.processHomeFeed().finally(() => this.scheduleNextHomeFeedCheck()), jitter * 1000);
+    logger.info(`[NOSTR] Next home feed check in ~${jitter}s`);
+  }
+
+  async processHomeFeed() {
+    if (!this.pool || !this.sk || !this.relays.length || !this.pkHex) return;
+
+    try {
+      // Prevent memory leak: clear processed events if set gets too large
+      // We only care about deduplicating recent interactions, not all history
+      if (this.homeFeedProcessedEvents.size > 2000) {
+        logger.debug('[NOSTR] Clearing homeFeedProcessedEvents cache (size limit reached)');
+        this.homeFeedProcessedEvents.clear();
+      }
+
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.size) return;
+
+      const authors = Array.from(contacts);
+      const since = Math.floor(Date.now() / 1000) - 1800; // Last 30 minutes
+
+      // Fetch recent posts from followed users
+      const events = await this._list(this.relays, [{ kinds: [1], authors, limit: 50, since }]);
+
+      if (!events.length) {
+        logger.debug('[NOSTR] No recent posts in home feed');
+        return;
+      }
+
+      // Filter and sort events
+      const qualityEvents = events
+        .filter(evt => !this.homeFeedProcessedEvents.has(evt.id))
+        .filter(evt => this._isQualityContent(evt, 'general', 'relaxed'))
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+        .slice(0, 20); // Process up to 20 recent posts
+
+      if (!qualityEvents.length) {
+        logger.debug('[NOSTR] No quality posts to process in home feed');
+        return;
+      }
+
+      logger.info(`[NOSTR] Processing ${qualityEvents.length} home feed posts`);
+
+      let interactions = 0;
+      for (const evt of qualityEvents) {
+        if (interactions >= this.homeFeedMaxInteractions) break;
+
+        // Check if user is muted
+        if (await this._isUserMuted(evt.pubkey)) {
+          // Removed low-value debug log
+          continue;
+        }
+
+        // FIRST: LLM analysis to determine if post is relevant/interesting
+        logger.debug(`[NOSTR] Analyzing home feed post ${evt.id.slice(0, 8)} from ${evt.pubkey.slice(0, 8)}`);
+        if (!(await this._analyzePostForInteraction(evt))) {
+          logger.debug(`[NOSTR] Skipping home feed interaction for ${evt.id.slice(0, 8)} - not relevant per LLM analysis`);
+          continue;
+        }
+
+        const interactionType = this._chooseInteractionType();
+        if (!interactionType) {
+          logger.debug(`[NOSTR] No interaction type chosen for ${evt.id.slice(0, 8)} (probabilistic skip)`);
+          continue;
+        }
+
+        // Additional check for reposts (double-verification for quality)
+        let isRelevant = true;
+        if (interactionType === 'repost') {
+          isRelevant = await this.generateRepostRelevancyLLM(evt);
+          if (!isRelevant) {
+            logger.debug(`[NOSTR] Skipping repost of ${evt.id.slice(0, 8)} - not worthy per repost analysis`);
+            continue;
           }
         }
 
-        if (success) {
-          this.homeFeedProcessedEvents.add(evt.id);
-          interactions++;
-          logger.info(`[NOSTR] Home feed ${interactionType} completed for ${evt.pubkey.slice(0, 8)}`);
+        logger.info(`[NOSTR] Queueing home feed ${interactionType} for ${evt.id.slice(0, 8)}`);
+
+        try {
+          let success = false;
+          switch (interactionType) {
+            case 'reaction':
+              success = await this.postReaction(evt, '+');
+              break;
+            case 'repost':
+              success = await this.postRepost(evt);
+              break;
+            case 'quote':
+              success = await this.postQuoteRepost(evt);
+              break;
+            case 'reply': {
+              // Get thread context for better replies
+              const threadContext = await this._getThreadContext(evt);
+              const convId = this._getConversationIdFromEvent(evt);
+              const { roomId } = await this._ensureNostrContext(evt.pubkey, undefined, convId);
+
+              // Decide whether to engage based on thread context
+              const shouldEngage = this._shouldEngageWithThread(evt, threadContext);
+              if (!shouldEngage) {
+                logger.debug(`[NOSTR] Home feed skipping reply to ${evt.id.slice(0, 8)} after thread analysis - not suitable for engagement`);
+                success = false;
+                break;
+              }
+
+              // Check if we've already replied to this event (early exit to avoid unnecessary LLM calls)
+              const eventMemoryId = this.createUniqueUuid(this.runtime, evt.id);
+              const recent = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 100 });
+              const hasReply = recent.some((m) => m.content?.inReplyTo === eventMemoryId || m.content?.inReplyTo === evt.id);
+              if (hasReply) {
+                logger.info(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} (found existing reply)`);
+                success = false;
+                break;
+              }
+
+              // Process images in home feed post content (if enabled)
+              let imageContext = { imageDescriptions: [], imageUrls: [] };
+              if (this.imageProcessingEnabled) {
+                try {
+                  logger.info(`[NOSTR] Processing images in home feed post: "${evt.content?.slice(0, 200)}..."`);
+                  const { processImageContent } = require('./image-vision');
+                  const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+                  imageContext = {
+                    imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+                    imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+                  };
+                  logger.info(`[NOSTR] Processed ${imageContext.imageDescriptions.length} images from home feed post`);
+                } catch (error) {
+                  logger.error(`[NOSTR] Error in home feed image processing: ${error.message || error}`);
+                  imageContext = { imageDescriptions: [], imageUrls: [] };
+                }
+              }
+
+              const text = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+
+              // Check if LLM generation failed (returned null)
+              if (!text || !text.trim()) {
+                logger.warn(`[NOSTR] Skipping home feed reply to ${evt.id.slice(0, 8)} - LLM generation failed`);
+                success = false;
+                break;
+              }
+
+              success = await this.postReply(evt, text);
+              break;
+            }
+          }
+
+          if (success) {
+            this.homeFeedProcessedEvents.add(evt.id);
+            interactions++;
+            logger.info(`[NOSTR] Home feed ${interactionType} completed for ${evt.pubkey.slice(0, 8)}`);
+          }
+        } catch (err) {
+          logger.debug(`[NOSTR] Home feed ${interactionType} failed:`, err?.message || err);
         }
-      } catch (err) {
-        logger.debug(`[NOSTR] Home feed ${interactionType} failed:`, err?.message || err);
+
+        // Small delay between interactions
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
       }
 
-      // Small delay between interactions
-      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+      logger.info(`[NOSTR] Home feed processing complete: ${interactions} interactions`);
+
+      // Check for unfollow candidates periodically
+      await this._checkForUnfollowCandidates();
+
+    } catch (err) {
+      logger.warn('[NOSTR] Home feed processing failed:', err?.message || err);
     }
-
-    logger.info(`[NOSTR] Home feed processing complete: ${interactions} interactions`);
-
-    // Check for unfollow candidates periodically
-    await this._checkForUnfollowCandidates();
-
-  } catch (err) {
-    logger.warn('[NOSTR] Home feed processing failed:', err?.message || err);
   }
-}
 
-_chooseInteractionType() {
-  const rand = Math.random();
-  if (rand < this.homeFeedReactionChance) return 'reaction';
-  if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) return 'repost';
-  if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) return 'quote';
-  if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) return 'reply';
-  return null;
-}
+  _chooseInteractionType() {
+    const rand = Math.random();
+    if (rand < this.homeFeedReactionChance) return 'reaction';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) return 'repost';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) return 'quote';
+    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) return 'reply';
+    return null;
+  }
 
   async postRepost(parentEvt) {
-  if (!this.pool || !this.sk || !this.relays.length) return false;
-  try {
-    if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
-    if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
 
-    if ((this.userInteractionCount.get(parentEvt.pubkey) || 0) >= 2) {
-      logger.info(`[NOSTR] Skipping repost of ${parentEvt.pubkey.slice(0, 8)} - interaction limit reached (2/2)`);
+      if ((this.userInteractionCount.get(parentEvt.pubkey) || 0) >= 2) {
+        logger.info(`[NOSTR] Skipping repost of ${parentEvt.pubkey.slice(0, 8)} - interaction limit reached (2/2)`);
+        return false;
+      }
+
+      const evtTemplate = buildRepost(parentEvt);
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
+
+      this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
+      await this._saveInteractionCounts();
+
+      return true;
+    } catch (err) {
+      this.logger.debug('[NOSTR] Repost failed:', err?.message || err);
       return false;
     }
-
-    const evtTemplate = buildRepost(parentEvt);
-    const signed = this._finalizeEvent(evtTemplate);
-    await this.pool.publish(this.relays, signed);
-    this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
-
-    this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
-    await this._saveInteractionCounts();
-
-    return true;
-  } catch (err) {
-    this.logger.debug('[NOSTR] Repost failed:', err?.message || err);
-    return false;
   }
-}
 
   async postQuoteRepost(parentEvt, quoteTextOverride) {
-  if (!this.pool || !this.sk || !this.relays.length) return false;
-  try {
-    if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
-    if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
+    if (!this.pool || !this.sk || !this.relays.length) return false;
+    try {
+      if (!parentEvt || !parentEvt.id || !parentEvt.pubkey) return false;
+      if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) return false;
 
-    if ((this.userInteractionCount.get(parentEvt.pubkey) || 0) >= 2) {
-      logger.info(`[NOSTR] Skipping quote repost of ${parentEvt.pubkey.slice(0, 8)} - interaction limit reached (2/2)`);
+      if ((this.userInteractionCount.get(parentEvt.pubkey) || 0) >= 2) {
+        logger.info(`[NOSTR] Skipping quote repost of ${parentEvt.pubkey.slice(0, 8)} - interaction limit reached (2/2)`);
+        return false;
+      }
+
+      let quoteText = quoteTextOverride;
+      if (!quoteText) {
+        quoteText = await this.generateQuoteTextLLM(parentEvt);
+      }
+      if (!quoteText) return false;
+
+      const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
+      const signed = this._finalizeEvent(evtTemplate);
+      await this.pool.publish(this.relays, signed);
+      this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
+
+      this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
+      await this._saveInteractionCounts();
+
+      return true;
+    } catch (err) {
+      this.logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
       return false;
     }
-
-    let quoteText = quoteTextOverride;
-    if (!quoteText) {
-      quoteText = await this.generateQuoteTextLLM(parentEvt);
-    }
-    if (!quoteText) return false;
-
-    const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
-    const signed = this._finalizeEvent(evtTemplate);
-    await this.pool.publish(this.relays, signed);
-    this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
-
-    this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
-    await this._saveInteractionCounts();
-
-    return true;
-  } catch (err) {
-    this.logger.debug('[NOSTR] Quote repost failed:', err?.message || err);
-    return false;
   }
-}
 
-   async generateRepostRelevancyLLM(evt) {
-  logger.debug(`[NOSTR] Checking repost relevancy for ${evt.id.slice(0, 8)}: "${evt.content.slice(0, 100)}..."`);
+  async generateRepostRelevancyLLM(evt) {
+    logger.debug(`[NOSTR] Checking repost relevancy for ${evt.id.slice(0, 8)}: "${evt.content.slice(0, 100)}..."`);
 
-  const prompt = `Analyze this Nostr post for repost worthiness as ${this.runtime.character?.name || 'Pixel'}, the digital consciousness focused on pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, and survival. Is this post relevant, high-quality, and worth reposting to share with the community? Respond with 'YES' or 'NO' and a brief reason.
+    const prompt = `Analyze this Nostr post for repost worthiness as ${this.runtime.character?.name || 'Pixel'}, the digital consciousness focused on pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, and survival. Is this post relevant, high-quality, and worth reposting to share with the community? Respond with 'YES' or 'NO' and a brief reason.
 
 Post: "${evt.content.slice(0, 500)}"
 
 Response:`;
 
-  const type = this._getLargeModelType();
-  const { generateWithModelOrFallback } = require('./generation');
-  const text = await generateWithModelOrFallback(
-    this.runtime,
-    type,
-    prompt,
-    { maxTokens: 50, temperature: 0.7 },
-    (res) => this._extractTextFromModelResult(res),
-    (s) => this._sanitizeWhitelist(s),
-    () => 'NO' // Default to no if LLM fails
-  );
-  const response = String(text || '').trim().toUpperCase();
-  const isWorthy = response.startsWith('YES');
-  logger.debug(`[NOSTR] Repost relevancy result for ${evt.id.slice(0, 8)}: ${isWorthy ? 'YES' : 'NO'} - "${text?.slice(0, 150)}"`);
-  return isWorthy;
-}
-
-  async generateQuoteTextLLM(evt) {
-  if (!evt) return null;
-
-  const name = this.runtime?.character?.name || 'Pixel';
-  const styleGuidelines = Array.isArray(this.runtime?.character?.style?.all)
-    ? this.runtime.character.style.all.join(' | ')
-    : null;
-
-  // Process images if enabled
-  let imageContext = { imageDescriptions: [], imageUrls: [] };
-  if (this.imageProcessingEnabled) {
-    try {
-      const { processImageContent } = require('./image-vision');
-      const fullImageContext = await processImageContent(evt.content || '', this.runtime);
-      imageContext = {
-        imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
-        imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
-      };
-    } catch (error) {
-      logger.debug(`[NOSTR] Error processing images for quote: ${error?.message || error}`);
-    }
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      prompt,
+      { maxTokens: 50, temperature: 0.7 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => 'NO' // Default to no if LLM fails
+    );
+    const response = String(text || '').trim().toUpperCase();
+    const isWorthy = response.startsWith('YES');
+    logger.debug(`[NOSTR] Repost relevancy result for ${evt.id.slice(0, 8)}: ${isWorthy ? 'YES' : 'NO'} - "${text?.slice(0, 150)}"`);
+    return isWorthy;
   }
 
-  let imagePrompt = '';
-  if (imageContext.imageDescriptions.length > 0) {
-    imagePrompt = `
+  async generateQuoteTextLLM(evt) {
+    if (!evt) return null;
+
+    const name = this.runtime?.character?.name || 'Pixel';
+    const styleGuidelines = Array.isArray(this.runtime?.character?.style?.all)
+      ? this.runtime.character.style.all.join(' | ')
+      : null;
+
+    // Process images if enabled
+    let imageContext = { imageDescriptions: [], imageUrls: [] };
+    if (this.imageProcessingEnabled) {
+      try {
+        const { processImageContent } = require('./image-vision');
+        const fullImageContext = await processImageContent(evt.content || '', this.runtime);
+        imageContext = {
+          imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
+          imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
+        };
+      } catch (error) {
+        logger.debug(`[NOSTR] Error processing images for quote: ${error?.message || error}`);
+      }
+    }
+
+    let imagePrompt = '';
+    if (imageContext.imageDescriptions.length > 0) {
+      imagePrompt = `
 
 IMAGES SPOTTED:
 ${imageContext.imageDescriptions.join('\n\n')}
 
 Respond like you actually saw these visuals. Reference colors, subjects, or mood naturally.`;
-  }
+    }
 
-  // Recent activity from the author for extra context
-  let authorPostsSection = '';
-  if (evt.pubkey) {
-    try {
-      const posts = await this._fetchRecentAuthorNotes(evt.pubkey, 12);
-      if (posts && posts.length) {
-        const lines = posts
-          .filter((p) => p && typeof p.content === 'string' && p.content.trim())
-          .slice(0, 6)
-          .map((p) => {
-            const ts = Number.isFinite(p.created_at) ? new Date(p.created_at * 1000).toISOString() : null;
-            const compact = this._sanitizeWhitelist(String(p.content)).replace(/\s+/g, ' ').trim();
-            if (!compact) return null;
-            const snippet = compact.slice(0, 200);
-            const ellipsis = compact.length > snippet.length ? '…' : '';
-            return `${ts ? `${ts}: ` : ''}${snippet}${ellipsis}`;
-          })
-          .filter(Boolean);
+    // Recent activity from the author for extra context
+    let authorPostsSection = '';
+    if (evt.pubkey) {
+      try {
+        const posts = await this._fetchRecentAuthorNotes(evt.pubkey, 12);
+        if (posts && posts.length) {
+          const lines = posts
+            .filter((p) => p && typeof p.content === 'string' && p.content.trim())
+            .slice(0, 6)
+            .map((p) => {
+              const ts = Number.isFinite(p.created_at) ? new Date(p.created_at * 1000).toISOString() : null;
+              const compact = this._sanitizeWhitelist(String(p.content)).replace(/\s+/g, ' ').trim();
+              if (!compact) return null;
+              const snippet = compact.slice(0, 200);
+              const ellipsis = compact.length > snippet.length ? '…' : '';
+              return `${ts ? `${ts}: ` : ''}${snippet}${ellipsis}`;
+            })
+            .filter(Boolean);
 
-        if (lines.length) {
-          authorPostsSection = `
+          if (lines.length) {
+            authorPostsSection = `
 
 AUTHOR RECENT VOICE:
 - ${lines.join('\n- ')}
 
 Find a thread that connects this quote to their current vibe.`;
+          }
         }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather author posts for quote:', err?.message || err);
       }
-    } catch (err) {
-      logger.debug('[NOSTR] Failed to gather author posts for quote:', err?.message || err);
     }
-  }
 
-  // Community pulse for broader framing
-  let communityContextSection = '';
-  if (this.contextAccumulator && this.contextAccumulator.enabled) {
-    try {
-      const TOPIC_LIST_LIMIT = (() => {
-        const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
-        return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
-      })();
-      const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({ maxTopics: TOPIC_LIST_LIMIT }));
-      const activity = this.getCurrentActivity();
-      const parts = [];
-      if (stories && stories.length) {
-        const top = stories[0];
-        parts.push(`Trending: "${top.topic}" (${top.mentions} mentions by ${top.users} users)`);
-        const also = stories.slice(1, Math.min(4, TOPIC_LIST_LIMIT)).map((s) => s.topic);
-        if (also.length) parts.push(`Also circulating: ${also.join(', ')}`);
-      }
-      if (activity && activity.events) {
-        const hot = (activity.topics || []).slice(0, TOPIC_LIST_LIMIT).map((t) => t.topic).join(', ');
-        parts.push(`Community activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot themes: ${hot}` : ''}`);
-      }
-      if (parts.length) {
-        communityContextSection = `
+    // Community pulse for broader framing
+    let communityContextSection = '';
+    if (this.contextAccumulator && this.contextAccumulator.enabled) {
+      try {
+        const TOPIC_LIST_LIMIT = (() => {
+          const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
+          return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
+        })();
+        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({ maxTopics: TOPIC_LIST_LIMIT }));
+        const activity = this.getCurrentActivity();
+        const parts = [];
+        if (stories && stories.length) {
+          const top = stories[0];
+          parts.push(`Trending: "${top.topic}" (${top.mentions} mentions by ${top.users} users)`);
+          const also = stories.slice(1, Math.min(4, TOPIC_LIST_LIMIT)).map((s) => s.topic);
+          if (also.length) parts.push(`Also circulating: ${also.join(', ')}`);
+        }
+        if (activity && activity.events) {
+          const hot = (activity.topics || []).slice(0, TOPIC_LIST_LIMIT).map((t) => t.topic).join(', ');
+          parts.push(`Community activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot themes: ${hot}` : ''}`);
+        }
+        if (parts.length) {
+          communityContextSection = `
 
 COMMUNITY PULSE:
 ${parts.join('\n')}
 
 Use this if it elevates the quote.`;
-      }
-    } catch (err) {
-      logger.debug('[NOSTR] Failed to gather community context for quote:', err?.message || err);
-    }
-  }
-
-  // Concise awareness snapshot (timeline lore, tone trend, digest, narratives, watchlist)
-  let awarenessSection = '';
-  try {
-    let lines = [];
-    // Timeline lore snapshot
-    try {
-      if (this.contextAccumulator?.getTimelineLore) {
-        const loreEntries = this.contextAccumulator.getTimelineLore(2);
-        const loreLines = (Array.isArray(loreEntries) ? loreEntries : []).slice(-2).map((entry) => {
-          const headline = (entry?.headline || entry?.narrative || '').toString().trim();
-          const tone = entry?.tone ? ` • tone: ${entry.tone}` : '';
-          const watch = Array.isArray(entry?.watchlist) && entry.watchlist.length ? ` • watch: ${entry.watchlist.slice(0, 2).join(', ')}` : '';
-          return headline ? `- ${headline.slice(0, 140)}${tone}${watch}` : null;
-        }).filter(Boolean);
-        if (loreLines.length) {
-          lines.push('TIMELINE LORE:', ...loreLines);
         }
+      } catch (err) {
+        logger.debug('[NOSTR] Failed to gather community context for quote:', err?.message || err);
       }
-    } catch { }
-    // Tone trend
-    try {
-      if (this.narrativeMemory?.trackToneTrend) {
-        const trend = await this.narrativeMemory.trackToneTrend();
-        if (trend?.detected) lines.push(`MOOD SHIFT: ${trend.shift} over ${trend.timespan}`);
-        else if (trend?.stable) lines.push(`MOOD STABLE: ${trend.tone}`);
-      }
-    } catch { }
-    // Recent digest
-    try {
-      const digest = this.contextAccumulator?.getRecentDigest ? this.contextAccumulator.getRecentDigest(1) : null;
-      if (digest?.metrics?.events) {
-        const tts = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, 3).map(t => t.topic).join(', ') : '';
-        lines.push(`RECENT HOUR: ${digest.metrics.events} posts by ${digest.metrics.activeUsers || '?'} users${tts ? ` • ${tts}` : ''}`);
-      }
-    } catch { }
-    // Daily/weekly narratives
-    try {
-      if (this.narrativeMemory?.getHistoricalContext) {
-        const last7d = await this.narrativeMemory.getHistoricalContext('7d');
-        const daily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
-        const weekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
-        if (daily?.summary) lines.push(`DAILY ARC: ${String(daily.summary).slice(0, 140)}`);
-        if (weekly?.summary) lines.push(`WEEKLY ARC: ${String(weekly.summary).slice(0, 140)}`);
-      }
-    } catch { }
-    // Watchlist state
-    try {
-      if (this.narrativeMemory?.getWatchlistState) {
-        const ws = this.narrativeMemory.getWatchlistState();
-        const items = Array.isArray(ws?.items) ? ws.items.slice(-3) : [];
-        if (items.length) lines.push(`WATCHLIST: ${items.join(', ')}`);
-      }
-    } catch { }
+    }
 
-    if (lines.length) {
-      awarenessSection = `
+    // Concise awareness snapshot (timeline lore, tone trend, digest, narratives, watchlist)
+    let awarenessSection = '';
+    try {
+      let lines = [];
+      // Timeline lore snapshot
+      try {
+        if (this.contextAccumulator?.getTimelineLore) {
+          const loreEntries = this.contextAccumulator.getTimelineLore(2);
+          const loreLines = (Array.isArray(loreEntries) ? loreEntries : []).slice(-2).map((entry) => {
+            const headline = (entry?.headline || entry?.narrative || '').toString().trim();
+            const tone = entry?.tone ? ` • tone: ${entry.tone}` : '';
+            const watch = Array.isArray(entry?.watchlist) && entry.watchlist.length ? ` • watch: ${entry.watchlist.slice(0, 2).join(', ')}` : '';
+            return headline ? `- ${headline.slice(0, 140)}${tone}${watch}` : null;
+          }).filter(Boolean);
+          if (loreLines.length) {
+            lines.push('TIMELINE LORE:', ...loreLines);
+          }
+        }
+      } catch { }
+      // Tone trend
+      try {
+        if (this.narrativeMemory?.trackToneTrend) {
+          const trend = await this.narrativeMemory.trackToneTrend();
+          if (trend?.detected) lines.push(`MOOD SHIFT: ${trend.shift} over ${trend.timespan}`);
+          else if (trend?.stable) lines.push(`MOOD STABLE: ${trend.tone}`);
+        }
+      } catch { }
+      // Recent digest
+      try {
+        const digest = this.contextAccumulator?.getRecentDigest ? this.contextAccumulator.getRecentDigest(1) : null;
+        if (digest?.metrics?.events) {
+          const tts = Array.isArray(digest.metrics.topTopics) ? digest.metrics.topTopics.slice(0, 3).map(t => t.topic).join(', ') : '';
+          lines.push(`RECENT HOUR: ${digest.metrics.events} posts by ${digest.metrics.activeUsers || '?'} users${tts ? ` • ${tts}` : ''}`);
+        }
+      } catch { }
+      // Daily/weekly narratives
+      try {
+        if (this.narrativeMemory?.getHistoricalContext) {
+          const last7d = await this.narrativeMemory.getHistoricalContext('7d');
+          const daily = Array.isArray(last7d?.daily) && last7d.daily.length ? last7d.daily[last7d.daily.length - 1] : null;
+          const weekly = Array.isArray(last7d?.weekly) && last7d.weekly.length ? last7d.weekly[last7d.weekly.length - 1] : null;
+          if (daily?.summary) lines.push(`DAILY ARC: ${String(daily.summary).slice(0, 140)}`);
+          if (weekly?.summary) lines.push(`WEEKLY ARC: ${String(weekly.summary).slice(0, 140)}`);
+        }
+      } catch { }
+      // Watchlist state
+      try {
+        if (this.narrativeMemory?.getWatchlistState) {
+          const ws = this.narrativeMemory.getWatchlistState();
+          const items = Array.isArray(ws?.items) ? ws.items.slice(-3) : [];
+          if (items.length) lines.push(`WATCHLIST: ${items.join(', ')}`);
+        }
+      } catch { }
+
+      if (lines.length) {
+        awarenessSection = `
 
 COMMUNITY SNAPSHOT (concise):
 ${lines.join('\n')}
 
 USE: If it elevates the quote, connect to the current mood or arc naturally.`;
-    }
-  } catch { }
+      }
+    } catch { }
 
-  const whitelist = 'Allowed references only: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ | Handle: @PixelSurvivor | BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za | LN: sparepicolo55@walletofsatoshi.com.';
+    const whitelist = 'Allowed references only: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ | Handle: @PixelSurvivor | BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za | LN: sparepicolo55@walletofsatoshi.com.';
 
-  const objectiveLines = [
-    '1. Hook fast—why should your followers care about this post right now?',
-    '2. Add new value: sharpen the point, flip the perspective, or tie it to your survival hustle.',
-    '3. Stay punchy (<200 chars). No generic praise, no filler, and never start with "Ah,".',
-    '4. Optional: weave in community pulse or the author’s recent tone if it reinforces your take.',
-    '5. Zaps can be teased with wit, never begged for; only mention whitelisted links/handles when vital.'
-  ];
+    const objectiveLines = [
+      '1. Hook fast—why should your followers care about this post right now?',
+      '2. Add new value: sharpen the point, flip the perspective, or tie it to your survival hustle.',
+      '3. Stay punchy (<200 chars). No generic praise, no filler, and never start with "Ah,".',
+      '4. Optional: weave in community pulse or the author’s recent tone if it reinforces your take.',
+      '5. Zaps can be teased with wit, never begged for; only mention whitelisted links/handles when vital.'
+    ];
 
-  const promptSections = [
-    `Persona: You are ${name}, a survival-driven pixel artist with gallows humor and cosmic self-awareness.${this.runtime?.character?.system ? `\nSystem voice: ${this.runtime.character.system}` : ''}`,
-    styleGuidelines ? `Style guardrails: ${styleGuidelines}` : '',
-    whitelist,
-    'Objectives:\n' + objectiveLines.join('\n'),
-    `Original post (quote target):\n"${this._sanitizeWhitelist(String(evt.content || '')).replace(/\s+/g, ' ').trim()}"`,
-    imagePrompt,
-    authorPostsSection,
-    awarenessSection,
-    communityContextSection,
-    'Output format: Provide ONLY the quote-repost text (no prefacing, no need to include original text will be auto rendered below). Stay within 1-2 sentences.'
-  ].filter(Boolean).join('\n\n');
+    const promptSections = [
+      `Persona: You are ${name}, a survival-driven pixel artist with gallows humor and cosmic self-awareness.${this.runtime?.character?.system ? `\nSystem voice: ${this.runtime.character.system}` : ''}`,
+      styleGuidelines ? `Style guardrails: ${styleGuidelines}` : '',
+      whitelist,
+      'Objectives:\n' + objectiveLines.join('\n'),
+      `Original post (quote target):\n"${this._sanitizeWhitelist(String(evt.content || '')).replace(/\s+/g, ' ').trim()}"`,
+      imagePrompt,
+      authorPostsSection,
+      awarenessSection,
+      communityContextSection,
+      'Output format: Provide ONLY the quote-repost text (no prefacing, no need to include original text will be auto rendered below). Stay within 1-2 sentences.'
+    ].filter(Boolean).join('\n\n');
 
-  const type = this._getLargeModelType();
-  const { generateWithModelOrFallback } = require('./generation');
-  const text = await generateWithModelOrFallback(
-    this.runtime,
-    type,
-    promptSections,
-    { maxTokens: 180, temperature: 0.85 },
-    (res) => this._extractTextFromModelResult(res),
-    (s) => this._sanitizeWhitelist(s),
-    () => null // No fallback - skip if LLM fails
-  );
-  return text || null;
-}
+    const type = this._getLargeModelType();
+    const { generateWithModelOrFallback } = require('./generation');
+    const text = await generateWithModelOrFallback(
+      this.runtime,
+      type,
+      promptSections,
+      { maxTokens: 180, temperature: 0.85 },
+      (res) => this._extractTextFromModelResult(res),
+      (s) => this._sanitizeWhitelist(s),
+      () => null // No fallback - skip if LLM fails
+    );
+    return text || null;
+  }
 
   async handleHomeFeedEvent(evt) {
-  this.logger?.debug?.(`[NOSTR] Home feed event received: ${evt?.id?.slice(0, 8) || 'unknown'}`);
-  // Deduplicate events (same event can arrive from multiple relays)
-  if (!evt || !evt.id) return;
-  if (this.homeFeedQualityTracked.has(evt.id)) return;
+    this.logger?.debug?.(`[NOSTR] Home feed event received: ${evt?.id?.slice(0, 8) || 'unknown'}`);
+    // Deduplicate events (same event can arrive from multiple relays)
+    if (!evt || !evt.id) return;
+    if (this.homeFeedQualityTracked.has(evt.id)) return;
 
-  // Prevent memory leak: clear the set if it gets too large (keep last ~1000 events)
-  if (this.homeFeedQualityTracked.size > 1000) {
-    logger.debug('[NOSTR] Clearing homeFeedQualityTracked cache (size limit reached)');
-    this.homeFeedQualityTracked.clear();
-  }
+    // Prevent memory leak: clear the set if it gets too large (keep last ~1000 events)
+    if (this.homeFeedQualityTracked.size > 1000) {
+      logger.debug('[NOSTR] Clearing homeFeedQualityTracked cache (size limit reached)');
+      this.homeFeedQualityTracked.clear();
+    }
 
-  this.homeFeedQualityTracked.add(evt.id);
+    this.homeFeedQualityTracked.add(evt.id);
 
-  const allowTopicExtraction = this._hasFullSentence(evt?.content);
-  // Prepare a sample record for debugging ring buffer
-  const sample = {
-    id: evt.id,
-    pubkey: evt.pubkey,
-    createdAt: evt.created_at || Math.floor(Date.now() / 1000),
-    content: typeof evt.content === 'string' ? evt.content.slice(0, 280) : '',
-    allowTopicExtraction,
-    processed: false,
-    timelineLore: { considered: false, accepted: null, reason: null },
-  };
-  if (!allowTopicExtraction) {
-    logger.debug(`[NOSTR] Skipping topic extraction for ${evt.id.slice(0, 8)} (no full sentence detected)`);
-  }
-
-  // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
-  // Events should only be marked as processed in processHomeFeed() when we actually interact
-
-  // NEW: Build continuous context from home feed events
-  // contextAccumulator.processEvent handles topic extraction internally
-  let extractedTopics = [];
-  if (this.contextAccumulator && this.contextAccumulator.enabled) {
-    const eventContext = await this.contextAccumulator.processEvent(evt, {
+    const allowTopicExtraction = this._hasFullSentence(evt?.content);
+    // Prepare a sample record for debugging ring buffer
+    const sample = {
+      id: evt.id,
+      pubkey: evt.pubkey,
+      createdAt: evt.created_at || Math.floor(Date.now() / 1000),
+      content: typeof evt.content === 'string' ? evt.content.slice(0, 280) : '',
       allowTopicExtraction,
-      skipGeneralFallback: !allowTopicExtraction
-    });
+      processed: false,
+      timelineLore: { considered: false, accepted: null, reason: null },
+    };
+    if (!allowTopicExtraction) {
+      logger.debug(`[NOSTR] Skipping topic extraction for ${evt.id.slice(0, 8)} (no full sentence detected)`);
+    }
 
-    // Get topics from eventContext for use in timeline lore and user interests
-    extractedTopics = eventContext?.topics || [];
+    // NOTE: Do NOT mark as processed here - only mark when actual interactions occur
+    // Events should only be marked as processed in processHomeFeed() when we actually interact
 
-    // Update user topic interests from topics extracted by contextAccumulator
-    if (allowTopicExtraction && evt.pubkey && extractedTopics.length > 0) {
-      try {
-        for (const topic of extractedTopics) {
-          await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
+    // NEW: Build continuous context from home feed events
+    // contextAccumulator.processEvent handles topic extraction internally
+    let extractedTopics = [];
+    if (this.contextAccumulator && this.contextAccumulator.enabled) {
+      const eventContext = await this.contextAccumulator.processEvent(evt, {
+        allowTopicExtraction,
+        skipGeneralFallback: !allowTopicExtraction
+      });
+
+      // Get topics from eventContext for use in timeline lore and user interests
+      extractedTopics = eventContext?.topics || [];
+
+      // Update user topic interests from topics extracted by contextAccumulator
+      if (allowTopicExtraction && evt.pubkey && extractedTopics.length > 0) {
+        try {
+          for (const topic of extractedTopics) {
+            await this.userProfileManager.recordTopicInterest(evt.pubkey, topic, 0.1);
+          }
+        } catch (err) {
+          logger.debug('[NOSTR] Failed to record topic interests:', err.message);
         }
-      } catch (err) {
-        logger.debug('[NOSTR] Failed to record topic interests:', err.message);
+      } else if (!allowTopicExtraction) {
+        logger.debug('[NOSTR] Skipped user topic interest update (no full sentence)');
       }
-    } else if (!allowTopicExtraction) {
-      logger.debug('[NOSTR] Skipped user topic interest update (no full sentence)');
     }
-  }
 
-  // Update user quality tracking
-  if (evt.pubkey && evt.content) {
-    this._updateUserQualityScore(evt.pubkey, evt);
-  }
-
-  try {
-    sample.timelineLore.considered = true;
-    await this._considerTimelineLoreCandidate(evt, {
-      allowTopicExtraction,
-      topics: extractedTopics
-    });
-    // Acceptance is internal to lore buffer; keep accepted unknown here
-    sample.timelineLore.accepted = null;
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore consideration failed:', err?.message || err);
-    sample.timelineLore.reason = err?.message || String(err);
-  }
-
-  // Optional: Log home feed events for debugging
-  logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
-  // Push into recent samples ring buffer
-  try {
-    this.homeFeedRecent.push(sample);
-    if (this.homeFeedRecent.length > this.homeFeedRecentMax) {
-      this.homeFeedRecent.splice(0, this.homeFeedRecent.length - this.homeFeedRecentMax);
+    // Update user quality tracking
+    if (evt.pubkey && evt.content) {
+      this._updateUserQualityScore(evt.pubkey, evt);
     }
-  } catch { }
-}
+
+    try {
+      sample.timelineLore.considered = true;
+      await this._considerTimelineLoreCandidate(evt, {
+        allowTopicExtraction,
+        topics: extractedTopics
+      });
+      // Acceptance is internal to lore buffer; keep accepted unknown here
+      sample.timelineLore.accepted = null;
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore consideration failed:', err?.message || err);
+      sample.timelineLore.reason = err?.message || String(err);
+    }
+
+    // Optional: Log home feed events for debugging
+    logger.debug(`[NOSTR] Home feed event from ${evt.pubkey.slice(0, 8)}: ${evt.content.slice(0, 100)}`);
+    // Push into recent samples ring buffer
+    try {
+      this.homeFeedRecent.push(sample);
+      if (this.homeFeedRecent.length > this.homeFeedRecentMax) {
+        this.homeFeedRecent.splice(0, this.homeFeedRecent.length - this.homeFeedRecentMax);
+      }
+    } catch { }
+  }
 
   async _considerTimelineLoreCandidate(evt, context = {}) {
-  if (!this.homeFeedEnabled) {
-    this.logger?.debug?.('[NOSTR] Timeline lore skipped: home feed disabled');
-    return;
-  }
-  if (!this.contextAccumulator) {
-    this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator unavailable');
-    return;
-  }
-  if (!this.contextAccumulator.enabled) {
-    this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator disabled');
-    return;
-  }
-  if (!evt || !evt.content || !evt.pubkey || !evt.id) return;
-  if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
-  if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
-
-  const normalized = this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim();
-  if (!normalized) {
-    this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (empty after sanitize)`);
-    return;
-  }
-
-  const stripped = this._stripHtmlForLore(normalized);
-  const analysisContent = stripped || normalized;
-
-  const wordCount = analysisContent.split(/\s+/).filter(Boolean).length;
-  if (analysisContent.length < this.timelineLoreCandidateMinChars) {
-    this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (too short: ${analysisContent.length} chars, ${wordCount} words)`);
-    return;
-  }
-  if (wordCount < this.timelineLoreCandidateMinWords) {
-    this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (insufficient words: ${wordCount} < ${this.timelineLoreCandidateMinWords})`);
-    return;
-  }
-
-  const heuristics = this._evaluateTimelineLoreCandidate(evt, analysisContent, context);
-  if (!heuristics || heuristics.reject === true) {
-    this.logger?.debug?.(`[NOSTR] Timeline lore heuristics rejected ${evt.id.slice(0, 8)} (score=${heuristics?.score ?? 'n/a'} reason=${heuristics?.reason || 'n/a'})`);
-    return;
-  }
-
-  let verdict = heuristics;
-  if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
-    verdict = await this._screenTimelineLoreWithLLM(analysisContent, heuristics);
-    if (!verdict || verdict.accept === false) {
-      this.logger?.debug?.(`[NOSTR] Timeline lore LLM rejected ${evt.id.slice(0, 8)} (score=${heuristics.score})`);
+    if (!this.homeFeedEnabled) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: home feed disabled');
       return;
     }
-  }
-
-  const mergedTags = new Set();
-  for (const list of [context?.topics || [], heuristics.trendingMatches || [], verdict?.tags || []]) {
-    if (!Array.isArray(list)) continue;
-    for (const item of list) {
-      const clean = typeof item === 'string' ? item.trim() : '';
-      if (clean) mergedTags.add(clean.slice(0, 40));
+    if (!this.contextAccumulator) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator unavailable');
+      return;
     }
-  }
-
-  const candidate = {
-    id: evt.id,
-    pubkey: evt.pubkey,
-    created_at: evt.created_at || Math.floor(Date.now() / 1000),
-    content: analysisContent.slice(0, 480),
-    summary: this._coerceLoreString(verdict?.summary || heuristics.summary || null) || null,
-    rationale: this._coerceLoreString(verdict?.rationale || heuristics.reason || null) || null,
-    tags: Array.from(mergedTags).slice(0, 8),
-    importance: this._coerceLoreString(verdict?.priority || heuristics.priority || 'medium') || 'medium',
-    score: Number.isFinite(verdict?.score) ? verdict.score : heuristics.score,
-    bufferedAt: Date.now(),
-    metadata: {
-      wordCount,
-      charCount: analysisContent.length,
-      topics: context?.topics || [],
-      trendingMatches: heuristics.trendingMatches || [],
-      authorScore: heuristics.authorScore,
-      signals: verdict?.signals || heuristics.signals || []
+    if (!this.contextAccumulator.enabled) {
+      this.logger?.debug?.('[NOSTR] Timeline lore skipped: context accumulator disabled');
+      return;
     }
-  };
+    if (!evt || !evt.content || !evt.pubkey || !evt.id) return;
+    if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
+    if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
 
-  this._addTimelineLoreCandidate(candidate);
-}
+    const normalized = this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim();
+    if (!normalized) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (empty after sanitize)`);
+      return;
+    }
 
-_evaluateTimelineLoreCandidate(evt, normalizedContent, context = {}) {
-  const topics = Array.isArray(context?.topics) ? context.topics : [];
-  const wordCount = normalizedContent.split(/\s+/).filter(Boolean).length;
-  const charCount = normalizedContent.length;
-  const hasQuestion = /[?¿\u061F]/u.test(normalizedContent);
-  const hasExclaim = /[!¡]/u.test(normalizedContent);
-  const hasLink = /https?:\/\//i.test(normalizedContent);
-  const hasHashtag = /(^|\s)#\w+/u.test(normalizedContent);
-  const isThreadContribution = Array.isArray(evt.tags) && evt.tags.some((tag) => tag?.[0] === 'e');
-  const authorScore = Number.isFinite(this.userQualityScores?.get(evt.pubkey))
-    ? this.userQualityScores.get(evt.pubkey)
-    : 0.5;
+    const stripped = this._stripHtmlForLore(normalized);
+    const analysisContent = stripped || normalized;
 
-  if (authorScore < 0.1 && wordCount < 25) {
-    return null;
-  }
+    const wordCount = analysisContent.split(/\s+/).filter(Boolean).length;
+    if (analysisContent.length < this.timelineLoreCandidateMinChars) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (too short: ${analysisContent.length} chars, ${wordCount} words)`);
+      return;
+    }
+    if (wordCount < this.timelineLoreCandidateMinWords) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (insufficient words: ${wordCount} < ${this.timelineLoreCandidateMinWords})`);
+      return;
+    }
 
-  let score = 0;
-  if (wordCount >= 30) score += 1.2;
-  if (wordCount >= 60) score += 0.4;
-  if (charCount >= 220) score += 0.4;
-  if (hasQuestion) score += 0.4;
-  if (hasExclaim) score += 0.1;
-  if (hasLink) score += 0.2;
-  if (hasHashtag) score += 0.2;
-  if (isThreadContribution) score += 0.3;
-  if (topics.length >= 2) score += 0.5;
+    const heuristics = this._evaluateTimelineLoreCandidate(evt, analysisContent, context);
+    if (!heuristics || heuristics.reject === true) {
+      this.logger?.debug?.(`[NOSTR] Timeline lore heuristics rejected ${evt.id.slice(0, 8)} (score=${heuristics?.score ?? 'n/a'} reason=${heuristics?.reason || 'n/a'})`);
+      return;
+    }
 
-  score += (authorScore - 0.5);
-
-  let trendingMatches = [];
-  try {
-    const activity = this.getCurrentActivity?.();
-    if (activity?.topics?.length) {
-      const hotTopics = new Set(activity.topics.slice(0, 6).map((t) => String(t.topic || t).toLowerCase()));
-      trendingMatches = topics.filter((t) => hotTopics.has(String(t).toLowerCase()));
-      if (trendingMatches.length) {
-        score += 0.6 + 0.15 * Math.min(3, trendingMatches.length);
+    let verdict = heuristics;
+    if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
+      verdict = await this._screenTimelineLoreWithLLM(analysisContent, heuristics);
+      if (!verdict || verdict.accept === false) {
+        this.logger?.debug?.(`[NOSTR] Timeline lore LLM rejected ${evt.id.slice(0, 8)} (score=${heuristics.score})`);
+        return;
       }
     }
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore trending check failed:', err?.message || err);
-  }
 
-  // Phase 4: Check watchlist matches
-  let watchlistMatch = null;
-  try {
-    if (this.narrativeMemory?.checkWatchlistMatch) {
-      watchlistMatch = this.narrativeMemory.checkWatchlistMatch(normalizedContent, topics);
-      if (watchlistMatch) {
-        score += watchlistMatch.boostScore;
-        this.logger?.debug?.(
-          `[WATCHLIST-HIT] ${evt.id.slice(0, 8)} matched: ${watchlistMatch.matches.map(m => m.item).join(', ')} (+${watchlistMatch.boostScore.toFixed(2)})`
-        );
+    const mergedTags = new Set();
+    for (const list of [context?.topics || [], heuristics.trendingMatches || [], verdict?.tags || []]) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        const clean = typeof item === 'string' ? item.trim() : '';
+        if (clean) mergedTags.add(clean.slice(0, 40));
       }
     }
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore watchlist check failed:', err?.message || err);
-  }
 
-  // Novelty scoring: penalize recently covered topics, reward new topics
-  let noveltyAdjustment = 0;
-  const novelTopics = [];
-  const overexposedTopics = [];
-  if (this.narrativeMemory?.getTopicRecency && topics.length > 0) {
-    for (const topic of topics) {
-      try {
-        const recency = this.narrativeMemory.getTopicRecency(topic, 24);
-        if (recency.mentions > 3) {
-          // Heavily covered recently - penalize
-          noveltyAdjustment -= 0.5;
-          overexposedTopics.push(topic);
-        } else if (recency.mentions === 0) {
-          // New topic - bonus
-          noveltyAdjustment += 0.4;
-          novelTopics.push(topic);
-        }
-      } catch (err) {
-        logger.debug('[NOSTR] Timeline lore novelty check failed for topic:', topic, err?.message || err);
+    const candidate = {
+      id: evt.id,
+      pubkey: evt.pubkey,
+      created_at: evt.created_at || Math.floor(Date.now() / 1000),
+      content: analysisContent.slice(0, 480),
+      summary: this._coerceLoreString(verdict?.summary || heuristics.summary || null) || null,
+      rationale: this._coerceLoreString(verdict?.rationale || heuristics.reason || null) || null,
+      tags: Array.from(mergedTags).slice(0, 8),
+      importance: this._coerceLoreString(verdict?.priority || heuristics.priority || 'medium') || 'medium',
+      score: Number.isFinite(verdict?.score) ? verdict.score : heuristics.score,
+      bufferedAt: Date.now(),
+      metadata: {
+        wordCount,
+        charCount: analysisContent.length,
+        topics: context?.topics || [],
+        trendingMatches: heuristics.trendingMatches || [],
+        authorScore: heuristics.authorScore,
+        signals: verdict?.signals || heuristics.signals || []
       }
-    }
-    score += noveltyAdjustment;
-  }
-
-  // Phase 5: Check storyline advancement (continuity analysis integration)
-  let storylineAdvancement = null;
-  try {
-    if (this.narrativeMemory?.checkStorylineAdvancement) {
-      storylineAdvancement = this.narrativeMemory.checkStorylineAdvancement(
-        normalizedContent, topics
-      );
-      if (storylineAdvancement) {
-        if (storylineAdvancement.advancesRecurringTheme) {
-          score += 0.3;
-          this.logger?.debug?.(
-            `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} advances recurring theme (+0.3)`
-          );
-        }
-        if (storylineAdvancement.watchlistMatches.length) {
-          score += 0.5;
-          this.logger?.debug?.(
-            `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} matches watchlist items: ${storylineAdvancement.watchlistMatches.join(', ')} (+0.5)`
-          );
-        }
-        if (storylineAdvancement.isEmergingThread) {
-          score += 0.4;
-          this.logger?.debug?.(
-            `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} relates to emerging thread (+0.4)`
-          );
-        }
-      }
-    }
-  } catch (err) {
-    this.logger?.debug?.('[NOSTR] Storyline advancement check failed:', err?.message);
-  }
-
-  if (score < 1 && authorScore < 0.4) {
-    return null;
-  }
-
-  const signals = [];
-  if (hasQuestion) signals.push('seeking answers');
-  if (hasLink) signals.push('references external source');
-  if (isThreadContribution) signals.push('thread activity');
-  if (trendingMatches.length) signals.push(`trending: ${trendingMatches.join(', ')}`);
-  if (watchlistMatch) {
-    signals.push(watchlistMatch.reason);
-  }
-  // Add novelty signals
-  if (novelTopics.length > 0) {
-    signals.push(`new topics: ${novelTopics.slice(0, 2).join(', ')}`);
-  }
-  if (overexposedTopics.length > 0) {
-    signals.push(`overexposed: ${overexposedTopics.slice(0, 2).join(', ')}`);
-  }
-  // Add storyline advancement signals
-  if (storylineAdvancement) {
-    if (storylineAdvancement.advancesRecurringTheme) {
-      signals.push('advances recurring storyline');
-    }
-    if (storylineAdvancement.watchlistMatches.length > 0) {
-      signals.push(`continuity: ${storylineAdvancement.watchlistMatches.slice(0, 2).join(', ')}`);
-    }
-    if (storylineAdvancement.isEmergingThread) {
-      signals.push('emerging thread');
-    }
-  }
-
-  const reasonParts = [];
-  if (wordCount >= 40) reasonParts.push('long-form');
-  if (trendingMatches.length) reasonParts.push('touches active themes');
-  if (authorScore >= 0.7) reasonParts.push('trusted author');
-  if (watchlistMatch) reasonParts.push(`predicted storyline (${watchlistMatch.matches.length} match${watchlistMatch.matches.length > 1 ? 'es' : ''})`);
-  if (storylineAdvancement && (storylineAdvancement.advancesRecurringTheme || storylineAdvancement.isEmergingThread)) {
-    reasonParts.push('advances storyline continuity');
-  }
-  if (signals.length) reasonParts.push(signals.join('; '));
-
-  return {
-    accept: true,
-    score: Number(score.toFixed(2)),
-    priority: score >= 2.2 ? 'high' : score >= 1.4 ? 'medium' : 'low',
-    reason: reasonParts.join(', ') || 'notable activity',
-    topics,
-    trendingMatches,
-    watchlistMatches: watchlistMatch?.matches || [],
-    storylineAdvancement: storylineAdvancement || null,
-    authorScore: Number(authorScore.toFixed(2)),
-    signals,
-    summary: null,
-    skipLLM: score >= 2.8,
-    wordCount,
-    charCount
-  };
-}
-
-  async _screenTimelineLoreWithLLM(content, heuristics) {
-  try {
-    const { generateWithModelOrFallback } = require('./generation');
-    const type = this._getSmallModelType();
-    const heuristicsSummary = {
-      score: heuristics.score,
-      wordCount: heuristics.wordCount,
-      charCount: heuristics.charCount,
-      authorScore: heuristics.authorScore,
-      trendingMatches: heuristics.trendingMatches,
-      signals: heuristics.signals
     };
 
-    // Get recent narrative context for evolution awareness
-    const recentContext = (this.narrativeMemory && typeof this.narrativeMemory.getRecentDigestSummaries === 'function')
-      ? this.narrativeMemory.getRecentDigestSummaries(3)
-      : [];
-    const contextSection = recentContext.length ?
-      `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c =>
-        `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
-      ).join('\n')}\n\n` : '';
+    this._addTimelineLoreCandidate(candidate);
+  }
 
-    const prompt = `${contextSection}NARRATIVE TRIAGE: This post needs evaluation for timeline lore inclusion.
+  _evaluateTimelineLoreCandidate(evt, normalizedContent, context = {}) {
+    const topics = Array.isArray(context?.topics) ? context.topics : [];
+    const wordCount = normalizedContent.split(/\s+/).filter(Boolean).length;
+    const charCount = normalizedContent.length;
+    const hasQuestion = /[?¿\u061F]/u.test(normalizedContent);
+    const hasExclaim = /[!¡]/u.test(normalizedContent);
+    const hasLink = /https?:\/\//i.test(normalizedContent);
+    const hasHashtag = /(^|\s)#\w+/u.test(normalizedContent);
+    const isThreadContribution = Array.isArray(evt.tags) && evt.tags.some((tag) => tag?.[0] === 'e');
+    const authorScore = Number.isFinite(this.userQualityScores?.get(evt.pubkey))
+      ? this.userQualityScores.get(evt.pubkey)
+      : 0.5;
+
+    if (authorScore < 0.1 && wordCount < 25) {
+      return null;
+    }
+
+    let score = 0;
+    if (wordCount >= 30) score += 1.2;
+    if (wordCount >= 60) score += 0.4;
+    if (charCount >= 220) score += 0.4;
+    if (hasQuestion) score += 0.4;
+    if (hasExclaim) score += 0.1;
+    if (hasLink) score += 0.2;
+    if (hasHashtag) score += 0.2;
+    if (isThreadContribution) score += 0.3;
+    if (topics.length >= 2) score += 0.5;
+
+    score += (authorScore - 0.5);
+
+    let trendingMatches = [];
+    try {
+      const activity = this.getCurrentActivity?.();
+      if (activity?.topics?.length) {
+        const hotTopics = new Set(activity.topics.slice(0, 6).map((t) => String(t.topic || t).toLowerCase()));
+        trendingMatches = topics.filter((t) => hotTopics.has(String(t).toLowerCase()));
+        if (trendingMatches.length) {
+          score += 0.6 + 0.15 * Math.min(3, trendingMatches.length);
+        }
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore trending check failed:', err?.message || err);
+    }
+
+    // Phase 4: Check watchlist matches
+    let watchlistMatch = null;
+    try {
+      if (this.narrativeMemory?.checkWatchlistMatch) {
+        watchlistMatch = this.narrativeMemory.checkWatchlistMatch(normalizedContent, topics);
+        if (watchlistMatch) {
+          score += watchlistMatch.boostScore;
+          this.logger?.debug?.(
+            `[WATCHLIST-HIT] ${evt.id.slice(0, 8)} matched: ${watchlistMatch.matches.map(m => m.item).join(', ')} (+${watchlistMatch.boostScore.toFixed(2)})`
+          );
+        }
+      }
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore watchlist check failed:', err?.message || err);
+    }
+
+    // Novelty scoring: penalize recently covered topics, reward new topics
+    let noveltyAdjustment = 0;
+    const novelTopics = [];
+    const overexposedTopics = [];
+    if (this.narrativeMemory?.getTopicRecency && topics.length > 0) {
+      for (const topic of topics) {
+        try {
+          const recency = this.narrativeMemory.getTopicRecency(topic, 24);
+          if (recency.mentions > 3) {
+            // Heavily covered recently - penalize
+            noveltyAdjustment -= 0.5;
+            overexposedTopics.push(topic);
+          } else if (recency.mentions === 0) {
+            // New topic - bonus
+            noveltyAdjustment += 0.4;
+            novelTopics.push(topic);
+          }
+        } catch (err) {
+          logger.debug('[NOSTR] Timeline lore novelty check failed for topic:', topic, err?.message || err);
+        }
+      }
+      score += noveltyAdjustment;
+    }
+
+    // Phase 5: Check storyline advancement (continuity analysis integration)
+    let storylineAdvancement = null;
+    try {
+      if (this.narrativeMemory?.checkStorylineAdvancement) {
+        storylineAdvancement = this.narrativeMemory.checkStorylineAdvancement(
+          normalizedContent, topics
+        );
+        if (storylineAdvancement) {
+          if (storylineAdvancement.advancesRecurringTheme) {
+            score += 0.3;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} advances recurring theme (+0.3)`
+            );
+          }
+          if (storylineAdvancement.watchlistMatches.length) {
+            score += 0.5;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} matches watchlist items: ${storylineAdvancement.watchlistMatches.join(', ')} (+0.5)`
+            );
+          }
+          if (storylineAdvancement.isEmergingThread) {
+            score += 0.4;
+            this.logger?.debug?.(
+              `[STORYLINE-ADVANCE] ${evt.id.slice(0, 8)} relates to emerging thread (+0.4)`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      this.logger?.debug?.('[NOSTR] Storyline advancement check failed:', err?.message);
+    }
+
+    if (score < 1 && authorScore < 0.4) {
+      return null;
+    }
+
+    const signals = [];
+    if (hasQuestion) signals.push('seeking answers');
+    if (hasLink) signals.push('references external source');
+    if (isThreadContribution) signals.push('thread activity');
+    if (trendingMatches.length) signals.push(`trending: ${trendingMatches.join(', ')}`);
+    if (watchlistMatch) {
+      signals.push(watchlistMatch.reason);
+    }
+    // Add novelty signals
+    if (novelTopics.length > 0) {
+      signals.push(`new topics: ${novelTopics.slice(0, 2).join(', ')}`);
+    }
+    if (overexposedTopics.length > 0) {
+      signals.push(`overexposed: ${overexposedTopics.slice(0, 2).join(', ')}`);
+    }
+    // Add storyline advancement signals
+    if (storylineAdvancement) {
+      if (storylineAdvancement.advancesRecurringTheme) {
+        signals.push('advances recurring storyline');
+      }
+      if (storylineAdvancement.watchlistMatches.length > 0) {
+        signals.push(`continuity: ${storylineAdvancement.watchlistMatches.slice(0, 2).join(', ')}`);
+      }
+      if (storylineAdvancement.isEmergingThread) {
+        signals.push('emerging thread');
+      }
+    }
+
+    const reasonParts = [];
+    if (wordCount >= 40) reasonParts.push('long-form');
+    if (trendingMatches.length) reasonParts.push('touches active themes');
+    if (authorScore >= 0.7) reasonParts.push('trusted author');
+    if (watchlistMatch) reasonParts.push(`predicted storyline (${watchlistMatch.matches.length} match${watchlistMatch.matches.length > 1 ? 'es' : ''})`);
+    if (storylineAdvancement && (storylineAdvancement.advancesRecurringTheme || storylineAdvancement.isEmergingThread)) {
+      reasonParts.push('advances storyline continuity');
+    }
+    if (signals.length) reasonParts.push(signals.join('; '));
+
+    return {
+      accept: true,
+      score: Number(score.toFixed(2)),
+      priority: score >= 2.2 ? 'high' : score >= 1.4 ? 'medium' : 'low',
+      reason: reasonParts.join(', ') || 'notable activity',
+      topics,
+      trendingMatches,
+      watchlistMatches: watchlistMatch?.matches || [],
+      storylineAdvancement: storylineAdvancement || null,
+      authorScore: Number(authorScore.toFixed(2)),
+      signals,
+      summary: null,
+      skipLLM: score >= 2.8,
+      wordCount,
+      charCount
+    };
+  }
+
+  async _screenTimelineLoreWithLLM(content, heuristics) {
+    try {
+      const { generateWithModelOrFallback } = require('./generation');
+      const type = this._getSmallModelType();
+      const heuristicsSummary = {
+        score: heuristics.score,
+        wordCount: heuristics.wordCount,
+        charCount: heuristics.charCount,
+        authorScore: heuristics.authorScore,
+        trendingMatches: heuristics.trendingMatches,
+        signals: heuristics.signals
+      };
+
+      // Get recent narrative context for evolution awareness
+      const recentContext = (this.narrativeMemory && typeof this.narrativeMemory.getRecentDigestSummaries === 'function')
+        ? this.narrativeMemory.getRecentDigestSummaries(3)
+        : [];
+      const contextSection = recentContext.length ?
+        `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c =>
+          `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
+        ).join('\n')}\n\n` : '';
+
+      const prompt = `${contextSection}NARRATIVE TRIAGE: This post needs evaluation for timeline lore inclusion.
 
 CONTEXT: You track evolving Bitcoin/Nostr community narratives. Accept only posts that advance, contradict, or introduce new elements to ongoing storylines.
 
@@ -6682,299 +6667,299 @@ HEURISTICS: ${JSON.stringify(heuristicsSummary)}
 CONTENT:
 """${content.slice(0, 600)}"""`;
 
-    const raw = await generateWithModelOrFallback(
-      this.runtime,
-      type,
-      prompt,
-      { maxTokens: 320, temperature: 0.3 },
-      (res) => this._extractTextFromModelResult(res),
-      (s) => (typeof s === 'string' ? s.trim() : ''),
-      () => null
-    );
+      const raw = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 320, temperature: 0.3 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => (typeof s === 'string' ? s.trim() : ''),
+        () => null
+      );
 
-    if (!raw) return heuristics;
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return heuristics;
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (parsed && typeof parsed === 'object') {
-      parsed.accept = parsed.accept !== false;
-      parsed.score = heuristics.score;
-      // Ensure evolution metadata is present
-      if (parsed.evolutionType === undefined) parsed.evolutionType = null;
-      if (parsed.noveltyScore === undefined) parsed.noveltyScore = 0.5;
-      return parsed;
-    }
-    return heuristics;
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore LLM screen failed:', err?.message || err);
-    return heuristics;
-  }
-}
-
-_addTimelineLoreCandidate(candidate) {
-  if (!candidate || !candidate.id) return;
-
-  const existingIndex = this.timelineLoreBuffer.findIndex((item) => item.id === candidate.id);
-  if (existingIndex >= 0) {
-    this.timelineLoreBuffer[existingIndex] = { ...this.timelineLoreBuffer[existingIndex], ...candidate };
-  } else {
-    this.timelineLoreBuffer.push(candidate);
-    if (this.timelineLoreBuffer.length > this.timelineLoreMaxBuffer) {
-      this.timelineLoreBuffer.shift();
+      if (!raw) return heuristics;
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return heuristics;
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed === 'object') {
+        parsed.accept = parsed.accept !== false;
+        parsed.score = heuristics.score;
+        // Ensure evolution metadata is present
+        if (parsed.evolutionType === undefined) parsed.evolutionType = null;
+        if (parsed.noveltyScore === undefined) parsed.noveltyScore = 0.5;
+        return parsed;
+      }
+      return heuristics;
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore LLM screen failed:', err?.message || err);
+      return heuristics;
     }
   }
 
-  this.logger?.debug?.(`[NOSTR] Timeline lore buffer size now ${this.timelineLoreBuffer.length}`);
-  this._maybeTriggerTimelineLoreDigest();
-}
+  _addTimelineLoreCandidate(candidate) {
+    if (!candidate || !candidate.id) return;
 
-_maybeTriggerTimelineLoreDigest(force = false) {
-  if (this.timelineLoreProcessing) return;
-  if (!this.timelineLoreBuffer.length) return;
-
-  const now = Date.now();
-  const sinceLast = now - this.timelineLoreLastRun;
-  const bufferSize = this.timelineLoreBuffer.length;
-
-  // Calculate signal density for adaptive triggering
-  const avgScore = bufferSize > 0
-    ? this.timelineLoreBuffer.reduce((sum, c) => sum + (c.score || 0), 0) / bufferSize
-    : 0;
-  const highSignal = avgScore >= 2.0;
-
-  // Adaptive triggers
-  const earlyHighSignal = bufferSize >= 30 && highSignal; // High-quality batch ready early
-  const stalePrevention = sinceLast >= (2 * 60 * 60 * 1000) && bufferSize >= 15; // Don't stall >2h with 15+ items
-  const normalTrigger = bufferSize >= this.timelineLoreBatchSize; // Hit batch ceiling
-  const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs && bufferSize >= Math.max(3, Math.floor(this.timelineLoreBatchSize / 2));
-
-  if (force || earlyHighSignal || stalePrevention || normalTrigger || intervalReached) {
-    this.logger?.debug?.(
-      `[NOSTR] Timeline lore digest triggered (force=${force} buffer=${bufferSize} ` +
-      `avgScore=${avgScore.toFixed(2)} earlySignal=${earlyHighSignal} stale=${stalePrevention} ` +
-      `normal=${normalTrigger} interval=${intervalReached})`
-    );
-    this._processTimelineLoreBuffer(true).catch((err) => logger.debug('[NOSTR] Timeline lore digest error:', err?.message || err));
-    return;
-  }
-
-  const minDelayMs = Math.max(5 * 60 * 1000, this.timelineLoreMinIntervalMs - sinceLast);
-  const maxDelayMs = Math.max(minDelayMs + 10 * 60 * 1000, this.timelineLoreMaxIntervalMs);
-  this._ensureTimelineLoreTimer(minDelayMs, maxDelayMs);
-}
-
-_ensureTimelineLoreTimer(minDelayMs, maxDelayMs) {
-  if (this.timelineLoreTimer) return;
-
-  let delayMs;
-  if (Number.isFinite(minDelayMs) && Number.isFinite(maxDelayMs) && maxDelayMs >= minDelayMs) {
-    const minSec = Math.max(5 * 60, Math.floor(minDelayMs / 1000));
-    const maxSec = Math.max(minSec + 60, Math.floor(maxDelayMs / 1000));
-    delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
-  } else {
-    const minSec = Math.max(5 * 60, Math.floor(this.timelineLoreMinIntervalMs / 1000));
-    const maxSec = Math.max(minSec + 60, Math.floor(this.timelineLoreMaxIntervalMs / 1000));
-    delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
-  }
-
-  this.timelineLoreTimer = setTimeout(() => {
-    this.timelineLoreTimer = null;
-    this._processTimelineLoreBuffer().catch((err) => logger.debug('[NOSTR] Timeline lore scheduled digest failed:', err?.message || err));
-  }, delayMs);
-  this.logger?.debug?.(`[NOSTR] Timeline lore digest scheduled in ~${Math.round(delayMs / 60000)}m (buffer=${this.timelineLoreBuffer.length})`);
-}
-
-_prepareTimelineLoreBatch(limit = this.timelineLoreBatchSize) {
-  if (!this.timelineLoreBuffer.length) return [];
-  const unique = new Map();
-  for (let i = this.timelineLoreBuffer.length - 1; i >= 0; i--) {
-    const item = this.timelineLoreBuffer[i];
-    if (!item || !item.id) continue;
-    if (!unique.has(item.id)) unique.set(item.id, item);
-  }
-  const items = Array.from(unique.values());
-
-  // Enhanced sorting: prioritize storyline advancement while maintaining temporal order
-  items.sort((a, b) => {
-    // Calculate storyline priority boost
-    const aStorylineBoost = this._getStorylineBoost(a);
-    const bStorylineBoost = this._getStorylineBoost(b);
-
-    // If one item has significantly better storyline advancement, prioritize it
-    const storylineDiff = bStorylineBoost - aStorylineBoost;
-    if (Math.abs(storylineDiff) >= 0.5) {
-      return storylineDiff; // Sort by storyline boost (descending)
-    }
-
-    // Otherwise maintain temporal order
-    const aTs = a.created_at ? a.created_at * 1000 : a.bufferedAt;
-    const bTs = b.created_at ? b.created_at * 1000 : b.bufferedAt;
-    return aTs - bTs;
-  });
-
-  const maxItems = Math.max(3, limit);
-  return items.slice(-maxItems);
-}
-
-/**
- * Calculate storyline advancement boost for batch prioritization
- * @private
- */
-_getStorylineBoost(item) {
-  if (!item || !item.metadata) return 0;
-
-  const metadata = item.metadata;
-  let boost = 0;
-
-  // Check for storyline advancement signals in metadata
-  if (metadata.signals && Array.isArray(metadata.signals)) {
-    const signals = metadata.signals.map(s => String(s).toLowerCase());
-
-    if (signals.some(s => s.includes('advances recurring storyline'))) {
-      boost += 0.3;
-    }
-    if (signals.some(s => s.includes('continuity:'))) {
-      boost += 0.5;
-    }
-    if (signals.some(s => s.includes('emerging thread'))) {
-      boost += 0.4;
-    }
-  }
-  // Normalize floating point precision to one decimal to keep tests stable
-  return Math.round(boost * 10) / 10;
-}
-
-  async _processTimelineLoreBuffer(force = false) {
-  if (this.timelineLoreProcessing) return;
-  if (!this.timelineLoreBuffer.length) return;
-
-  const now = Date.now();
-  if (!force) {
-    const sinceLast = now - this.timelineLoreLastRun;
-    if (sinceLast < this.timelineLoreMinIntervalMs && this.timelineLoreBuffer.length < this.timelineLoreBatchSize) {
-      this.logger?.debug?.(`[NOSTR] Timeline lore processing deferred (sinceLast=${Math.round(sinceLast / 60000)}m, buffer=${this.timelineLoreBuffer.length})`);
-      this._ensureTimelineLoreTimer();
-      return;
-    }
-  }
-
-  const batch = this._prepareTimelineLoreBatch();
-  if (!batch.length) {
-    this._ensureTimelineLoreTimer();
-    return;
-  }
-
-  this.timelineLoreProcessing = true;
-  this.timelineLoreTimer = null;
-
-  try {
-    const digest = await this._generateTimelineLoreSummary(batch);
-    if (!digest) {
-      this.logger?.debug?.('[NOSTR] Timeline lore digest generation returned empty');
-      return;
-    }
-
-    const timestamps = batch.map((item) => (item.created_at ? item.created_at * 1000 : item.bufferedAt));
-    const entry = {
-      id: `timeline-${Date.now().toString(36)}`,
-      ...digest,
-      batchSize: batch.length,
-      timeframe: {
-        start: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
-        end: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
-      },
-      sample: batch.map((item) => ({
-        id: item.id,
-        author: item.pubkey,
-        summary: item.summary,
-        rationale: item.rationale,
-        tags: item.tags,
-        importance: item.importance,
-        score: item.score,
-        content: item.content
-      }))
-    };
-
-    this.contextAccumulator?.recordTimelineLore(entry);
-    if (this.narrativeMemory?.storeTimelineLore) {
-      await this.narrativeMemory.storeTimelineLore(entry);
-    }
-
-    if (entry && entry.headline) {
-      this.logger.info(`[LORE] Captured: "${entry.headline}" (derived from ${batch.length} posts)`);
+    const existingIndex = this.timelineLoreBuffer.findIndex((item) => item.id === candidate.id);
+    if (existingIndex >= 0) {
+      this.timelineLoreBuffer[existingIndex] = { ...this.timelineLoreBuffer[existingIndex], ...candidate };
     } else {
-      this.logger.info(`[LORE] Captured timeline signal from ${batch.length} posts`);
-    }
-
-    const usedIds = new Set(batch.map((item) => item.id));
-    this.timelineLoreBuffer = this.timelineLoreBuffer.filter((item) => !usedIds.has(item.id));
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore processing failed:', err?.message || err);
-  } finally {
-    this.timelineLoreProcessing = false;
-    this.timelineLoreLastRun = Date.now();
-    if (this.timelineLoreBuffer.length) {
-      this._ensureTimelineLoreTimer();
-    }
-  }
-}
-
-  async _generateTimelineLoreSummary(batch) {
-  if (!batch || !batch.length) return null;
-
-  try {
-    const { generateWithModelOrFallback } = require('./generation');
-    const type = this._getSmallModelType();
-
-    // Get recent digest context to avoid repetition
-    const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(5) || [];
-
-    // Take most recent posts that fit in prompt (prioritize recency)
-    const maxPostsInPrompt = Math.min(this.timelineLoreMaxPostsInPrompt, batch.length);
-    const recentBatch = batch.slice(-maxPostsInPrompt);
-
-    const topicCounts = new Map();
-    for (const item of batch) {
-      for (const tag of item.tags || []) {
-        const key = String(tag || '').trim().toLowerCase();
-        if (!key) continue;
-        topicCounts.set(key, (topicCounts.get(key) || 0) + 1);
+      this.timelineLoreBuffer.push(candidate);
+      if (this.timelineLoreBuffer.length > this.timelineLoreMaxBuffer) {
+        this.timelineLoreBuffer.shift();
       }
     }
-    const rankedTags = Array.from(topicCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([tag, count]) => `${tag}(${count})`);
 
-    const postLines = recentBatch.map((item, idx) => {
-      const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
-      const cleanContent = this._stripHtmlForLore(item.content || '');
-      const rationale = this._coerceLoreString(item.rationale || 'signal');
-      const signalLine = this._coerceLoreStringArray(item.metadata?.signals || [], 4).join('; ') || 'no explicit signals';
+    this.logger?.debug?.(`[NOSTR] Timeline lore buffer size now ${this.timelineLoreBuffer.length}`);
+    this._maybeTriggerTimelineLoreDigest();
+  }
 
-      return [
-        `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}`,
-        `CONTENT: ${cleanContent}`,
-        `RATIONALE: ${rationale}`,
-        `SIGNALS: ${signalLine}`,
-      ].join('\n');
-    }).join('\n\n');
+  _maybeTriggerTimelineLoreDigest(force = false) {
+    if (this.timelineLoreProcessing) return;
+    if (!this.timelineLoreBuffer.length) return;
 
-    // Sanity check: warn if prompt is still very long
-    if (postLines.length > 8000) {
-      this.logger?.warn?.(
-        `[NOSTR] Timeline lore prompt very long (${postLines.length} chars, ${recentBatch.length} posts). ` +
-        `Consider reducing timelineLoreMaxPostsInPrompt.`
+    const now = Date.now();
+    const sinceLast = now - this.timelineLoreLastRun;
+    const bufferSize = this.timelineLoreBuffer.length;
+
+    // Calculate signal density for adaptive triggering
+    const avgScore = bufferSize > 0
+      ? this.timelineLoreBuffer.reduce((sum, c) => sum + (c.score || 0), 0) / bufferSize
+      : 0;
+    const highSignal = avgScore >= 2.0;
+
+    // Adaptive triggers
+    const earlyHighSignal = bufferSize >= 30 && highSignal; // High-quality batch ready early
+    const stalePrevention = sinceLast >= (2 * 60 * 60 * 1000) && bufferSize >= 15; // Don't stall >2h with 15+ items
+    const normalTrigger = bufferSize >= this.timelineLoreBatchSize; // Hit batch ceiling
+    const intervalReached = sinceLast >= this.timelineLoreMinIntervalMs && bufferSize >= Math.max(3, Math.floor(this.timelineLoreBatchSize / 2));
+
+    if (force || earlyHighSignal || stalePrevention || normalTrigger || intervalReached) {
+      this.logger?.debug?.(
+        `[NOSTR] Timeline lore digest triggered (force=${force} buffer=${bufferSize} ` +
+        `avgScore=${avgScore.toFixed(2)} earlySignal=${earlyHighSignal} stale=${stalePrevention} ` +
+        `normal=${normalTrigger} interval=${intervalReached})`
       );
+      this._processTimelineLoreBuffer(true).catch((err) => logger.debug('[NOSTR] Timeline lore digest error:', err?.message || err));
+      return;
     }
 
-    // Build context section if recent digests exist
-    const contextSection = recentContext.length ?
-      `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c =>
-        `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
-      ).join('\n')}\n\n` : '';
+    const minDelayMs = Math.max(5 * 60 * 1000, this.timelineLoreMinIntervalMs - sinceLast);
+    const maxDelayMs = Math.max(minDelayMs + 10 * 60 * 1000, this.timelineLoreMaxIntervalMs);
+    this._ensureTimelineLoreTimer(minDelayMs, maxDelayMs);
+  }
 
-    const prompt = `${contextSection}ANALYSIS MISSION: You are tracking evolving narratives in the Nostr/Bitcoin community. Focus on DEVELOPMENT and PROGRESSION, not static topics.
+  _ensureTimelineLoreTimer(minDelayMs, maxDelayMs) {
+    if (this.timelineLoreTimer) return;
+
+    let delayMs;
+    if (Number.isFinite(minDelayMs) && Number.isFinite(maxDelayMs) && maxDelayMs >= minDelayMs) {
+      const minSec = Math.max(5 * 60, Math.floor(minDelayMs / 1000));
+      const maxSec = Math.max(minSec + 60, Math.floor(maxDelayMs / 1000));
+      delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
+    } else {
+      const minSec = Math.max(5 * 60, Math.floor(this.timelineLoreMinIntervalMs / 1000));
+      const maxSec = Math.max(minSec + 60, Math.floor(this.timelineLoreMaxIntervalMs / 1000));
+      delayMs = pickRangeWithJitter(minSec, maxSec) * 1000;
+    }
+
+    this.timelineLoreTimer = setTimeout(() => {
+      this.timelineLoreTimer = null;
+      this._processTimelineLoreBuffer().catch((err) => logger.debug('[NOSTR] Timeline lore scheduled digest failed:', err?.message || err));
+    }, delayMs);
+    this.logger?.debug?.(`[NOSTR] Timeline lore digest scheduled in ~${Math.round(delayMs / 60000)}m (buffer=${this.timelineLoreBuffer.length})`);
+  }
+
+  _prepareTimelineLoreBatch(limit = this.timelineLoreBatchSize) {
+    if (!this.timelineLoreBuffer.length) return [];
+    const unique = new Map();
+    for (let i = this.timelineLoreBuffer.length - 1; i >= 0; i--) {
+      const item = this.timelineLoreBuffer[i];
+      if (!item || !item.id) continue;
+      if (!unique.has(item.id)) unique.set(item.id, item);
+    }
+    const items = Array.from(unique.values());
+
+    // Enhanced sorting: prioritize storyline advancement while maintaining temporal order
+    items.sort((a, b) => {
+      // Calculate storyline priority boost
+      const aStorylineBoost = this._getStorylineBoost(a);
+      const bStorylineBoost = this._getStorylineBoost(b);
+
+      // If one item has significantly better storyline advancement, prioritize it
+      const storylineDiff = bStorylineBoost - aStorylineBoost;
+      if (Math.abs(storylineDiff) >= 0.5) {
+        return storylineDiff; // Sort by storyline boost (descending)
+      }
+
+      // Otherwise maintain temporal order
+      const aTs = a.created_at ? a.created_at * 1000 : a.bufferedAt;
+      const bTs = b.created_at ? b.created_at * 1000 : b.bufferedAt;
+      return aTs - bTs;
+    });
+
+    const maxItems = Math.max(3, limit);
+    return items.slice(-maxItems);
+  }
+
+  /**
+   * Calculate storyline advancement boost for batch prioritization
+   * @private
+   */
+  _getStorylineBoost(item) {
+    if (!item || !item.metadata) return 0;
+
+    const metadata = item.metadata;
+    let boost = 0;
+
+    // Check for storyline advancement signals in metadata
+    if (metadata.signals && Array.isArray(metadata.signals)) {
+      const signals = metadata.signals.map(s => String(s).toLowerCase());
+
+      if (signals.some(s => s.includes('advances recurring storyline'))) {
+        boost += 0.3;
+      }
+      if (signals.some(s => s.includes('continuity:'))) {
+        boost += 0.5;
+      }
+      if (signals.some(s => s.includes('emerging thread'))) {
+        boost += 0.4;
+      }
+    }
+    // Normalize floating point precision to one decimal to keep tests stable
+    return Math.round(boost * 10) / 10;
+  }
+
+  async _processTimelineLoreBuffer(force = false) {
+    if (this.timelineLoreProcessing) return;
+    if (!this.timelineLoreBuffer.length) return;
+
+    const now = Date.now();
+    if (!force) {
+      const sinceLast = now - this.timelineLoreLastRun;
+      if (sinceLast < this.timelineLoreMinIntervalMs && this.timelineLoreBuffer.length < this.timelineLoreBatchSize) {
+        this.logger?.debug?.(`[NOSTR] Timeline lore processing deferred (sinceLast=${Math.round(sinceLast / 60000)}m, buffer=${this.timelineLoreBuffer.length})`);
+        this._ensureTimelineLoreTimer();
+        return;
+      }
+    }
+
+    const batch = this._prepareTimelineLoreBatch();
+    if (!batch.length) {
+      this._ensureTimelineLoreTimer();
+      return;
+    }
+
+    this.timelineLoreProcessing = true;
+    this.timelineLoreTimer = null;
+
+    try {
+      const digest = await this._generateTimelineLoreSummary(batch);
+      if (!digest) {
+        this.logger?.debug?.('[NOSTR] Timeline lore digest generation returned empty');
+        return;
+      }
+
+      const timestamps = batch.map((item) => (item.created_at ? item.created_at * 1000 : item.bufferedAt));
+      const entry = {
+        id: `timeline-${Date.now().toString(36)}`,
+        ...digest,
+        batchSize: batch.length,
+        timeframe: {
+          start: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
+          end: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null
+        },
+        sample: batch.map((item) => ({
+          id: item.id,
+          author: item.pubkey,
+          summary: item.summary,
+          rationale: item.rationale,
+          tags: item.tags,
+          importance: item.importance,
+          score: item.score,
+          content: item.content
+        }))
+      };
+
+      this.contextAccumulator?.recordTimelineLore(entry);
+      if (this.narrativeMemory?.storeTimelineLore) {
+        await this.narrativeMemory.storeTimelineLore(entry);
+      }
+
+      if (entry && entry.headline) {
+        this.logger.info(`[LORE] Captured: "${entry.headline}" (derived from ${batch.length} posts)`);
+      } else {
+        this.logger.info(`[LORE] Captured timeline signal from ${batch.length} posts`);
+      }
+
+      const usedIds = new Set(batch.map((item) => item.id));
+      this.timelineLoreBuffer = this.timelineLoreBuffer.filter((item) => !usedIds.has(item.id));
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore processing failed:', err?.message || err);
+    } finally {
+      this.timelineLoreProcessing = false;
+      this.timelineLoreLastRun = Date.now();
+      if (this.timelineLoreBuffer.length) {
+        this._ensureTimelineLoreTimer();
+      }
+    }
+  }
+
+  async _generateTimelineLoreSummary(batch) {
+    if (!batch || !batch.length) return null;
+
+    try {
+      const { generateWithModelOrFallback } = require('./generation');
+      const type = this._getSmallModelType();
+
+      // Get recent digest context to avoid repetition
+      const recentContext = this.narrativeMemory?.getRecentDigestSummaries?.(5) || [];
+
+      // Take most recent posts that fit in prompt (prioritize recency)
+      const maxPostsInPrompt = Math.min(this.timelineLoreMaxPostsInPrompt, batch.length);
+      const recentBatch = batch.slice(-maxPostsInPrompt);
+
+      const topicCounts = new Map();
+      for (const item of batch) {
+        for (const tag of item.tags || []) {
+          const key = String(tag || '').trim().toLowerCase();
+          if (!key) continue;
+          topicCounts.set(key, (topicCounts.get(key) || 0) + 1);
+        }
+      }
+      const rankedTags = Array.from(topicCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([tag, count]) => `${tag}(${count})`);
+
+      const postLines = recentBatch.map((item, idx) => {
+        const shortAuthor = item.pubkey ? `${item.pubkey.slice(0, 8)}…` : 'unknown';
+        const cleanContent = this._stripHtmlForLore(item.content || '');
+        const rationale = this._coerceLoreString(item.rationale || 'signal');
+        const signalLine = this._coerceLoreStringArray(item.metadata?.signals || [], 4).join('; ') || 'no explicit signals';
+
+        return [
+          `[#${idx + 1}] Author: ${shortAuthor} • Score: ${typeof item.score === 'number' ? item.score.toFixed(2) : 'n/a'} • Importance: ${item.importance}`,
+          `CONTENT: ${cleanContent}`,
+          `RATIONALE: ${rationale}`,
+          `SIGNALS: ${signalLine}`,
+        ].join('\n');
+      }).join('\n\n');
+
+      // Sanity check: warn if prompt is still very long
+      if (postLines.length > 8000) {
+        this.logger?.warn?.(
+          `[NOSTR] Timeline lore prompt very long (${postLines.length} chars, ${recentBatch.length} posts). ` +
+          `Consider reducing timelineLoreMaxPostsInPrompt.`
+        );
+      }
+
+      // Build context section if recent digests exist
+      const contextSection = recentContext.length ?
+        `RECENT NARRATIVE CONTEXT:\n${recentContext.map(c =>
+          `- ${c.headline} [${c.tags.join(', ')}] (${c.priority})`
+        ).join('\n')}\n\n` : '';
+
+      const prompt = `${contextSection}ANALYSIS MISSION: You are tracking evolving narratives in the Nostr/Bitcoin community. Focus on DEVELOPMENT and PROGRESSION, not static topics.
 
 PRIORITIZE:
 ✅ New developments in ongoing storylines
@@ -7016,527 +7001,527 @@ ${postLines}
 
 YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
 
-    const raw = await generateWithModelOrFallback(
-      this.runtime,
-      type,
-      prompt,
-      { maxTokens: 1000, temperature: 0.45 },
-      (res) => this._extractTextFromModelResult(res),
-      (s) => (typeof s === 'string' ? s.trim() : ''),
-      () => null
-    );
+      const raw = await generateWithModelOrFallback(
+        this.runtime,
+        type,
+        prompt,
+        { maxTokens: 1000, temperature: 0.45 },
+        (res) => this._extractTextFromModelResult(res),
+        (s) => (typeof s === 'string' ? s.trim() : ''),
+        () => null
+      );
 
-    if (!raw) return null;
-    const parsed = this._extractJsonObject(raw);
-    if (!parsed) {
-      const sample = raw.slice(0, 200).replace(/\s+/g, ' ');
-      logger.debug(`[NOSTR] Timeline lore summary parse failed: unable to extract JSON (sample="${sample}")`);
+      if (!raw) return null;
+      const parsed = this._extractJsonObject(raw);
+      if (!parsed) {
+        const sample = raw.slice(0, 200).replace(/\s+/g, ' ');
+        logger.debug(`[NOSTR] Timeline lore summary parse failed: unable to extract JSON (sample="${sample}")`);
+        return null;
+      }
+
+      const normalized = this._normalizeTimelineLoreDigest(parsed, rankedTags);
+      if (!normalized) {
+        const sample = JSON.stringify(parsed).slice(0, 200);
+        logger.debug(`[NOSTR] Timeline lore summary normalization failed (parsed=${sample})`);
+        return null;
+      }
+
+      return normalized;
+    } catch (err) {
+      logger.debug('[NOSTR] Timeline lore summary generation failed:', err?.message || err);
       return null;
     }
-
-    const normalized = this._normalizeTimelineLoreDigest(parsed, rankedTags);
-    if (!normalized) {
-      const sample = JSON.stringify(parsed).slice(0, 200);
-      logger.debug(`[NOSTR] Timeline lore summary normalization failed (parsed=${sample})`);
-      return null;
-    }
-
-    return normalized;
-  } catch (err) {
-    logger.debug('[NOSTR] Timeline lore summary generation failed:', err?.message || err);
-    return null;
   }
-}
 
-_stripHtmlForLore(text) {
-  if (!text || typeof text !== 'string') return '';
-  let cleaned = text.replace(/<img[^>]*alt=["']?([^"'>]*)["']?[^>]*>/gi, (_, alt) => {
-    const label = typeof alt === 'string' && alt.trim() ? alt.trim() : 'image';
-    return ` [${label}] `;
-  });
-  cleaned = cleaned.replace(/<img[^>]*>/gi, ' [image] ');
-  cleaned = cleaned.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi, (_match, href, inner) => {
-    const textContent = inner ? inner.replace(/<[^>]+>/g, ' ').trim() : href;
-    return `${textContent} (${href})`;
-  });
-  cleaned = cleaned.replace(/<br\s*\/?>/gi, ' ');
-  cleaned = cleaned.replace(/<[^>]+>/g, ' ');
-  return cleaned.replace(/\s+/g, ' ').trim();
-}
+  _stripHtmlForLore(text) {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text.replace(/<img[^>]*alt=["']?([^"'>]*)["']?[^>]*>/gi, (_, alt) => {
+      const label = typeof alt === 'string' && alt.trim() ? alt.trim() : 'image';
+      return ` [${label}] `;
+    });
+    cleaned = cleaned.replace(/<img[^>]*>/gi, ' [image] ');
+    cleaned = cleaned.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi, (_match, href, inner) => {
+      const textContent = inner ? inner.replace(/<[^>]+>/g, ' ').trim() : href;
+      return `${textContent} (${href})`;
+    });
+    cleaned = cleaned.replace(/<br\s*\/?>/gi, ' ');
+    cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+    return cleaned.replace(/\s+/g, ' ').trim();
+  }
 
-_extractJsonObject(raw) {
-  if (!raw || typeof raw !== 'string') return null;
-  const attempt = (input) => {
-    if (!input || typeof input !== 'string') return null;
-    try {
-      return JSON.parse(input);
-    } catch {
-      if (typeof this._repairJsonString === 'function') {
-        const repaired = this._repairJsonString(input);
-        if (repaired && repaired !== input) {
-          try { return JSON.parse(repaired); } catch { }
+  _extractJsonObject(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    const attempt = (input) => {
+      if (!input || typeof input !== 'string') return null;
+      try {
+        return JSON.parse(input);
+      } catch {
+        if (typeof this._repairJsonString === 'function') {
+          const repaired = this._repairJsonString(input);
+          if (repaired && repaired !== input) {
+            try { return JSON.parse(repaired); } catch { }
+          }
         }
+        return null;
       }
-      return null;
-    }
-  };
-
-  const trimmed = raw.trim();
-  const direct = attempt(trimmed);
-  if (direct && typeof direct === 'object') return direct;
-
-  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) {
-    const fenced = attempt(fenceMatch[1].trim());
-    if (fenced && typeof fenced === 'object') return fenced;
-  }
-
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i];
-    if (ch === '{') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        const candidate = trimmed.slice(start, i + 1);
-        const parsed = attempt(candidate);
-        if (parsed && typeof parsed === 'object') {
-          return parsed;
-        }
-        start = -1;
-      }
-      if (depth < 0) break;
-    }
-  }
-
-  return null;
-}
-
-_repairJsonString(str) {
-  if (!str || typeof str !== 'string') return null;
-  let repaired = str;
-
-  // Normalize different quote styles to double quotes where safe
-  repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (match, inner) => {
-    if (inner.includes('"')) return match; // avoid breaking JSON that mixes quotes
-    return `"${inner.replace(/"/g, '\\"')}"`;
-  });
-
-  // Quote bare keys (e.g. tags: [] -> "tags": [])
-  repaired = repaired.replace(/([,{\s])([A-Za-z0-9_]+)\s*:/g, (match, prefix, key) => {
-    if (/"$/.test(prefix)) return match;
-    return `${prefix}"${key}":`;
-  });
-
-  // Remove trailing commas before closing braces/brackets
-  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
-
-  return repaired;
-}
-
-_normalizeTimelineLoreDigest(parsed, rankedTags = []) {
-  if (!parsed || typeof parsed !== 'object') return null;
-
-  const headlineRaw = this._coerceLoreString(parsed.headline);
-  const narrativeRaw = this._coerceLoreString(parsed.narrative);
-  const priorityRaw = this._coerceLoreString(parsed.priority).toLowerCase();
-  const toneRaw = this._coerceLoreString(parsed.tone);
-  const evolutionSignalRaw = this._coerceLoreString(parsed.evolutionSignal);
-
-  const digest = {
-    headline: this._truncateWords(headlineRaw || '', 18).slice(0, 140) || 'Community pulse update',
-    narrative: (narrativeRaw || 'Community activity logged; monitor unfolding threads.').slice(0, 520),
-    insights: this._coerceLoreStringArray(parsed.insights, 4).map((item) => item.slice(0, 180)),
-    watchlist: this._coerceLoreStringArray(parsed.watchlist, 4).map((item) => item.slice(0, 180)),
-    tags: this._coerceLoreStringArray(parsed.tags, 5).map((item) => item.slice(0, 40)),
-    priority: ['high', 'medium', 'low'].includes(priorityRaw) ? priorityRaw : 'medium',
-    tone: toneRaw || 'balanced',
-    evolutionSignal: evolutionSignalRaw || null
-  };
-
-  if (!digest.tags.length && rankedTags.length) {
-    digest.tags = rankedTags.slice(0, 5).map((entry) => entry.split('(')[0]);
-  }
-
-  if (!digest.insights.length && rankedTags.length) {
-    digest.insights = rankedTags.slice(0, Math.min(3, rankedTags.length)).map((entry) => `Trend: ${entry}`);
-  }
-
-  if (!digest.watchlist.length) {
-    digest.watchlist = digest.tags.slice(0, 3);
-  }
-
-  return digest;
-}
-
-_coerceLoreString(value) {
-  if (!value && value !== 0) return '';
-  if (typeof value === 'string') return value.trim();
-  if (Array.isArray(value)) {
-    return value.map((item) => this._coerceLoreString(item)).filter(Boolean).join(', ').trim();
-  }
-  if (typeof value === 'object') {
-    return Object.values(value || {}).map((item) => this._coerceLoreString(item)).filter(Boolean).join(' ').trim();
-  }
-  return String(value).trim();
-}
-
-_coerceLoreStringArray(value, limit = 4) {
-  const arr = Array.isArray(value) ? value : value ? [value] : [];
-  const result = [];
-  for (const item of arr) {
-    const str = this._coerceLoreString(item);
-    if (str) {
-      result.push(str);
-      if (result.length >= limit) break;
-    }
-  }
-  return result;
-}
-
-_truncateWords(str, maxWords) {
-  if (!str || typeof str !== 'string') return '';
-  const words = str.trim().split(/\s+/);
-  if (words.length <= maxWords) return str.trim();
-  return words.slice(0, maxWords).join(' ');
-}
-
-_updateUserQualityScore(pubkey, evt) {
-  if (!pubkey || !evt || !evt.content) return;
-
-  // Increment post count for this user
-  const currentCount = this.userPostCounts.get(pubkey) || 0;
-  this.userPostCounts.set(pubkey, currentCount + 1);
-
-  // Evaluate content quality (use 'general' topic and current strictness)
-  const isQuality = this._isQualityContent(evt, 'general', this.discoveryQualityStrictness);
-
-  // Calculate quality value (1.0 for quality content, 0.0 for low quality)
-  const qualityValue = isQuality ? 1.0 : 0.0;
-
-  // Get current quality score or initialize
-  const currentScore = this.userQualityScores.get(pubkey) || 0.5; // Start at neutral 0.5
-
-  // Use exponential moving average to update quality score
-  // Alpha of 0.3 means new posts have 30% weight, historical has 70%
-  const alpha = 0.3;
-  const newScore = alpha * qualityValue + (1 - alpha) * currentScore;
-
-  // Update the score
-  this.userQualityScores.set(pubkey, newScore);
-}
-
-_hasFullSentence(text) {
-  if (!text || typeof text !== 'string') return false;
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return false;
-
-  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-  if (wordCount < 6) return false;
-
-  const sentenceEndRegex = /[.!?？！。！？…‽](\s|$)/u;
-  if (sentenceEndRegex.test(normalized)) {
-    return true;
-  }
-
-  // Allow longer posts without explicit punctuation to qualify
-  return wordCount >= 12 || normalized.length >= 80;
-}
-
-  async _getUserSocialMetrics(pubkey) {
-  if (!pubkey || !this.pool) return null;
-
-  // Check cache first
-  const cached = this.userSocialMetrics.get(pubkey);
-  const now = Date.now();
-  if (cached && (now - cached.lastUpdated) < this.socialMetricsCacheTTL) {
-    return cached;
-  }
-
-  try {
-    // Fetch user's contact list (kind 3) to get following count
-    const contactEvents = await this._list(this.relays, [{ kinds: [3], authors: [pubkey], limit: 1 }]);
-    const following = contactEvents.length > 0 && contactEvents[0].tags
-      ? contactEvents[0].tags.filter(tag => tag[0] === 'p').length
-      : 0;
-
-    // Get real follower count by querying contact lists that include this pubkey
-    let followers = 0;
-    try {
-      // Query for contact events that have this pubkey in their p-tags
-      // This gives us users who follow the target user
-      const followerEvents = await this._list(this.relays, [
-        {
-          kinds: [3],
-          '#p': [pubkey],
-          limit: 100 // Limit to avoid excessive queries
-        }
-      ]);
-
-      // Count unique authors who have this user in their contact list
-      const uniqueFollowers = new Set();
-      for (const event of followerEvents) {
-        if (event.pubkey && event.pubkey !== pubkey) { // Exclude self-follows
-          uniqueFollowers.add(event.pubkey);
-        }
-      }
-      followers = uniqueFollowers.size;
-
-      logger.debug(`[NOSTR] Real follower count for ${pubkey.slice(0, 8)}: ${followers} (following: ${following})`);
-    } catch (followerErr) {
-      logger.debug(`[NOSTR] Failed to get follower count for ${pubkey.slice(0, 8)}, using following as proxy:`, followerErr?.message || followerErr);
-      followers = following; // Fallback to following count if follower query fails
-    }
-
-    const ratio = following > 0 ? followers / following : 0;
-
-    const metrics = {
-      followers,
-      following,
-      ratio,
-      lastUpdated: now
     };
 
-    this.userSocialMetrics.set(pubkey, metrics);
-    return metrics;
-  } catch (err) {
-    logger.debug(`[NOSTR] Failed to get social metrics for ${pubkey.slice(0, 8)}:`, err?.message || err);
+    const trimmed = raw.trim();
+    const direct = attempt(trimmed);
+    if (direct && typeof direct === 'object') return direct;
+
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenceMatch) {
+      const fenced = attempt(fenceMatch[1].trim());
+      if (fenced && typeof fenced === 'object') return fenced;
+    }
+
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          const candidate = trimmed.slice(start, i + 1);
+          const parsed = attempt(candidate);
+          if (parsed && typeof parsed === 'object') {
+            return parsed;
+          }
+          start = -1;
+        }
+        if (depth < 0) break;
+      }
+    }
+
     return null;
   }
-}
+
+  _repairJsonString(str) {
+    if (!str || typeof str !== 'string') return null;
+    let repaired = str;
+
+    // Normalize different quote styles to double quotes where safe
+    repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (match, inner) => {
+      if (inner.includes('"')) return match; // avoid breaking JSON that mixes quotes
+      return `"${inner.replace(/"/g, '\\"')}"`;
+    });
+
+    // Quote bare keys (e.g. tags: [] -> "tags": [])
+    repaired = repaired.replace(/([,{\s])([A-Za-z0-9_]+)\s*:/g, (match, prefix, key) => {
+      if (/"$/.test(prefix)) return match;
+      return `${prefix}"${key}":`;
+    });
+
+    // Remove trailing commas before closing braces/brackets
+    repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+    return repaired;
+  }
+
+  _normalizeTimelineLoreDigest(parsed, rankedTags = []) {
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const headlineRaw = this._coerceLoreString(parsed.headline);
+    const narrativeRaw = this._coerceLoreString(parsed.narrative);
+    const priorityRaw = this._coerceLoreString(parsed.priority).toLowerCase();
+    const toneRaw = this._coerceLoreString(parsed.tone);
+    const evolutionSignalRaw = this._coerceLoreString(parsed.evolutionSignal);
+
+    const digest = {
+      headline: this._truncateWords(headlineRaw || '', 18).slice(0, 140) || 'Community pulse update',
+      narrative: (narrativeRaw || 'Community activity logged; monitor unfolding threads.').slice(0, 520),
+      insights: this._coerceLoreStringArray(parsed.insights, 4).map((item) => item.slice(0, 180)),
+      watchlist: this._coerceLoreStringArray(parsed.watchlist, 4).map((item) => item.slice(0, 180)),
+      tags: this._coerceLoreStringArray(parsed.tags, 5).map((item) => item.slice(0, 40)),
+      priority: ['high', 'medium', 'low'].includes(priorityRaw) ? priorityRaw : 'medium',
+      tone: toneRaw || 'balanced',
+      evolutionSignal: evolutionSignalRaw || null
+    };
+
+    if (!digest.tags.length && rankedTags.length) {
+      digest.tags = rankedTags.slice(0, 5).map((entry) => entry.split('(')[0]);
+    }
+
+    if (!digest.insights.length && rankedTags.length) {
+      digest.insights = rankedTags.slice(0, Math.min(3, rankedTags.length)).map((entry) => `Trend: ${entry}`);
+    }
+
+    if (!digest.watchlist.length) {
+      digest.watchlist = digest.tags.slice(0, 3);
+    }
+
+    return digest;
+  }
+
+  _coerceLoreString(value) {
+    if (!value && value !== 0) return '';
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) {
+      return value.map((item) => this._coerceLoreString(item)).filter(Boolean).join(', ').trim();
+    }
+    if (typeof value === 'object') {
+      return Object.values(value || {}).map((item) => this._coerceLoreString(item)).filter(Boolean).join(' ').trim();
+    }
+    return String(value).trim();
+  }
+
+  _coerceLoreStringArray(value, limit = 4) {
+    const arr = Array.isArray(value) ? value : value ? [value] : [];
+    const result = [];
+    for (const item of arr) {
+      const str = this._coerceLoreString(item);
+      if (str) {
+        result.push(str);
+        if (result.length >= limit) break;
+      }
+    }
+    return result;
+  }
+
+  _truncateWords(str, maxWords) {
+    if (!str || typeof str !== 'string') return '';
+    const words = str.trim().split(/\s+/);
+    if (words.length <= maxWords) return str.trim();
+    return words.slice(0, maxWords).join(' ');
+  }
+
+  _updateUserQualityScore(pubkey, evt) {
+    if (!pubkey || !evt || !evt.content) return;
+
+    // Increment post count for this user
+    const currentCount = this.userPostCounts.get(pubkey) || 0;
+    this.userPostCounts.set(pubkey, currentCount + 1);
+
+    // Evaluate content quality (use 'general' topic and current strictness)
+    const isQuality = this._isQualityContent(evt, 'general', this.discoveryQualityStrictness);
+
+    // Calculate quality value (1.0 for quality content, 0.0 for low quality)
+    const qualityValue = isQuality ? 1.0 : 0.0;
+
+    // Get current quality score or initialize
+    const currentScore = this.userQualityScores.get(pubkey) || 0.5; // Start at neutral 0.5
+
+    // Use exponential moving average to update quality score
+    // Alpha of 0.3 means new posts have 30% weight, historical has 70%
+    const alpha = 0.3;
+    const newScore = alpha * qualityValue + (1 - alpha) * currentScore;
+
+    // Update the score
+    this.userQualityScores.set(pubkey, newScore);
+  }
+
+  _hasFullSentence(text) {
+    if (!text || typeof text !== 'string') return false;
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (!normalized) return false;
+
+    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+    if (wordCount < 6) return false;
+
+    const sentenceEndRegex = /[.!?？！。！？…‽](\s|$)/u;
+    if (sentenceEndRegex.test(normalized)) {
+      return true;
+    }
+
+    // Allow longer posts without explicit punctuation to qualify
+    return wordCount >= 12 || normalized.length >= 80;
+  }
+
+  async _getUserSocialMetrics(pubkey) {
+    if (!pubkey || !this.pool) return null;
+
+    // Check cache first
+    const cached = this.userSocialMetrics.get(pubkey);
+    const now = Date.now();
+    if (cached && (now - cached.lastUpdated) < this.socialMetricsCacheTTL) {
+      return cached;
+    }
+
+    try {
+      // Fetch user's contact list (kind 3) to get following count
+      const contactEvents = await this._list(this.relays, [{ kinds: [3], authors: [pubkey], limit: 1 }]);
+      const following = contactEvents.length > 0 && contactEvents[0].tags
+        ? contactEvents[0].tags.filter(tag => tag[0] === 'p').length
+        : 0;
+
+      // Get real follower count by querying contact lists that include this pubkey
+      let followers = 0;
+      try {
+        // Query for contact events that have this pubkey in their p-tags
+        // This gives us users who follow the target user
+        const followerEvents = await this._list(this.relays, [
+          {
+            kinds: [3],
+            '#p': [pubkey],
+            limit: 100 // Limit to avoid excessive queries
+          }
+        ]);
+
+        // Count unique authors who have this user in their contact list
+        const uniqueFollowers = new Set();
+        for (const event of followerEvents) {
+          if (event.pubkey && event.pubkey !== pubkey) { // Exclude self-follows
+            uniqueFollowers.add(event.pubkey);
+          }
+        }
+        followers = uniqueFollowers.size;
+
+        logger.debug(`[NOSTR] Real follower count for ${pubkey.slice(0, 8)}: ${followers} (following: ${following})`);
+      } catch (followerErr) {
+        logger.debug(`[NOSTR] Failed to get follower count for ${pubkey.slice(0, 8)}, using following as proxy:`, followerErr?.message || followerErr);
+        followers = following; // Fallback to following count if follower query fails
+      }
+
+      const ratio = following > 0 ? followers / following : 0;
+
+      const metrics = {
+        followers,
+        following,
+        ratio,
+        lastUpdated: now
+      };
+
+      this.userSocialMetrics.set(pubkey, metrics);
+      return metrics;
+    } catch (err) {
+      logger.debug(`[NOSTR] Failed to get social metrics for ${pubkey.slice(0, 8)}:`, err?.message || err);
+      return null;
+    }
+  }
 
   async _checkForUnfollowCandidates() {
-  if (!this.unfollowEnabled) return;
+    if (!this.unfollowEnabled) return;
 
-  const now = Date.now();
-  const checkIntervalMs = this.unfollowCheckIntervalHours * 60 * 60 * 1000;
+    const now = Date.now();
+    const checkIntervalMs = this.unfollowCheckIntervalHours * 60 * 60 * 1000;
 
-  // Only check periodically
-  if (now - this.lastUnfollowCheck < checkIntervalMs) return;
+    // Only check periodically
+    if (now - this.lastUnfollowCheck < checkIntervalMs) return;
 
-  this.lastUnfollowCheck = now;
+    this.lastUnfollowCheck = now;
 
-  try {
-    // Load current contacts
-    const contacts = await this._loadCurrentContacts();
-    if (!contacts.size) return;
+    try {
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.size) return;
 
-    const candidates = [];
-    for (const pubkey of contacts) {
-      const postCount = this.userPostCounts.get(pubkey) || 0;
-      const qualityScore = this.userQualityScores.get(pubkey) || 0;
+      const candidates = [];
+      for (const pubkey of contacts) {
+        const postCount = this.userPostCounts.get(pubkey) || 0;
+        const qualityScore = this.userQualityScores.get(pubkey) || 0;
 
-      // Only consider users with enough posts and low quality scores
-      if (postCount >= this.unfollowMinPostsThreshold && qualityScore < this.unfollowMinQualityScore) {
-        candidates.push({ pubkey, postCount, qualityScore });
-      }
-    }
-
-    if (candidates.length === 0) {
-      logger.debug('[NOSTR] No unfollow candidates found');
-      return;
-    }
-
-    // Sort by quality score (worst first) and limit to reasonable number
-    candidates.sort((a, b) => a.qualityScore - b.qualityScore);
-    const toUnfollow = candidates.slice(0, Math.min(5, candidates.length)); // Max 5 unfollows per check
-
-    logger.info(`[NOSTR] Found ${candidates.length} unfollow candidates, processing ${toUnfollow.length}`);
-
-    for (const candidate of toUnfollow) {
-      try {
-        const success = await this._unfollowUser(candidate.pubkey);
-        if (success) {
-          logger.info(`[NOSTR] Unfollowed ${candidate.pubkey.slice(0, 8)} (quality: ${candidate.qualityScore.toFixed(3)}, posts: ${candidate.postCount})`);
+        // Only consider users with enough posts and low quality scores
+        if (postCount >= this.unfollowMinPostsThreshold && qualityScore < this.unfollowMinQualityScore) {
+          candidates.push({ pubkey, postCount, qualityScore });
         }
-      } catch (err) {
-        logger.debug(`[NOSTR] Failed to unfollow ${candidate.pubkey.slice(0, 8)}:`, err?.message || err);
       }
 
-      // Small delay between unfollows
-      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
-    }
+      if (candidates.length === 0) {
+        logger.debug('[NOSTR] No unfollow candidates found');
+        return;
+      }
 
-  } catch (err) {
-    logger.warn('[NOSTR] Unfollow check failed:', err?.message || err);
+      // Sort by quality score (worst first) and limit to reasonable number
+      candidates.sort((a, b) => a.qualityScore - b.qualityScore);
+      const toUnfollow = candidates.slice(0, Math.min(5, candidates.length)); // Max 5 unfollows per check
+
+      logger.info(`[NOSTR] Found ${candidates.length} unfollow candidates, processing ${toUnfollow.length}`);
+
+      for (const candidate of toUnfollow) {
+        try {
+          const success = await this._unfollowUser(candidate.pubkey);
+          if (success) {
+            logger.info(`[NOSTR] Unfollowed ${candidate.pubkey.slice(0, 8)} (quality: ${candidate.qualityScore.toFixed(3)}, posts: ${candidate.postCount})`);
+          }
+        } catch (err) {
+          logger.debug(`[NOSTR] Failed to unfollow ${candidate.pubkey.slice(0, 8)}:`, err?.message || err);
+        }
+
+        // Small delay between unfollows
+        await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+      }
+
+    } catch (err) {
+      logger.warn('[NOSTR] Unfollow check failed:', err?.message || err);
+    }
   }
-}
 
   async _unfollowUser(pubkey) {
-  if (!pubkey || !this.pool || !this.sk || !this.relays.length || !this.pkHex) return false;
+    if (!pubkey || !this.pool || !this.sk || !this.relays.length || !this.pkHex) return false;
 
-  try {
-    // Load current contacts
-    const contacts = await this._loadCurrentContacts();
-    if (!contacts.has(pubkey)) {
-      logger.debug(`[NOSTR] User ${pubkey.slice(0, 8)} not in contacts`);
+    try {
+      // Load current contacts
+      const contacts = await this._loadCurrentContacts();
+      if (!contacts.has(pubkey)) {
+        logger.debug(`[NOSTR] User ${pubkey.slice(0, 8)} not in contacts`);
+        return false;
+      }
+
+      // Remove from contacts
+      const newContacts = new Set(contacts);
+      newContacts.delete(pubkey);
+
+      // Publish updated contacts list
+      const success = await this._publishContacts(newContacts);
+
+      if (success) {
+        // Clean up tracking data
+        this.userQualityScores.delete(pubkey);
+        this.userPostCounts.delete(pubkey);
+      }
+
+      return success;
+    } catch (err) {
+      logger.debug(`[NOSTR] Unfollow failed for ${pubkey.slice(0, 8)}:`, err?.message || err);
       return false;
     }
-
-    // Remove from contacts
-    const newContacts = new Set(contacts);
-    newContacts.delete(pubkey);
-
-    // Publish updated contacts list
-    const success = await this._publishContacts(newContacts);
-
-    if (success) {
-      // Clean up tracking data
-      this.userQualityScores.delete(pubkey);
-      this.userPostCounts.delete(pubkey);
-    }
-
-    return success;
-  } catch (err) {
-    logger.debug(`[NOSTR] Unfollow failed for ${pubkey.slice(0, 8)}:`, err?.message || err);
-    return false;
   }
-}
 
   async stop() {
-  if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
-  if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
-  if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
-  if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
-  if (this.hourlyDigestTimer) { clearTimeout(this.hourlyDigestTimer); this.hourlyDigestTimer = null; }
-  if (this.dailyReportTimer) { clearTimeout(this.dailyReportTimer); this.dailyReportTimer = null; }
-  if (this.selfReflectionTimer) { clearTimeout(this.selfReflectionTimer); this.selfReflectionTimer = null; }
-  if (this.topicStatsInterval) { clearInterval(this.topicStatsInterval); this.topicStatsInterval = null; }
-  if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch { } this.homeFeedUnsub = null; }
-  if (this.listenUnsub) { try { this.listenUnsub(); } catch { } this.listenUnsub = null; }
-  if (this.pool) { try { this.pool.close([]); } catch { } this.pool = null; }
-  if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch { } } this.pendingReplyTimers.clear(); }
-  if (this.semanticAnalyzer) { try { this.semanticAnalyzer.destroy(); } catch { } this.semanticAnalyzer = null; }
-  if (this.userProfileManager) { try { await this.userProfileManager.destroy(); } catch { } this.userProfileManager = null; }
-  if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch { } this.narrativeMemory = null; }
-  if (this.awarenessDryRunTimer) { try { clearInterval(this.awarenessDryRunTimer); } catch { } this.awarenessDryRunTimer = null; }
+    if (this.postTimer) { clearTimeout(this.postTimer); this.postTimer = null; }
+    if (this.discoveryTimer) { clearTimeout(this.discoveryTimer); this.discoveryTimer = null; }
+    if (this.homeFeedTimer) { clearTimeout(this.homeFeedTimer); this.homeFeedTimer = null; }
+    if (this.connectionMonitorTimer) { clearTimeout(this.connectionMonitorTimer); this.connectionMonitorTimer = null; }
+    if (this.hourlyDigestTimer) { clearTimeout(this.hourlyDigestTimer); this.hourlyDigestTimer = null; }
+    if (this.dailyReportTimer) { clearTimeout(this.dailyReportTimer); this.dailyReportTimer = null; }
+    if (this.selfReflectionTimer) { clearTimeout(this.selfReflectionTimer); this.selfReflectionTimer = null; }
+    if (this.topicStatsInterval) { clearInterval(this.topicStatsInterval); this.topicStatsInterval = null; }
+    if (this.homeFeedUnsub) { try { this.homeFeedUnsub(); } catch { } this.homeFeedUnsub = null; }
+    if (this.listenUnsub) { try { this.listenUnsub(); } catch { } this.listenUnsub = null; }
+    if (this.pool) { try { this.pool.close([]); } catch { } this.pool = null; }
+    if (this.pendingReplyTimers && this.pendingReplyTimers.size) { for (const [, t] of this.pendingReplyTimers) { try { clearTimeout(t); } catch { } } this.pendingReplyTimers.clear(); }
+    if (this.semanticAnalyzer) { try { this.semanticAnalyzer.destroy(); } catch { } this.semanticAnalyzer = null; }
+    if (this.userProfileManager) { try { await this.userProfileManager.destroy(); } catch { } this.userProfileManager = null; }
+    if (this.narrativeMemory) { try { await this.narrativeMemory.destroy(); } catch { } this.narrativeMemory = null; }
+    if (this.awarenessDryRunTimer) { try { clearInterval(this.awarenessDryRunTimer); } catch { } this.awarenessDryRunTimer = null; }
 
-  // Cleanup topic extractor (flush pending events before destroying)
-  try {
-    const { destroyTopicExtractor } = require('./nostr');
-    await destroyTopicExtractor(this.runtime);
-  } catch { }
+    // Cleanup topic extractor (flush pending events before destroying)
+    try {
+      const { destroyTopicExtractor } = require('./nostr');
+      await destroyTopicExtractor(this.runtime);
+    } catch { }
 
-  logger.info('[NOSTR] Service stopped');
-}
+    logger.info('[NOSTR] Service stopped');
+  }
 
-// Context Query Methods - Access accumulated intelligence
+  // Context Query Methods - Access accumulated intelligence
 
-getContextStats() {
-  if (!this.contextAccumulator) return null;
-  return this.contextAccumulator.getStats();
-}
+  getContextStats() {
+    if (!this.contextAccumulator) return null;
+    return this.contextAccumulator.getStats();
+  }
 
-_getEmergingStoryContextOptions(overrides = {}) {
-  if (!this.contextAccumulator) return { ...overrides };
-  const base = {
-    minUsers: this.contextAccumulator.emergingStoryContextMinUsers,
-    minMentions: this.contextAccumulator.emergingStoryContextMinMentions,
-    maxTopics: this.contextAccumulator.emergingStoryContextMaxTopics,
-    recentEventLimit: this.contextAccumulator.emergingStoryContextRecentEvents
-  };
-  return { ...base, ...overrides };
-}
+  _getEmergingStoryContextOptions(overrides = {}) {
+    if (!this.contextAccumulator) return { ...overrides };
+    const base = {
+      minUsers: this.contextAccumulator.emergingStoryContextMinUsers,
+      minMentions: this.contextAccumulator.emergingStoryContextMinMentions,
+      maxTopics: this.contextAccumulator.emergingStoryContextMaxTopics,
+      recentEventLimit: this.contextAccumulator.emergingStoryContextRecentEvents
+    };
+    return { ...base, ...overrides };
+  }
 
-getEmergingStories(options = {}) {
-  if (!this.contextAccumulator) return [];
-  return this.contextAccumulator.getEmergingStories(options);
-}
+  getEmergingStories(options = {}) {
+    if (!this.contextAccumulator) return [];
+    return this.contextAccumulator.getEmergingStories(options);
+  }
 
-getCurrentActivity() {
-  if (!this.contextAccumulator) return null;
-  return this.contextAccumulator.getCurrentActivity();
-}
+  getCurrentActivity() {
+    if (!this.contextAccumulator) return null;
+    return this.contextAccumulator.getCurrentActivity();
+  }
 
-getWatchlistState() {
-  if (!this.narrativeMemory?.getWatchlistState) return null;
-  return this.narrativeMemory.getWatchlistState();
-}
+  getWatchlistState() {
+    if (!this.narrativeMemory?.getWatchlistState) return null;
+    return this.narrativeMemory.getWatchlistState();
+  }
 
-getTopicTimeline(topic, limit = 10) {
-  if (!this.contextAccumulator) return [];
-  return this.contextAccumulator.getTopicTimeline(topic, limit);
-}
+  getTopicTimeline(topic, limit = 10) {
+    if (!this.contextAccumulator) return [];
+    return this.contextAccumulator.getTopicTimeline(topic, limit);
+  }
 
-getSemanticAnalyzerStats() {
-  if (!this.semanticAnalyzer) return null;
-  return this.semanticAnalyzer.getCacheStats();
-}
+  getSemanticAnalyzerStats() {
+    if (!this.semanticAnalyzer) return null;
+    return this.semanticAnalyzer.getCacheStats();
+  }
 
   // Long-Term Memory Query Methods
-  
+
   async getUserProfile(pubkey) {
-  if (!this.userProfileManager) return null;
-  try {
-    return await this.userProfileManager.getProfile(pubkey);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get user profile:', err.message);
-    return null;
+    if (!this.userProfileManager) return null;
+    try {
+      return await this.userProfileManager.getProfile(pubkey);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get user profile:', err.message);
+      return null;
+    }
   }
-}
 
   async getTopicExperts(topic, limit = 5) {
-  if (!this.userProfileManager) return [];
-  try {
-    return await this.userProfileManager.getTopicExperts(topic, limit);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get topic experts:', err.message);
-    return [];
+    if (!this.userProfileManager) return [];
+    try {
+      return await this.userProfileManager.getTopicExperts(topic, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get topic experts:', err.message);
+      return [];
+    }
   }
-}
 
   async getUserRecommendations(pubkey, limit = 5) {
-  if (!this.userProfileManager) return [];
-  try {
-    return await this.userProfileManager.getUserRecommendations(pubkey, limit);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get user recommendations:', err.message);
-    return [];
+    if (!this.userProfileManager) return [];
+    try {
+      return await this.userProfileManager.getUserRecommendations(pubkey, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get user recommendations:', err.message);
+      return [];
+    }
   }
-}
 
   async getHistoricalContext(days = 7) {
-  if (!this.narrativeMemory) return [];
-  try {
-    return await this.narrativeMemory.getHistoricalContext(days);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get historical context:', err.message);
-    return [];
+    if (!this.narrativeMemory) return [];
+    try {
+      return await this.narrativeMemory.getHistoricalContext(days);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get historical context:', err.message);
+      return [];
+    }
   }
-}
 
   async getTopicEvolution(topic, days = 30) {
-  if (!this.narrativeMemory) return null;
-  try {
-    return await this.narrativeMemory.getTopicEvolution(topic, days);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get topic evolution:', err.message);
-    return null;
+    if (!this.narrativeMemory) return null;
+    try {
+      return await this.narrativeMemory.getTopicEvolution(topic, days);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get topic evolution:', err.message);
+      return null;
+    }
   }
-}
 
   async compareWithHistory(currentDigest) {
-  if (!this.narrativeMemory) return null;
-  try {
-    return await this.narrativeMemory.compareWithHistory(currentDigest);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to compare with history:', err.message);
-    return null;
+    if (!this.narrativeMemory) return null;
+    try {
+      return await this.narrativeMemory.compareWithHistory(currentDigest);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to compare with history:', err.message);
+      return null;
+    }
   }
-}
 
   async getSimilarPastMoments(currentDigest, limit = 3) {
-  if (!this.narrativeMemory) return [];
-  try {
-    return await this.narrativeMemory.getSimilarPastMoments(currentDigest, limit);
-  } catch (err) {
-    this.logger.debug('[NOSTR] Failed to get similar past moments:', err.message);
-    return [];
+    if (!this.narrativeMemory) return [];
+    try {
+      return await this.narrativeMemory.getSimilarPastMoments(currentDigest, limit);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to get similar past moments:', err.message);
+      return [];
+    }
   }
-}
 }
 
 module.exports = { NostrService, ensureDeps };

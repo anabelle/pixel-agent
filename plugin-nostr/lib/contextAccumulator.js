@@ -7,22 +7,22 @@ class ContextAccumulator {
     this.runtime = runtime;
     this.logger = logger || console;
     this.createUniqueUuid = options.createUniqueUuid || null;
-    
+
     // Hourly digests: hour timestamp -> digest data
     this.hourlyDigests = new Map();
-    
+
     // Emerging stories: topic -> story data
     this.emergingStories = new Map();
-    
+
     // Topic timelines: topic -> [events over time]
     this.topicTimelines = new Map();
 
     // Timeline lore digests generated from home feed reasoning
     this.timelineLoreEntries = [];
-    
+
     // Daily narrative accumulator
     this.dailyEvents = [];
-    
+
     const parsePositiveInt = (value, fallback) => {
       const parsed = parseInt(value, 10);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -66,30 +66,30 @@ class ContextAccumulator {
       options?.displayTopTopicsLimit ?? process.env.PROMPT_TOPICS_LIMIT,
       15
     );
-    
+
     // Feature flags
     this.enabled = true;
     this.hourlyDigestEnabled = true;
     this.dailyReportEnabled = true;
     this.emergingStoriesEnabled = true;
-  // Respect constructor option llmAnalysis to turn on LLM paths without new env vars
-  const llmOpt = options?.llmAnalysis === true;
-  this.llmAnalysisEnabled = llmOpt || process.env.CONTEXT_LLM_ANALYSIS_ENABLED === 'true' || false;
-  this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
-  this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
-    
-  // Performance tuning
-  this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment
-  // Allow larger posts for LLM sentiment/topic extraction (overridable via ENV)
-  this.llmSentimentMaxLength = process.env.CONTEXT_LLM_SENTIMENT_MAXLEN ? parseInt(process.env.CONTEXT_LLM_SENTIMENT_MAXLEN) : 1000;
-  this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
-  this.llmTopicMaxLength = process.env.CONTEXT_LLM_TOPIC_MAXLEN ? parseInt(process.env.CONTEXT_LLM_TOPIC_MAXLEN) : 1000;
-  // Narrative sampling controls
-  this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 800; // Default increased from 500
-  this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 30000; // Default increased from 15000
-  // Hourly pool size for narrative sampling (how many recent events to consider)
-  this.llmHourlyPoolSize = process.env.LLM_HOURLY_POOL_SIZE ? parseInt(process.env.LLM_HOURLY_POOL_SIZE) : 200;
-    
+    // Respect constructor option llmAnalysis to turn on LLM paths without new env vars
+    const llmOpt = options?.llmAnalysis === true;
+    this.llmAnalysisEnabled = llmOpt || process.env.CONTEXT_LLM_ANALYSIS_ENABLED === 'true' || false;
+    this.llmSentimentEnabled = process.env.CONTEXT_LLM_SENTIMENT_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+    this.llmTopicExtractionEnabled = process.env.CONTEXT_LLM_TOPICS_ENABLED === 'true' || this.llmAnalysisEnabled; // Can enable separately
+
+    // Performance tuning
+    this.llmSentimentMinLength = 20; // Minimum content length for LLM sentiment
+    // Allow larger posts for LLM sentiment/topic extraction (overridable via ENV)
+    this.llmSentimentMaxLength = process.env.CONTEXT_LLM_SENTIMENT_MAXLEN ? parseInt(process.env.CONTEXT_LLM_SENTIMENT_MAXLEN) : 1000;
+    this.llmTopicMinLength = 20; // Minimum content length for LLM topic extraction
+    this.llmTopicMaxLength = process.env.CONTEXT_LLM_TOPIC_MAXLEN ? parseInt(process.env.CONTEXT_LLM_TOPIC_MAXLEN) : 1000;
+    // Narrative sampling controls
+    this.llmNarrativeSampleSize = process.env.LLM_NARRATIVE_SAMPLE_SIZE ? parseInt(process.env.LLM_NARRATIVE_SAMPLE_SIZE) : 800; // Default increased from 500
+    this.llmNarrativeMaxContentLength = process.env.LLM_NARRATIVE_MAX_CONTENT ? parseInt(process.env.LLM_NARRATIVE_MAX_CONTENT) : 30000; // Default increased from 15000
+    // Hourly pool size for narrative sampling (how many recent events to consider)
+    this.llmHourlyPoolSize = process.env.LLM_HOURLY_POOL_SIZE ? parseInt(process.env.LLM_HOURLY_POOL_SIZE) : 200;
+
     // Real-time analysis configuration
     this.realtimeAnalysisEnabled = process.env.REALTIME_ANALYSIS_ENABLED === 'true' || false;
     this.quarterHourAnalysisEnabled = process.env.QUARTER_HOUR_ANALYSIS_ENABLED === 'true' || false;
@@ -169,7 +169,7 @@ class ContextAccumulator {
             const core = require('@elizaos/core');
             if (core?.ChannelType) channelType = core.ChannelType;
           }
-        } catch {}
+        } catch { }
 
         this._systemContextPromise = ensureNostrContextSystem(this.runtime, {
           createUniqueUuid,
@@ -197,39 +197,39 @@ class ContextAccumulator {
 
     try {
       const hour = this._getCurrentHour();
-      
+
       // Initialize hourly digest if needed
       if (!this.hourlyDigests.has(hour)) {
         this.hourlyDigests.set(hour, this._createEmptyDigest());
       }
-      
+
       const digest = this.hourlyDigests.get(hour);
-      
+
       // 1. Basic tracking
       digest.eventCount++;
       digest.users.add(evt.pubkey);
-      
+
       // 2. Extract structured data
-  const extracted = await this._extractStructuredData(evt, options);
-      
+      const extracted = await this._extractStructuredData(evt, options);
+
       // 3. Track topics
       for (const topic of extracted.topics) {
         digest.topics.set(topic, (digest.topics.get(topic) || 0) + 1);
         this._updateTopicTimeline(topic, evt);
         // Adaptive trending topic history
-        try { this.adaptiveTrending.recordTopicMention(topic, evt); } catch {}
+        try { this.adaptiveTrending.recordTopicMention(topic, evt); } catch { }
       }
-      
+
       // 4. Track sentiment
       if (extracted.sentiment) {
         digest.sentiment[extracted.sentiment]++;
       }
-      
+
       // 5. Collect links and media
       if (extracted.links && extracted.links.length > 0) {
         digest.links.push(...extracted.links.slice(0, 10)); // Limit per event
       }
-      
+
       // 6. Track conversations (threads)
       const threadId = this._getThreadId(evt);
       if (threadId !== evt.id) {
@@ -242,12 +242,12 @@ class ContextAccumulator {
           timestamp: evt.created_at
         });
       }
-      
+
       // 7. Detect emerging stories
       if (this.emergingStoriesEnabled) {
         await this._detectEmergingStory(evt, extracted);
       }
-      
+
       // 8. Add to daily events (for end-of-day report)
       if (this.dailyEvents.length < this.maxDailyEvents) {
         this.dailyEvents.push({
@@ -259,10 +259,10 @@ class ContextAccumulator {
           timestamp: evt.created_at || Date.now()
         });
       }
-      
+
       // 9. Cleanup old data
       this._cleanupOldData();
-      
+
     } catch (err) {
       this.logger.debug('[CONTEXT] processEvent error:', err.message);
     }
@@ -286,7 +286,7 @@ class ContextAccumulator {
 
   getTimelineLore(limit = 5) {
     if (!Number.isFinite(limit) || limit <= 0) limit = 5;
-    
+
     // Sort by priority (high > medium > low) then recency
     const priorityMap = { high: 3, medium: 2, low: 1 };
     const sorted = [...this.timelineLoreEntries].sort((a, b) => {
@@ -294,7 +294,7 @@ class ContextAccumulator {
       if (priorityDiff !== 0) return priorityDiff;
       return (b.timestamp || 0) - (a.timestamp || 0);
     });
-    
+
     return sorted.slice(0, limit);
   }
 
@@ -302,14 +302,14 @@ class ContextAccumulator {
     const content = evt.content || '';
     const allowTopicExtraction = options.allowTopicExtraction !== false;
     const skipGeneralFallback = options.skipGeneralFallback === true;
-    
+
     // Extract links
     const linkRegex = /(https?:\/\/[^\s]+)/g;
     const links = content.match(linkRegex) || [];
-    
+
     // Detect if it's a question
     const isQuestion = content.includes('?');
-    
+
     // Topic extraction: Use unified extraction from nostr.js (includes LLM + fallback)
     let topics = [];
     let topicSource = 'none';
@@ -323,7 +323,7 @@ class ContextAccumulator {
     } else {
       topicSource = 'topic-extraction-disabled';
     }
-    
+
     // If still no topics and not skipping fallback, use 'general'
     if (topics.length === 0 && !skipGeneralFallback) {
       topics = ['general'];
@@ -335,19 +335,19 @@ class ContextAccumulator {
       const topicSummary = topics.length > 0 ? topics.join(', ') : '(none)';
       this.logger.debug(`[CONTEXT] Topics(${topicSource}) evt=${idSnippet} -> ${topicSummary}`);
     }
-    
+
     // Sentiment analysis: Try LLM first (if enabled and content is substantial), fallback to keyword-based
     let sentiment = 'neutral';
-    
-    if (this.llmSentimentEnabled && this.runtime && typeof this.runtime.generateText === 'function' && 
-        content.length >= this.llmSentimentMinLength && content.length <= this.llmSentimentMaxLength) {
+
+    if (this.llmSentimentEnabled && this.runtime && typeof this.runtime.generateText === 'function' &&
+      content.length >= this.llmSentimentMinLength && content.length <= this.llmSentimentMaxLength) {
       // Use LLM for sentiment analysis on substantial content
       sentiment = await this._analyzeSentimentWithLLM(content);
     } else {
       // Fast keyword-based sentiment for short content or when LLM disabled
       sentiment = this._basicSentiment(content);
     }
-    
+
     return {
       topics,
       links,
@@ -359,7 +359,7 @@ class ContextAccumulator {
 
   async _extractTopicsWithLLM(content) {
     try {
-  const truncatedContent = content.slice(0, 800);
+      const truncatedContent = content.slice(0, 800);
       const prompt = `What are the main topics in this post? Give 1-3 specific topics.
 
 Rules:
@@ -436,10 +436,10 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS FOLLOWING TEXT. DO NOT USE ANY OTHER I
         this.logger.debug(`[CONTEXT] LLM topics returned empty, using fallback`);
         return [];
       }
-      
+
       this.logger.debug(`[CONTEXT] LLM extracted topics: ${topics.join(', ')}`);
       return topics;
-      
+
     } catch (err) {
       this.logger.debug('[CONTEXT] LLM topic extraction failed:', err.message);
       return [];
@@ -456,7 +456,7 @@ THE POST TO ANALYZE IS THIS AND ONLY THIS FOLLOWING TEXT. DO NOT USE ANY OTHER I
       // Check if we have too many "general" topics
       const generalCount = digest.topics.get('general') || 0;
       const totalTopics = Array.from(digest.topics.values()).reduce((sum, count) => sum + count, 0);
-      
+
       // If "general" is more than 30% of topics, try to refine
       if (generalCount / totalTopics < 0.3) {
         return digest.topics; // Not too many vague topics
@@ -497,16 +497,16 @@ Respond with ONLY the topics, comma-separated:`;
       if (refinedTopics.length > 0) {
         // Create new topics map with refined topics replacing "general"
         const newTopics = new Map(digest.topics);
-        
+
         // Distribute "general" count across refined topics
         const countPerTopic = Math.ceil(generalCount / refinedTopics.length);
         refinedTopics.forEach(topic => {
           newTopics.set(topic, (newTopics.get(topic) || 0) + countPerTopic);
         });
-        
+
         // Remove or reduce "general"
         newTopics.delete('general');
-        
+
         this.logger.debug(`[CONTEXT] 🎯 Refined ${generalCount} "general" topics into: ${refinedTopics.join(', ')}`);
       }
     } catch (err) {
@@ -516,7 +516,7 @@ Respond with ONLY the topics, comma-separated:`;
 
   _checkEmergingStory(topic, story) {
     if (!this.emergingStoriesEnabled) return;
-    
+
     // Check thresholds
     const isEmerging = (
       story.users.size >= this.emergingStoryThreshold &&
@@ -538,13 +538,6 @@ Respond with ONLY the topics, comma-separated:`;
   }
 
 
-      return digest.topics;
-      
-    } catch (err) {
-      this.logger.debug('[CONTEXT] Topic refinement failed:', err.message);
-      return digest.topics;
-    }
-  }
 
   async _analyzeSentimentWithLLM(content) {
     try {
@@ -560,16 +553,16 @@ Sentiment:`;
       });
 
       const sentimentLower = response.trim().toLowerCase();
-      
+
       // Validate response
       if (sentimentLower.includes('positive')) return 'positive';
       if (sentimentLower.includes('negative')) return 'negative';
       if (sentimentLower.includes('neutral')) return 'neutral';
-      
+
       // If LLM gives unexpected response, fallback to keyword analysis
       this.logger.debug(`[CONTEXT] LLM sentiment returned unexpected value: ${response.trim()}, using fallback`);
       return this._basicSentiment(content);
-      
+
     } catch (err) {
       this.logger.debug('[CONTEXT] LLM sentiment analysis failed:', err.message);
       return this._basicSentiment(content);
@@ -581,11 +574,11 @@ Sentiment:`;
     try {
       if (!contents || contents.length === 0) return [];
       if (contents.length === 1) return [await this._analyzeSentimentWithLLM(contents[0])];
-      
+
       // Limit batch size to prevent token overflow
       const batchSize = Math.min(contents.length, 10);
       const batch = contents.slice(0, batchSize);
-      
+
       const prompt = `Analyze the sentiment of each post below. For each post, respond with ONLY one word: "positive", "negative", or "neutral".
 
 ${batch.map((c, i) => `Post ${i + 1}: "${c.slice(0, 200)}"`).join('\n\n')}
@@ -600,26 +593,26 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       // Parse response line by line
       const lines = response.trim().split('\n').filter(l => l.trim());
       const sentiments = [];
-      
+
       for (let i = 0; i < batch.length; i++) {
         const line = lines[i]?.toLowerCase() || '';
         let sentiment = 'neutral';
-        
+
         if (line.includes('positive')) sentiment = 'positive';
         else if (line.includes('negative')) sentiment = 'negative';
         else if (line.includes('neutral')) sentiment = 'neutral';
         else sentiment = this._basicSentiment(batch[i]); // Fallback
-        
+
         sentiments.push(sentiment);
       }
-      
+
       // Process remaining items with fallback if batch was limited
       for (let i = batchSize; i < contents.length; i++) {
         sentiments.push(this._basicSentiment(contents[i]));
       }
-      
+
       return sentiments;
-      
+
     } catch (err) {
       this.logger.debug('[CONTEXT] Batch sentiment analysis failed:', err.message);
       // Fallback to basic sentiment for all
@@ -629,59 +622,59 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
 
   _basicSentiment(content) {
     const lower = content.toLowerCase();
-    
+
     // Expanded keyword lists with weighted scoring
     const positiveKeywords = {
       // Strong positive (weight: 2)
-      'love': 2, 'amazing': 2, 'excellent': 2, 'fantastic': 2, 'awesome': 2, 
+      'love': 2, 'amazing': 2, 'excellent': 2, 'fantastic': 2, 'awesome': 2,
       'brilliant': 2, 'outstanding': 2, 'wonderful': 2, 'incredible': 2,
       'perfect': 2, 'beautiful': 2, 'stunning': 2, 'spectacular': 2,
-      
+
       // Moderate positive (weight: 1)
       'great': 1, 'good': 1, 'nice': 1, 'cool': 1, 'happy': 1, 'excited': 1,
       'helpful': 1, 'interesting': 1, 'useful': 1, 'fun': 1, 'glad': 1,
       'appreciate': 1, 'thanks': 1, 'thank': 1, 'enjoy': 1, 'impressed': 1,
       'congrats': 1, 'celebrate': 1, 'win': 1, 'success': 1, 'inspiring': 1,
-      
+
       // Emoji positive (weight: 1)
-      '🚀': 1, '🎉': 1, '❤️': 1, '😊': 1, '👍': 1, '🔥': 1, '✨': 1, 
+      '🚀': 1, '🎉': 1, '❤️': 1, '😊': 1, '👍': 1, '🔥': 1, '✨': 1,
       '💪': 1, '🙌': 1, '👏': 1, '💯': 1, '⭐': 1, '🎊': 1, '😄': 1,
       '😍': 1, '🤩': 1, '💖': 1, '🌟': 1
     };
-    
+
     const negativeKeywords = {
       // Strong negative (weight: 2)
       'hate': 2, 'terrible': 2, 'awful': 2, 'worst': 2, 'horrible': 2,
       'disgusting': 2, 'disaster': 2, 'pathetic': 2, 'useless': 2,
       'garbage': 2, 'trash': 2, 'scam': 2, 'fraud': 2, 'sucks': 2,
-      
+
       // Moderate negative (weight: 1)
       'bad': 1, 'sad': 1, 'disappointing': 1, 'disappointed': 1, 'fail': 1,
       'failed': 1, 'broken': 1, 'problem': 1, 'issue': 1, 'wrong': 1,
       'error': 1, 'angry': 1, 'frustrated': 1, 'confusing': 1, 'confused': 1,
       'worried': 1, 'concerned': 1, 'unfortunate': 1, 'struggling': 1,
-      
+
       // Emoji negative (weight: 1)
       '😢': 1, '😡': 1, '👎': 1, '😞': 1, '😔': 1, '😩': 1, '😤': 1,
       '💔': 1, '😠': 1, '😰': 1, '😓': 1, '🤦': 1, '😖': 1
     };
-    
+
     // Calculate weighted sentiment scores
     let positiveScore = 0;
     let negativeScore = 0;
-    
+
     for (const [keyword, weight] of Object.entries(positiveKeywords)) {
       if (lower.includes(keyword)) positiveScore += weight;
     }
-    
+
     for (const [keyword, weight] of Object.entries(negativeKeywords)) {
       if (lower.includes(keyword)) negativeScore += weight;
     }
-    
+
     // Check for negation patterns that might flip sentiment
     const negations = ['not', 'no', "don't", "doesn't", "didn't", "won't", "can't", "never"];
     const hasNegation = negations.some(neg => lower.includes(neg));
-    
+
     // If there's negation near positive words, reduce positive score
     if (hasNegation && positiveScore > 0) {
       // Look for patterns like "not good", "not great", etc.
@@ -694,10 +687,10 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         }
       }
     }
-    
+
     // Determine sentiment based on weighted scores
     const threshold = 1; // Need at least weight of 1 to count
-    
+
     if (positiveScore > negativeScore && positiveScore >= threshold) return 'positive';
     if (negativeScore > positiveScore && negativeScore >= threshold) return 'negative';
     return 'neutral';
@@ -709,7 +702,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       const root = eTags.find(t => t[3] === 'root');
       if (root && root[1]) return root[1];
       if (eTags.length > 0 && eTags[0][1]) return eTags[0][1];
-    } catch {}
+    } catch { }
     return evt.id;
   }
 
@@ -717,7 +710,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     if (!this.topicTimelines.has(topic)) {
       this.topicTimelines.set(topic, []);
     }
-    
+
     const timeline = this.topicTimelines.get(topic);
     timeline.push({
       eventId: evt.id,
@@ -725,7 +718,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       timestamp: evt.created_at || Date.now(),
       content: evt.content.slice(0, 100)
     });
-    
+
     // Keep only recent events per topic
     if (timeline.length > this.maxTopicTimelineEvents) {
       timeline.shift();
@@ -735,7 +728,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
   async _detectEmergingStory(evt, extracted) {
     for (const topic of extracted.topics) {
       if (topic === 'general') continue; // Skip generic topic
-      
+
       if (!this.emergingStories.has(topic)) {
         this.emergingStories.set(topic, {
           topic,
@@ -747,7 +740,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
           sentiment: { positive: 0, negative: 0, neutral: 0 }
         });
       }
-      
+
       const story = this.emergingStories.get(topic);
       story.mentions++;
       story.users.add(evt.pubkey);
@@ -758,29 +751,29 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         timestamp: evt.created_at || Date.now()
       });
       story.lastUpdate = Date.now();
-      
+
       // Track sentiment
       if (extracted.sentiment) {
         story.sentiment[extracted.sentiment]++;
       }
-      
+
       // Limit events per story
       if (story.events.length > 20) {
         story.events.shift();
       }
-      
+
       // Check if it qualifies as "emerging"
-      const isNew = story.mentions === this.emergingStoryMentionThreshold && 
-                    story.users.size >= this.emergingStoryThreshold;
-      
+      const isNew = story.mentions === this.emergingStoryMentionThreshold &&
+        story.users.size >= this.emergingStoryThreshold;
+
       if (isNew) {
         this.logger.info(`[CONTEXT] 🔥 EMERGING STORY: "${topic}" (${story.mentions} mentions, ${story.users.size} users)`);
-        
+
         // Store to memory for later retrieval
         await this._storeEmergingStory(topic, story);
       }
     }
-    
+
     // Cleanup old stories (older than 6 hours)
     const sixHoursAgo = Date.now() - (6 * 60 * 60 * 1000);
     for (const [topic, story] of this.emergingStories.entries()) {
@@ -798,15 +791,15 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
     try {
       const timestamp = Date.now();
       const topicSlug = topic.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20);
-      
+
       // Use createUniqueUuid passed in constructor or from runtime
       const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
-      
+
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store emerging story - createUniqueUuid not available');
         return;
       }
-      
+
       const systemContext = await this._getSystemContext();
       const rooms = systemContext?.rooms || {};
       const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
@@ -837,7 +830,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       if (worldId) {
         memory.worldId = worldId;
       }
-      
+
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
@@ -856,23 +849,23 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
 
     const hour = this._getCurrentHour() - (60 * 60 * 1000); // Previous hour
     const digest = this.hourlyDigests.get(hour);
-    
+
     if (!digest || digest.eventCount === 0) {
       this.logger.debug('[CONTEXT] No events in previous hour for digest');
       return null;
     }
-    
+
     // Refine topics if too many "general" entries
     if (this.llmTopicExtractionEnabled) {
       digest.topics = await this._refineTopicsForDigest(digest);
     }
-    
+
     // Generate structured summary
     const topTopics = Array.from(digest.topics.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([topic, count]) => ({ topic, count }));
-    
+
     const hotConversations = Array.from(digest.conversations.entries())
       .filter(([_, events]) => events.length >= 3)
       .sort((a, b) => b[1].length - a[1].length)
@@ -882,11 +875,11 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         replyCount: events.length,
         participants: new Set(events.map(e => e.author)).size
       }));
-    
+
     const summary = {
       timeRange: new Date(hour).toISOString(),
-      hourLabel: new Date(hour).toLocaleString('en-US', { 
-        hour: 'numeric', 
+      hourLabel: new Date(hour).toLocaleString('en-US', {
+        hour: 'numeric',
         hour12: true,
         timeZoneName: 'short'
       }),
@@ -900,29 +893,24 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         threadsActive: digest.conversations.size
       }
     };
-    
+
     // NEW: Generate LLM-powered narrative summary
     if (this.llmAnalysisEnabled) {
-      const narrative = await this._generateDailyNarrativeSummary(report, topTopics);
-      if (narrative) {
-        report.narrative = narrative;
-        this.logger.info(`[NARRATIVE] DAILY:\n${narrative.summary}`);
+      try {
+        const narrative = await this._generateLLMNarrativeSummary(summary);
+        if (narrative) {
+          summary.narrative = narrative;
+          this.logger.info(`[NARRATIVE] HOURLY:\n${narrative.summary}`);
+        }
+      } catch (err) {
+        this.logger.debug('[CONTEXT] Hourly narrative generation failed:', err.message);
       }
     }
-    
-    this.logger.info(`[REPORT] DAILY: ${report.summary.totalEvents} events from ${report.summary.activeUsers} users. Top: ${topTopics.slice(0, 5).map(t => `${t.topic}(${t.count})`).join(', ')}`);
-    
-    if (emergingStories.length > 0) {
-      this.logger.info(`[TREND] Emerging stories: ${emergingStories.map(s => s.topic).join(', ')}`);
-    }
 
-    }
-    
-  this.logger.info(`[DIGEST] HOURLY (${summary.hourLabel}): ${digest.eventCount} events, ${digest.users.size} users. Top: ${topTopics.slice(0, 5).map(t => t.topic).join(', ')}`);
-    
     // Store to memory
     await this._storeDigestToMemory(summary);
-    
+
+
     // Store to narrative memory for long-term historical context
     if (this.narrativeMemory) {
       try {
@@ -939,7 +927,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         this.logger.debug('[CONTEXT] Failed to store hourly narrative:', err.message);
       }
     }
-    
+
     return summary;
   }
 
@@ -965,7 +953,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
 
       // Build user interaction map
       const userInteractions = new Map();
-      
+
       for (const evt of recentEvents) {
         if (!userInteractions.has(evt.author)) {
           userInteractions.set(evt.author, { posts: 0, topics: new Set(), sentiments: [] });
@@ -993,12 +981,12 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       const uniqueTopicsCount = topicEntries.length;
       const sortedTopics = topicEntries.sort((a, b) => b[1] - a[1]);
       const topTopicsForMetrics = sortedTopics.slice(0, 5);
-  const top3Sum = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).reduce((s, [, c]) => s + c, 0);
+      const top3Sum = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).reduce((s, [, c]) => s + c, 0);
       const concentrationTop3 = totalTopicMentions > 0 ? (top3Sum / totalTopicMentions) : 0;
       const hhi = totalTopicMentions > 0
         ? sortedTopics.reduce((s, [, c]) => {
-            const share = c / totalTopicMentions; return s + share * share;
-          }, 0)
+          const share = c / totalTopicMentions; return s + share * share;
+        }, 0)
         : 0;
       const hhiLabel = hhi < 0.15 ? 'fragmented' : hhi < 0.25 ? 'moderate' : 'concentrated';
 
@@ -1012,7 +1000,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
 
       // Build per-topic sample snippets (focus on top 3 topics)
       const perTopicSamples = (() => {
-  const top3Topics = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).map(([t]) => t);
+        const top3Topics = sortedTopics.slice(0, Math.min(3, this.displayTopTopicsLimit)).map(([t]) => t);
         const buckets = new Map(top3Topics.map(t => [t, []]));
         for (const e of recentEvents) {
           if (!Array.isArray(e.topics)) continue;
@@ -1040,9 +1028,9 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
           if (history.length > 0) {
             const lastWeek = history[0];
             const avgEvents = Math.round(lastWeek.events);
-            const comparison = digest.eventCount > avgEvents * 1.2 ? 'significantly higher' 
-                             : digest.eventCount < avgEvents * 0.8 ? 'notably lower'
-                             : 'similar';
+            const comparison = digest.eventCount > avgEvents * 1.2 ? 'significantly higher'
+              : digest.eventCount < avgEvents * 0.8 ? 'notably lower'
+                : 'similar';
             historicalContext = `\n\nHISTORICAL CONTEXT (same hour last week):
 - Activity level: ${lastWeek.events} events (this hour: ${comparison})
 - Common topics: ${lastWeek.topTopics?.slice(0, 3).map(t => t.topic).join(', ') || 'N/A'}
@@ -1053,11 +1041,11 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
         }
       }
 
-  const prompt = `Analyze this hour's activity on Nostr and create a compelling narrative summary.
+      const prompt = `Analyze this hour's activity on Nostr and create a compelling narrative summary.
 
 ACTIVITY DATA:
 - ${digest.eventCount} posts from ${digest.users.size} users
-- Top topics: ${Array.from(digest.topics.entries()).sort((a,b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => `${t}(${c})`).join(', ')}
+- Top topics: ${Array.from(digest.topics.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([t, c]) => `${t}(${c})`).join(', ')}
 - Sentiment: ${digest.sentiment.positive} positive, ${digest.sentiment.neutral} neutral, ${digest.sentiment.negative} negative
 - ${digest.conversations.size} active threads
 
@@ -1125,7 +1113,7 @@ Make it fascinating! Find the human story in the data.`;
           connections: []
         };
       }
-      
+
       this.logger.info(`[CONTEXT] 🎯 Generating hourly narrative from ${recentEvents.length} events, sampling ${this.llmNarrativeSampleSize} posts for LLM analysis`);
       return narrative;
 
@@ -1148,15 +1136,15 @@ Make it fascinating! Find the human story in the data.`;
 
     try {
       const timestamp = Date.now();
-      
+
       // Use createUniqueUuid passed in constructor or from runtime
       const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
-      
+
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store digest - createUniqueUuid not available');
         return;
       }
-      
+
       const systemContext = await this._getSystemContext();
       const rooms = systemContext?.rooms || {};
       const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
@@ -1179,7 +1167,7 @@ Make it fascinating! Find the human story in the data.`;
       if (worldId) {
         memory.worldId = worldId;
       }
-      
+
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
@@ -1195,17 +1183,17 @@ Make it fascinating! Find the human story in the data.`;
 
   async generateDailyReport() {
     if (!this.dailyReportEnabled) return null;
-    
+
     if (this.dailyEvents.length === 0) {
       this.logger.debug('[CONTEXT] No events for daily report');
       return null;
     }
-    
+
     // Aggregate daily statistics
     const uniqueUsers = new Set(this.dailyEvents.map(e => e.author));
     const allTopics = new Map();
     const sentiment = { positive: 0, negative: 0, neutral: 0 };
-    
+
     for (const evt of this.dailyEvents) {
       for (const topic of evt.topics) {
         allTopics.set(topic, (allTopics.get(topic) || 0) + 1);
@@ -1214,12 +1202,12 @@ Make it fascinating! Find the human story in the data.`;
         sentiment[evt.sentiment]++;
       }
     }
-    
+
     const topTopics = Array.from(allTopics.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 15)
       .map(([topic, count]) => ({ topic, count }));
-    
+
     const emergingStories = Array.from(this.emergingStories.entries())
       .filter(([_, story]) => story.users.size >= this.emergingStoryThreshold)
       .sort((a, b) => b[1].mentions - a[1].mentions)
@@ -1230,7 +1218,7 @@ Make it fascinating! Find the human story in the data.`;
         users: story.users.size,
         sentiment: story.sentiment
       }));
-    
+
     const report = {
       date: new Date().toISOString().split('T')[0],
       summary: {
@@ -1242,7 +1230,7 @@ Make it fascinating! Find the human story in the data.`;
         eventsPerUser: (this.dailyEvents.length / uniqueUsers.size).toFixed(1)
       }
     };
-    
+
     // NEW: Generate LLM-powered daily narrative
     if (this.llmAnalysisEnabled) {
       const narrative = await this._generateDailyNarrativeSummary(report, topTopics);
@@ -1251,16 +1239,16 @@ Make it fascinating! Find the human story in the data.`;
         this.logger.info(`[CONTEXT] 🎭 DAILY NARRATIVE:\n${narrative.summary}`);
       }
     }
-    
+
     this.logger.info(`[CONTEXT] 📰 DAILY REPORT: ${report.summary.totalEvents} events from ${report.summary.activeUsers} users. Top topics: ${topTopics.slice(0, 5).map(t => `${t.topic}(${t.count})`).join(', ')}`);
-    
+
     if (emergingStories.length > 0) {
       this.logger.info(`[CONTEXT] 🔥 Emerging stories: ${emergingStories.map(s => s.topic).join(', ')}`);
     }
-    
+
     // Store to memory
     await this._storeDailyReport(report);
-    
+
     // Store to narrative memory for long-term historical context
     if (this.narrativeMemory) {
       try {
@@ -1278,10 +1266,10 @@ Make it fascinating! Find the human story in the data.`;
         this.logger.debug('[CONTEXT] Failed to store daily narrative:', err.message);
       }
     }
-    
+
     // Clear daily events for next day
     this.dailyEvents = [];
-    
+
     return report;
   }
 
@@ -1295,7 +1283,7 @@ Make it fascinating! Find the human story in the data.`;
       const sampleSize = Math.min(this.llmNarrativeSampleSize, this.dailyEvents.length); // Use configurable sample size
       const sampledEvents = [];
       const step = Math.floor(this.dailyEvents.length / sampleSize);
-      
+
       for (let i = 0; i < this.dailyEvents.length; i += step) {
         if (sampledEvents.length >= sampleSize) break;
         const evt = this.dailyEvents[i];
@@ -1381,7 +1369,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
           tomorrow: 'Continue monitoring community trends'
         };
       }
-      
+
       this.logger.info(`[CONTEXT] 🎯 Generating daily narrative from ${this.dailyEvents.length} total events, sampling ${sampleSize} posts for LLM analysis`);
       return narrative;
 
@@ -1399,15 +1387,15 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
     try {
       const timestamp = Date.now();
       const dateSlug = report.date.replace(/[^0-9]/g, '');
-      
+
       // Use createUniqueUuid passed in constructor or from runtime
       const createUniqueUuid = this.createUniqueUuid || this.runtime.createUniqueUuid;
-      
+
       if (!createUniqueUuid) {
         this.logger.warn('[CONTEXT] Cannot store daily report - createUniqueUuid not available');
         return;
       }
-      
+
       const systemContext = await this._getSystemContext();
       const rooms = systemContext?.rooms || {};
       const entityId = systemContext?.entityId || createUniqueUuid(this.runtime, 'nostr-context-accumulator');
@@ -1430,7 +1418,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
       if (worldId) {
         memory.worldId = worldId;
       }
-      
+
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
@@ -1445,7 +1433,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   }
 
   // Query methods for retrieving accumulated context
-  
+
   getEmergingStories(options = {}) {
     if (!this.emergingStories || this.emergingStories.size === 0) {
       return [];
@@ -1485,7 +1473,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   getTopicTimeline(topic, limit = 10) {
     const timeline = this.topicTimelines.get(topic);
     if (!timeline) return [];
-    
+
     return timeline.slice(-limit);
   }
 
@@ -1497,11 +1485,11 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   getCurrentActivity() {
     const currentHour = this._getCurrentHour();
     const digest = this.hourlyDigests.get(currentHour);
-    
+
     if (!digest) {
       return { events: 0, users: 0, topics: [] };
     }
-    
+
     const topTopics = Array.from(digest.topics.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -1509,8 +1497,8 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
 
     // Provide adaptive trending alongside raw counts
     let trending = [];
-    try { trending = this.getAdaptiveTrendingTopics(5); } catch {}
-    
+    try { trending = this.getAdaptiveTrendingTopics(5); } catch { }
+
     return {
       events: digest.eventCount,
       users: digest.users.size,
@@ -1570,7 +1558,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   }
 
   // Utility methods
-  
+
   _createEmptyDigest() {
     return {
       eventCount: 0,
@@ -1590,7 +1578,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   _cleanupOldData() {
     // Remove hourly digests older than 24 hours
     const oldestToKeep = this._getCurrentHour() - (this.maxHourlyDigests * 60 * 60 * 1000);
-    
+
     for (const [hour, _] of this.hourlyDigests.entries()) {
       if (hour < oldestToKeep) {
         this.hourlyDigests.delete(hour);
@@ -1599,7 +1587,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   }
 
   // Configuration methods
-  
+
   enable() {
     this.enabled = true;
     this.logger.info('[CONTEXT] Context accumulator enabled');
@@ -1611,7 +1599,7 @@ Make it profound! Find the deeper story in the data. Be CONCRETE and SPECIFIC.`;
   }
 
   // Real-time analysis methods
-  
+
   startRealtimeAnalysis() {
     if (!this.realtimeAnalysisEnabled) {
       this.logger.info('[CONTEXT] Real-time analysis disabled');
@@ -1857,10 +1845,10 @@ OUTPUT JSON:
         };
       }
 
-    this.logger.debug(`[CONTEXT] 🔄 ROLLING WINDOW: ${analysis.acceleration} activity, emerging: ${analysis.emergingTopics.join(', ') || 'none'}`);
-    if (analysis.momentum.length > 0) {
-      this.logger.debug(`[CONTEXT] ⚡ Momentum: ${analysis.momentum.join(', ')}`);
-    }
+      this.logger.debug(`[CONTEXT] 🔄 ROLLING WINDOW: ${analysis.acceleration} activity, emerging: ${analysis.emergingTopics.join(', ') || 'none'}`);
+      if (analysis.momentum.length > 0) {
+        this.logger.debug(`[CONTEXT] ⚡ Momentum: ${analysis.momentum.join(', ')}`);
+      }
 
       // Store rolling window analysis
       await this._storeRealtimeAnalysis('rolling-window', analysis, {
@@ -1932,7 +1920,7 @@ OUTPUT JSON:
 
     // Activity level change
     const activityChange = recentEvents.length > previousEvents.length * 1.5 ? 'spiking' :
-                          recentEvents.length < previousEvents.length * 0.7 ? 'dropping' : 'steady';
+      recentEvents.length < previousEvents.length * 0.7 ? 'dropping' : 'steady';
 
     // New users appearing
     const newUsers = Array.from(recentUsers).filter(u => !previousUsers.has(u)).length;
@@ -1946,10 +1934,10 @@ OUTPUT JSON:
         timestamp: now
       };
 
-    this.logger.debug(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
-    if (topicSpikes.length > 0) {
-      this.logger.debug(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
-    }
+      this.logger.debug(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
+      if (topicSpikes.length > 0) {
+        this.logger.debug(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
+      }
 
       // Store trend detection
       await this._storeRealtimeAnalysis('trend-detection', trends, {
@@ -2068,8 +2056,8 @@ OUTPUT JSON:
       emergingStories: this.emergingStories.size,
       topicTimelines: this.topicTimelines.size,
       dailyEvents: this.dailyEvents.length,
-  currentActivity: this.getCurrentActivity(),
-  adaptiveTrendingEnabled: !!this.adaptiveTrending,
+      currentActivity: this.getCurrentActivity(),
+      adaptiveTrendingEnabled: !!this.adaptiveTrending,
       config: {
         maxHourlyDigests: this.maxHourlyDigests,
         maxTopicTimelineEvents: this.maxTopicTimelineEvents,
@@ -2090,7 +2078,7 @@ OUTPUT JSON:
 module.exports = { ContextAccumulator };
 
 // Extend prototype with helper for adaptive trending
-ContextAccumulator.prototype.getAdaptiveTrendingTopics = function(limit = 5) {
+ContextAccumulator.prototype.getAdaptiveTrendingTopics = function (limit = 5) {
   if (!this.adaptiveTrending) return [];
   return this.adaptiveTrending.getTrendingTopics(limit);
 };

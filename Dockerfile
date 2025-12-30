@@ -2,35 +2,52 @@ FROM oven/bun:1-slim
 
 WORKDIR /app
 
-# Install build tools for native modules
-RUN apt-get update && apt-get install -y python3 make g++ git && rm -rf /var/lib/apt/lists/*
+# Install build tools for native modules (sharp, onnxruntime, telegram)
+# Use --no-install-recommends to keep image small
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    git \
+    libvips-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create node and npm symlinks to bun for compatibility
-RUN ln -s /usr/local/bin/bun /usr/local/bin/node && ln -s /usr/local/bin/bun /usr/local/bin/npm
+# Create node and npm shims for compatibility with packages that expect Node.js
+# The npm shim handles: 
+#   - 'npm view' for @elizaos/cli update checks
+#   - Falls back to bun for everything else
+RUN ln -sf /usr/local/bin/bun /usr/local/bin/node && \
+    printf '#!/bin/sh\ncase "$1" in\n  view) echo "1.7.0"; exit 0;;\n  *) exec /usr/local/bin/bun "$@";;\nesac\n' > /usr/local/bin/npm && \
+    chmod +x /usr/local/bin/npm
 
-# Build local plugin first
+# Build local Nostr plugin first (isolated to allow caching)
 COPY plugin-nostr ./plugin-nostr
 WORKDIR /app/plugin-nostr
-RUN bun install
-# No build step needed for JS plugin
+RUN bun install --frozen-lockfile || bun install
 
-# Back to app
+# Back to main app
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better layer caching
 COPY package.json bun.lock* ./
 
-# Install dependencies
-RUN bun install
+# Install dependencies with native module support
+# --trust: allows postinstall scripts for sharp/onnxruntime
+RUN bun install --trust
 
-# Copy source
+# Copy source files
 COPY . .
 
-# Build app (compiles TS and generates initial character.json)
-RUN bun run build
+# Build TypeScript and generate character.json
+RUN bun run build && bun run build:character
 
-# Expose port
+# Expose the agent port
 EXPOSE 3003
 
-# Start using bun and pipe logs for Syntropy orchestration
-CMD ["/bin/sh", "-c", "mkdir -p /app/logs && bun run start 2>&1 | tee /app/logs/agent.log"]
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD wget --spider -q http://localhost:3003/health || exit 1
+
+# Start agent directly (logs go to stdout for docker logs)
+CMD ["bun", "./node_modules/@elizaos/cli/dist/index.js", "start", "--character", "./character.json", "--port", "3003"]

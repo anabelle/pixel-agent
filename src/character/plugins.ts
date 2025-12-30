@@ -1,30 +1,29 @@
-// @ts-ignore
-import telegramPlugin from "@elizaos/plugin-telegram";
-// @ts-ignore
-import discordPlugin from "@elizaos/plugin-discord";
-// @ts-ignore
-import sqlPlugin from "@elizaos/plugin-sql";
-// @ts-ignore
-import bootstrapPlugin from "@elizaos/plugin-bootstrap";
-// @ts-ignore
-import openrouterPlugin from "@elizaos/plugin-openrouter";
-// @ts-ignore
-import openaiPlugin from "@elizaos/plugin-openai";
-// @ts-ignore
-import knowledgePlugin from "@elizaos/plugin-knowledge";
-// @ts-ignore
-import twitterPlugin from "@elizaos/plugin-twitter";
-// @ts-ignore
-import nostrPlugin from "pixel-plugin-nostr";
+/**
+ * Plugin Configuration for Pixel Agent
+ * 
+ * NOTE: This file is NOT used when running via the ElizaOS CLI.
+ * The CLI resolves plugins by name from character.json.
+ * 
+ * This file exists for backwards compatibility if running directly.
+ */
 
-export const plugins = [
-  telegramPlugin,
-  discordPlugin,
-  sqlPlugin,
-  bootstrapPlugin,
-  openrouterPlugin,
-  openaiPlugin,
-  knowledgePlugin,
-  twitterPlugin,
-  nostrPlugin,
-];
+import type { Plugin } from "@elizaos/core";
+
+// Plugin names that the ElizaOS CLI will resolve at runtime
+// We export these as strings - the CLI does the actual resolution
+export const PLUGIN_NAMES = [
+  '@elizaos/plugin-bootstrap',
+  '@elizaos/adapter-postgres',
+  '@elizaos/plugin-sql',
+  '@elizaos/plugin-openai',
+  '@elizaos/plugin-openrouter',
+  '@elizaos/plugin-telegram',
+  '@elizaos/plugin-discord',
+  '@elizaos/plugin-twitter',
+  '@elizaos/plugin-knowledge',
+  'pixel-plugin-nostr',
+] as const;
+
+// Empty array - plugins are resolved by CLI at runtime using character.json
+export const plugins: Plugin[] = [];
+

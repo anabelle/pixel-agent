@@ -153,17 +153,22 @@ docker compose logs -f agent
 
 ### Option 2: Local Development
 **Prerequisites:**
-- Node.js 20+
-- Bun runtime: `curl -fsSL https://bun.sh/install | bash`
-- ElizaOS CLI: `bun i -g @elizaos/cli`
+- Bun runtime (v1.3+): `curl -fsSL https://bun.sh/install | bash`
+- PostgreSQL 15+ (or use Docker: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15-alpine`)
 
 ```bash
-# Install dependencies
+# Install dependencies (includes @elizaos/cli)
 bun install
 
-# Start development mode
-bun run dev
+# Set DATABASE_URL in .env
+echo 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pixel_agent' >> .env
+
+# Build and start
+bun run build
+bun run start
 ```
+
+**Note:** The agent uses PostgreSQL for production persistence. SQLite is no longer the default.
 
 ## 🔧 Platform-Specific Setup
 
@@ -279,14 +284,18 @@ export const character: Character = {
     ]
   ],
 
-  // Plugin configuration
+  // Plugin configuration (Twitter disabled by default)
   plugins: [
     "@elizaos/plugin-bootstrap",
+    "@elizaos/adapter-postgres",
     "@elizaos/plugin-sql",
+    "@elizaos/plugin-openai",
     "@elizaos/plugin-openrouter",
     "@elizaos/plugin-telegram",
-    "@elizaos/plugin-twitter",
-    "@pixel/plugin-nostr"
+    "@elizaos/plugin-discord",
+    // "@elizaos/plugin-twitter", // Enable when API credentials configured
+    "@elizaos/plugin-knowledge",
+    "pixel-plugin-nostr"
   ],
 
   // Environment settings

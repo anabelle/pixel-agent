@@ -1,0 +1,25 @@
+# Bun Configuration for Pixel Agent
+# See: https://bun.sh/docs/runtime/bunfig
+
+[install]
+# Trust these packages to run postinstall scripts (for native modules)
+trustedDependencies = [
+  "sharp",
+  "onnxruntime-node",
+  "@elizaos/plugin-telegram",
+  "@elizaos/plugin-twitter"
+]
+
+[install.lockfile]
+# Save lockfile for reproducible builds
+save = true
+
+[run]
+# Bun transpiles TypeScript by default
+# Enable source maps for better error traces
+# Silence experimental warnings
+silent = false
+
+[test]
+# Test configuration
+coverage = false

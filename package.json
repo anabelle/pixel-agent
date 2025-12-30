@@ -5,7 +5,7 @@
   "main": "src/index.ts",
   "scripts": {
     "build": "tsc && bun run build:character",
-    "build:character": "bun -e \"import 'dotenv/config'; import {character} from './dist/character.js'; const {plugins, ...rest} = character; console.log(JSON.stringify(rest, null, 2))\" 2>&1 | grep -v 'Info\\|Warn\\|Error' > character.json",
+    "build:character": "bun -e \"import 'dotenv/config'; import {character} from './dist/character.js'; const {plugins, ...rest} = character; const pluginNames = ['@elizaos/plugin-bootstrap', '@elizaos/plugin-discord', '@elizaos/plugin-knowledge', '@elizaos/plugin-openai', '@elizaos/plugin-openrouter', '@elizaos/plugin-sql', '@elizaos/plugin-telegram', '@elizaos/plugin-twitter', 'pixel-plugin-nostr']; console.log(JSON.stringify({...rest, plugins: pluginNames}, null, 2))\" 2>&1 | grep -v 'Info\\|Warn\\|Error' > character.json",
     "dev": "elizaos dev",
     "start": "bun run build:character && elizaos start --character ./character.json --port 3003",
     "start:patched": "./start-with-twitter-patch.sh",

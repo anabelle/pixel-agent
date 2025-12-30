@@ -31,6 +31,9 @@ export const settings = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
+  // Enable OpenAI for text embeddings
+  USE_OPENAI_EMBEDDING: "true",
+  TEXT_EMBEDDING_MODEL: "text-embedding-3-small",
   GOOGLE_GENERATIVE_AI_API_KEY:
     process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
   // Nostr

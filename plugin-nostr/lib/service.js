@@ -956,7 +956,7 @@ Response (YES/NO):`;
         const { getTopicExtractorStats } = require('./nostr');
         const stats = getTopicExtractorStats(runtime);
         if (stats && stats.processed > 0) {
-          logger.info(`[TOPIC] Stats: ${stats.processed} processed, ${stats.llmCalls} LLM calls, ${stats.cacheHitRate} cache hits, ${stats.skipRate} skipped, ${stats.estimatedSavings} calls saved, cache: ${stats.cacheSize} entries`);
+          logger.debug(`[TOPIC] Stats: ${stats.processed} processed, ${stats.llmCalls} LLM calls, ${stats.cacheHitRate} cache hits, ${stats.skipRate} skipped, ${stats.estimatedSavings} calls saved, cache: ${stats.cacheSize} entries`);
         }
       } catch (err) {
         logger.debug('[TOPIC] Stats logging failed:', err?.message || err);

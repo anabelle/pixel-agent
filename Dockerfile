@@ -33,4 +33,4 @@ RUN bun run build
 EXPOSE 3003
 
 # Start using bun and pipe logs for Syntropy orchestration
-CMD ["/bin/sh", "-c", "mkdir -p /app/logs && bun run build:character && bunx @elizaos/cli@latest start --character ./character.json --port 3003 2>&1 | tee /app/logs/agent.log"]
+CMD ["/bin/sh", "-c", "mkdir -p /app/logs && bun run start 2>&1 | tee /app/logs/agent.log"]

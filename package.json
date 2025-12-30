@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc && npm run build:character",
     "build:character": "node -e \"require('dotenv').config(); const {character} = require('./dist/character.js'); console.log(JSON.stringify(character, null, 2))\" > character.json",
-    "dev": "npx @elizaos/cli@latest dev",
-    "start": "npm run build:character && npx @elizaos/cli@latest start --character ./character.json --port 3002",
+    "dev": "elizaos dev",
+    "start": "npm run build:character && elizaos start --character ./character.json --port 3003",
     "start:patched": "./start-with-twitter-patch.sh",
     "test": "npx @elizaos/cli@latest test",
     "test:plugin-nostr": "cd plugin-nostr && npm test",

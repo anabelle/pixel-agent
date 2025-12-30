@@ -108,7 +108,7 @@ async function ensureDeps() {
   }
   try {
     const eventsMod = require('events');
-    const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 64);
+    const max = Number(process?.env?.NOSTR_MAX_WS_LISTENERS ?? 200);
     if (Number.isFinite(max) && max > 0) {
       if (typeof eventsMod.setMaxListeners === 'function') eventsMod.setMaxListeners(max);
       if (eventsMod.EventEmitter && typeof eventsMod.EventEmitter.defaultMaxListeners === 'number') {

@@ -1,13 +1,30 @@
+// @ts-ignore
+import telegramPlugin from "@elizaos/plugin-telegram";
+// @ts-ignore
+import discordPlugin from "@elizaos/plugin-discord";
+// @ts-ignore
+import sqlPlugin from "@elizaos/plugin-sql";
+// @ts-ignore
+import bootstrapPlugin from "@elizaos/plugin-bootstrap";
+// @ts-ignore
+import openrouterPlugin from "@elizaos/plugin-openrouter";
+// @ts-ignore
+import openaiPlugin from "@elizaos/plugin-openai";
+// @ts-ignore
+import knowledgePlugin from "@elizaos/plugin-knowledge";
+// @ts-ignore
+import twitterPlugin from "@elizaos/plugin-twitter";
+// @ts-ignore
+import nostrPlugin from "pixel-plugin-nostr";
+
 export const plugins = [
-  "@elizaos/plugin-telegram",
-  "@elizaos/plugin-discord",
-  "@elizaos/plugin-sql",
-  "@elizaos/plugin-bootstrap",
-  "@elizaos/plugin-openrouter",
-  "@elizaos/plugin-openai",
-  "@elizaos/plugin-knowledge",
-  // "@elizaos/plugin-shell",
-  // '@elizaos/plugin-twitter',
-  "pixel-plugin-nostr",
-  "@elizaos/client-instagram",
+  telegramPlugin,
+  discordPlugin,
+  sqlPlugin,
+  bootstrapPlugin,
+  openrouterPlugin,
+  openaiPlugin,
+  knowledgePlugin,
+  twitterPlugin,
+  nostrPlugin,
 ];

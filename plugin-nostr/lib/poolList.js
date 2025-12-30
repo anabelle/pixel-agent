@@ -20,7 +20,11 @@ async function poolList(pool, relays, filters) {
       return [];
     }
   }
-  const filtersArr = Array.isArray(filters) && filters.length ? filters : [{}];
+  // Handle input variations (object or array)
+  const filtersArr = Array.isArray(filters) ? filters : [filters || {}];
+  // Workaround: Unbox single filter to avoid "not an object" array error in subscribeMany
+  const subArg = filtersArr.length === 1 ? filtersArr[0] : filtersArr;
+
   return await new Promise((resolve) => {
     const events = [];
     const seen = new Set();
@@ -32,15 +36,15 @@ async function poolList(pool, relays, filters) {
     const finish = () => {
       if (done) return;
       done = true;
-      try { if (unsub) unsub(); } catch {}
+      try { if (unsub) unsub(); } catch { }
       if (settleTimer) clearTimeout(settleTimer);
       if (safetyTimer) clearTimeout(safetyTimer);
       resolve(events);
     };
 
     try {
-  // Send all filters in one subscription to avoid opening multiple REQs per relay
-  unsub = pool.subscribeMany(relays, filtersArr, {
+      // Send all filters in one subscription to avoid opening multiple REQs per relay
+      unsub = pool.subscribeMany(relays, subArg, {
         onevent: (evt) => {
           if (evt && evt.id && !seen.has(evt.id)) {
             seen.add(evt.id);

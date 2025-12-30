@@ -5673,16 +5673,13 @@ Response (YES/NO):`;
 
     // Setup main event subscriptions
     try {
+      // NOTE: Passing a single filter object instead of array to avoid "not an object" errors
+      const filter = { kinds: [1, 4, 7, 14, 9735], '#p': [this.pkHex] };
+      logger.info(`[NOSTR] Subscribing with merged filter: ${JSON.stringify(filter)}`);
+
       this.listenUnsub = this.pool.subscribeMany(
         this.relays,
-        [
-          { kinds: [1], '#p': [this.pkHex] },
-          { kinds: [4], '#p': [this.pkHex] },
-          // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
-          { kinds: [14], '#p': [this.pkHex] },
-          { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
-          { kinds: [7], authors: undefined, limit: 0, '#p': [this.pkHex] },
-        ],
+        filter,
         {
           onevent: (evt) => {
             try {
@@ -5766,10 +5763,10 @@ Response (YES/NO):`;
     try {
       // Load current contacts (followed users)
       const contacts = await this._loadCurrentContacts();
-      // if (!contacts.size) {
-      //   logger.debug('[NOSTR] No contacts to follow for home feed');
-      //   return;
-      // }
+      if (!contacts.size) {
+        logger.debug('[NOSTR] No contacts to follow for home feed');
+        return;
+      }
 
       const authors = contacts.size ? Array.from(contacts) : [];
       logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
@@ -5777,7 +5774,7 @@ Response (YES/NO):`;
       // Subscribe to posts from followed users
       this.homeFeedUnsub = this.pool.subscribeMany(
         this.relays,
-        [{ kinds: [1], limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last hour
+        { kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }, // Last 24 hours
         {
           onevent: (evt) => {
             this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
@@ -5834,7 +5831,8 @@ Response (YES/NO):`;
       const since = Math.floor(Date.now() / 1000) - 1800; // Last 30 minutes
 
       // Fetch recent posts from followed users
-      const events = await this._list(this.relays, [{ kinds: [1], authors, limit: 50, since }]);
+      // NOTE: Passing filter object directly
+      const events = await this._list(this.relays, { kinds: [1], authors, limit: 50, since });
 
       if (!events.length) {
         logger.debug('[NOSTR] No recent posts in home feed');
@@ -7488,6 +7486,18 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
       return await this.userProfileManager.getUserRecommendations(pubkey, limit);
     } catch (err) {
       this.logger.debug('[NOSTR] Failed to get user recommendations:', err.message);
+      return [];
+    }
+  }
+
+  async _list(relays, filters) {
+    if (!this.pool) return [];
+    try {
+      // Workaround: Unboxing single-element filter arrays to avoid "not an object" errors
+      const finalFilters = (Array.isArray(filters) && filters.length === 1) ? filters[0] : filters;
+      return await this.pool.list(relays, finalFilters);
+    } catch (e) {
+      logger.error(`[NOSTR] _list failed: ${e.message}`);
       return [];
     }
   }

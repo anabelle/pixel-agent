@@ -5,7 +5,7 @@ const { poolList } = require('./poolList');
 async function loadCurrentContacts(pool, relays, pkHex) {
   if (!pool || !pkHex) return new Set();
   try {
-    const events = await poolList(pool, relays, [{ kinds: [3], authors: [pkHex], limit: 2 }]);
+    const events = await poolList(pool, relays, { kinds: [3], authors: [pkHex], limit: 2 });
     if (!events || !events.length) return new Set();
     const latest = events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
     const pTags = Array.isArray(latest.tags) ? latest.tags.filter((t) => t[0] === 'p') : [];
@@ -31,7 +31,7 @@ async function publishContacts(pool, relays, sk, newSet, buildContactsFn, finali
 async function loadMuteList(pool, relays, pkHex) {
   if (!pool || !pkHex) return new Set();
   try {
-    const events = await poolList(pool, relays, [{ kinds: [10000], authors: [pkHex], limit: 2 }]);
+    const events = await poolList(pool, relays, { kinds: [10000], authors: [pkHex], limit: 2 });
     if (!events || !events.length) return new Set();
     const latest = events.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
     const pTags = Array.isArray(latest.tags) ? latest.tags.filter((t) => t[0] === 'p') : [];

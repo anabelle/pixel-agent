@@ -1817,10 +1817,7 @@ Response (YES/NO):`;
     }
   }
 
-  async _list(relays, filters) {
-    const { poolList } = require('./poolList');
-    return poolList(this.pool, relays, filters);
-  }
+
 
   async _publishContacts(newSet) {
     const { publishContacts } = require('./contacts');

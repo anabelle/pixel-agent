@@ -28,7 +28,7 @@ const { pickDiscoveryTopics, isSemanticMatch, isQualityAuthor, selectFollowCandi
 const { buildPostPrompt, buildReplyPrompt, buildDmReplyPrompt, buildZapThanksPrompt, buildDailyDigestPostPrompt, buildPixelBoughtPrompt, buildAwarenessPostPrompt, extractTextFromModelResult, sanitizeWhitelist } = require('./text');
 const { getUserHistory } = require('./providers/userHistoryProvider');
 const { getConversationIdFromEvent, extractTopicsFromEvent, isSelfAuthor } = require('./nostr');
-const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey } = require('./zaps');
+const { getZapAmountMsats, getZapTargetEventId, generateThanksText, getZapSenderPubkey, getZapMessage } = require('./zaps');
 const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRepost, buildContacts, buildMuteList } = require('./eventFactory');
 const { ContextAccumulator } = require('./contextAccumulator');
 const { NarrativeContextProvider } = require('./narrativeContextProvider');
@@ -660,7 +660,8 @@ class NostrService {
       );
       const result = response?.trim().toUpperCase();
       const isRelevant = result.startsWith('YES');
-      logger.debug(`[NOSTR] Home feed analysis result for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - "${response?.slice(0, 150)}"`);
+      const resultStr = isRelevant ? 'YES' : 'NO';
+      logger.info(`[NOSTR] Home feed analysis result for ${evt.id.slice(0, 8)}: ${resultStr} - "${response?.slice(0, 150)}"`);
       return isRelevant;
     } catch (err) {
       logger.debug('[NOSTR] Failed to analyze post for interaction:', err?.message || err);
@@ -4577,7 +4578,7 @@ Response (YES/NO):`;
         this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
         return;
       }
-
+      try { logger?.info?.(`[NOSTR] Received Mention from ${evt.pubkey.slice(0, 8)} (${evt.id.slice(0, 8)}): "${evt.content}"`); } catch { }
 
       // Check if the mention is relevant and worth responding to
       const isRelevant = await this._isRelevantMention(evt);
@@ -4903,7 +4904,7 @@ Response (YES/NO):`;
       const evtTemplate = buildReaction(parentEvt, symbol);
       const signed = this._finalizeEvent(evtTemplate);
       await this.pool.publish(this.relays, signed);
-      this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${evtTemplate.content}" (original: "${parentEvt.content.slice(0, 50)}…")`);
+      this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${symbol}" (content: "${parentEvt.content.slice(0, 200)}${parentEvt.content.length > 200 ? '...' : ''}")`);
       // Record reaction as a lightweight interaction for the author
       try {
         if (this.userProfileManager && parentEvt.pubkey) {
@@ -4999,7 +5000,8 @@ Response (YES/NO):`;
       const { buildZapThanksPost } = require('./zapHandler');
       const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
       const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
-      logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}. Generating thanks reply to ${String(parentLog || '').slice(0, 8)}.`);
+      const zapMessage = getZapMessage(evt);
+      logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}${zapMessage ? ` with message: "${zapMessage}"` : ''}. Generating thanks reply.`);
       await this.postReply(prepared.parent, prepared.text, prepared.options);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => { });
       // Record a zap interaction for the sender (improves history)
@@ -5679,6 +5681,7 @@ Response (YES/NO):`;
           // Also listen for sealed DMs (NIP-24/44) kind 14 when addressed to us
           { kinds: [14], '#p': [this.pkHex] },
           { kinds: [9735], authors: undefined, limit: 0, '#p': [this.pkHex] },
+          { kinds: [7], authors: undefined, limit: 0, '#p': [this.pkHex] },
         ],
         {
           onevent: (evt) => {
@@ -5712,6 +5715,12 @@ Response (YES/NO):`;
               ];
               if (botPatterns.some(pattern => pattern.test(evt.content))) {
                 logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
+                return;
+              }
+
+              if (evt.kind === 7) {
+                const targetTag = evt.tags.find(t => t && t[0] === 'e');
+                logger.info(`[LIKE] Received reaction "${evt.content}" from ${evt.pubkey.slice(0, 8)} for event ${targetTag ? targetTag[1].slice(0, 8) : 'unknown'}`);
                 return;
               }
 
@@ -5995,7 +6004,7 @@ Response (YES/NO):`;
       const evtTemplate = buildRepost(parentEvt);
       const signed = this._finalizeEvent(evtTemplate);
       await this.pool.publish(this.relays, signed);
-      this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)}`);
+      this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)} from ${parentEvt.pubkey.slice(0, 8)} (content: "${parentEvt.content.slice(0, 200)}${parentEvt.content.length > 200 ? '...' : ''}")`);
 
       this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
       await this._saveInteractionCounts();
@@ -6027,7 +6036,7 @@ Response (YES/NO):`;
       const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
       const signed = this._finalizeEvent(evtTemplate);
       await this.pool.publish(this.relays, signed);
-      this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)}`);
+      this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)} with: "${quoteText}"`);
 
       this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
       await this._saveInteractionCounts();

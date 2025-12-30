@@ -1934,9 +1934,9 @@ OUTPUT JSON:
         timestamp: now
       };
 
-      this.logger.debug(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
+      this.logger.info(`[CONTEXT] 📊 TREND ALERT: ${activityChange} activity, ${topicSpikes.length} topic spikes, ${userSpikes.length} user spikes, ${newUsers} new users`);
       if (topicSpikes.length > 0) {
-        this.logger.debug(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
+        this.logger.info(`[CONTEXT] 🚀 Topic spikes: ${topicSpikes.map(t => `${t.topic}(${t.ratio}x)`).join(', ')}`);
       }
 
       // Store trend detection
@@ -1961,7 +1961,7 @@ OUTPUT JSON:
               const dev = (t.development ?? 0).toFixed(2);
               return `${t.topic} (score ${score}, vel ${vel}, nov ${nov}, dev ${dev})`;
             }).join(' | ');
-            this.logger.debug(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
+            this.logger.info(`[CONTEXT] 🔥 ADAPTIVE TRENDING: ${pretty}`);
           }
         } else if (this._lastTrendingSignature) {
           // Reset signature when no trending topics

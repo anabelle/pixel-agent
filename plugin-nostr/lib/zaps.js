@@ -64,7 +64,7 @@ function generateThanksText(amountMsats) {
   ];
   const pick = () => base[Math.floor(Math.random() * base.length)];
   if (!amountMsats) {
-    return `zap received ,  ${pick()} ⚡️💛`; 
+    return `zap received ,  ${pick()} ⚡️💛`;
   }
   const sats = Math.floor(amountMsats / 1000);
   if (sats >= 10000) return `⚡️ ${sats} sats, i’m screaming, thank you!! ${pick()} 🙏💛`;
@@ -90,7 +90,26 @@ function getZapSenderPubkey(evt) {
       const m = raw.match(/"pubkey"\s*:\s*"([0-9a-fA-F]{64})"/);
       if (m && m[1]) return m[1].toLowerCase();
     }
-  } catch {}
+  } catch { }
+  return null;
+}
+
+// Extract the message/comment from the NIP-57 description tag
+function getZapMessage(evt) {
+  try {
+    if (!evt || !Array.isArray(evt.tags)) return null;
+    const descTag = evt.tags.find((t) => t && t[0] === 'description' && typeof t[1] === 'string');
+    if (!descTag) return null;
+    const raw = descTag[1];
+    try {
+      const obj = JSON.parse(raw);
+      return obj && typeof obj.content === 'string' ? obj.content : null;
+    } catch {
+      // Fallback: regex search for content field
+      const m = raw.match(/"content"\s*:\s*"([^"]*)"/);
+      if (m && m[1]) return m[1];
+    }
+  } catch { }
   return null;
 }
 
@@ -99,5 +118,6 @@ module.exports = {
   getZapTargetEventId,
   generateThanksText,
   getZapSenderPubkey,
+  getZapMessage,
   parseBolt11Msats,
 };

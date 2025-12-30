@@ -160,15 +160,12 @@ docker compose logs -f agent
 # Install dependencies (includes @elizaos/cli)
 bun install
 
-# Set DATABASE_URL in .env
-echo 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/pixel_agent' >> .env
-
 # Build and start
 bun run build
 bun run start
 ```
 
-**Note:** The agent uses PostgreSQL for production persistence. SQLite is no longer the default.
+**Note:** ElizaOS v1.6+ uses **embedded PGLite** (PostgreSQL 17) stored at `.eliza/.elizadb/`. No external database configuration needed - the agent manages its own persistence automatically.
 
 ## 🔧 Platform-Specific Setup
 

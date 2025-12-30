@@ -47,7 +47,7 @@ EXPOSE 3003
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --spider -q http://localhost:3003/health || exit 1
+    CMD bun -e "fetch('http://localhost:3003/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 # Start agent directly (logs go to stdout for docker logs)
 CMD ["bun", "./node_modules/@elizaos/cli/dist/index.js", "start", "--character", "./character.json", "--port", "3003"]

@@ -13,7 +13,7 @@ function getConversationIdFromEvent(evt) {
     const root = eTags.find((t) => t[3] === 'root');
     if (root && root[1]) return root[1];
     if (eTags.length && eTags[0][1]) return eTags[0][1];
-  } catch {}
+  } catch { }
   return evt?.id || 'nostr';
 }
 
@@ -33,36 +33,33 @@ const FORBIDDEN_TOPIC_WORDS = new Set([
 ]);
 
 // Terms too generic/common for timeline lore and watchlist - focus on specific topics instead
+// Includes Nostr infrastructure/services that appear in URLs but aren't meaningful topics
+const TIMELINE_LORE_IGNORED_TERMS_BASE = [
+  // Generic crypto/tech terms
+  'bitcoin', 'btc', 'nostr', 'crypto', 'cryptocurrency', 'blockchain',
+  'decentralized', 'lightning', 'ln', 'sats', 'satoshis', 'web3',
+  'protocol', 'network', 'technology', 'tech', 'development', 'community',
+  'discussion', 'conversation', 'post', 'posts', 'posting',
+  'update', 'updates', 'news', 'today', 'yesterday', 'tomorrow',
+  // Nostr infrastructure/services (appear in URLs, not real topics)
+  'blossom', 'primal', 'damus', 'snort', 'nostrudel', 'amethyst',
+  'coracle', 'iris', 'naddr', 'nevent', 'npub', 'nprofile', 'note',
+  'relay', 'relays', 'nostr.band', 'nos.social', 'nostter', 'satellite',
+  'void.cat', 'nostrcheck', 'nostrimg', 'imgproxy', 'image',
+  // Common URL/service fragments
+  'cdn', 'https', 'http', 'www', 'com', 'org', 'net', 'io',
+];
+
+// Allow adding custom ignored words via environment variable
+const CUSTOM_IGNORED_TOPICS = (() => {
+  const envVal = process.env.CONTEXT_IGNORED_TOPICS;
+  if (!envVal) return [];
+  return envVal.split(',').map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
+})();
+
 const TIMELINE_LORE_IGNORED_TERMS = new Set([
-  'bitcoin',
-  'btc',
-  'nostr',
-  'crypto',
-  'cryptocurrency',
-  'blockchain',
-  'decentralized',
-  'lightning',
-  'ln',
-  'sats',
-  'satoshis',
-  'web3',
-  'protocol',
-  'network',
-  'technology',
-  'tech',
-  'development',
-  'community',
-  'discussion',
-  'conversation',
-  'post',
-  'posts',
-  'posting',
-  'update',
-  'updates',
-  'news',
-  'today',
-  'yesterday',
-  'tomorrow'
+  ...TIMELINE_LORE_IGNORED_TERMS_BASE,
+  ...CUSTOM_IGNORED_TOPICS
 ]);
 
 const STOPWORDS = new Set([
@@ -161,12 +158,12 @@ const _topicExtractors = new Map();
 
 function _getTopicExtractor(runtime) {
   const key = runtime?.agentId || 'default';
-  
+
   if (!_topicExtractors.has(key)) {
     const { TopicExtractor } = require('./topicExtractor');
     _topicExtractors.set(key, new TopicExtractor(runtime, runtime?.logger));
   }
-  
+
   return _topicExtractors.get(key);
 }
 
@@ -178,7 +175,7 @@ function getTopicExtractorStats(runtime) {
 async function destroyTopicExtractor(runtime) {
   const key = runtime?.agentId || 'default';
   const extractor = _topicExtractors.get(key);
-  
+
   if (extractor) {
     // Flush any pending events before destroying
     await extractor.flush();
@@ -200,16 +197,16 @@ async function extractTopicsFromEvent(event, runtime) {
   try {
     const extractor = _getTopicExtractor(runtime);
     const topics = await extractor.extractTopics(event);
-    
+
     if (debugLog) {
       debugLog(`[NOSTR] Final topics for ${event.id?.slice(0, 8)}: [${topics.join(', ')}]`);
     }
-    
+
     return topics;
   } catch (error) {
     const message = error?.message || String(error);
     debugLog?.(`[NOSTR] Topic extraction failed: ${message}`);
-    
+
     // Fallback to fast extraction
     return _extractFallbackTopics(event.content, EXTRACTED_TOPICS_LIMIT);
   }
@@ -260,13 +257,13 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
     const recipientTag = evt.tags.find(tag => tag[0] === 'p');
     if (!recipientTag || !recipientTag[1]) return null;
 
-  const recipientPubkey = String(recipientTag[1]).toLowerCase();
-  const senderPubkey = String(evt.pubkey).toLowerCase();
-  const selfPubkey = String(publicKey).toLowerCase();
+    const recipientPubkey = String(recipientTag[1]).toLowerCase();
+    const senderPubkey = String(evt.pubkey).toLowerCase();
+    const selfPubkey = String(publicKey).toLowerCase();
 
     // Determine which key to use for decryption
     // If we're the recipient, use sender's pubkey; if we're the sender, use recipient's pubkey
-  const peerPubkey = (recipientPubkey === selfPubkey) ? senderPubkey : recipientPubkey;
+    const peerPubkey = (recipientPubkey === selfPubkey) ? senderPubkey : recipientPubkey;
 
     // Prefer nostr-tools if available
     if (decryptFn) {
@@ -295,8 +292,8 @@ async function decryptDirectMessage(evt, privateKey, publicKey, decryptFn) {
 async function encryptNIP04Manual(privateKey, peerPubkey, message) {
   try {
     const crypto = require('crypto');
-  const priv = _normalizePrivKeyHex(privateKey) || privateKey;
-  const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
+    const priv = _normalizePrivKeyHex(privateKey) || privateKey;
+    const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
 
     // Generate random IV
     const iv = crypto.randomBytes(16);
@@ -340,9 +337,9 @@ async function decryptNIP04Manual(privateKey, peerPubkey, encryptedContent) {
       throw new Error('Invalid IV length');
     }
 
-  // Calculate shared secret
-  const priv = _normalizePrivKeyHex(privateKey) || privateKey;
-  const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
+    // Calculate shared secret
+    const priv = _normalizePrivKeyHex(privateKey) || privateKey;
+    const sharedX = _getSharedXHex(priv, String(peerPubkey).toLowerCase());
 
     const decipher = crypto.createDecipheriv(
       'aes-256-cbc',

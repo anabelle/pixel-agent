@@ -4111,7 +4111,11 @@ Response (YES/NO):`;
         const evtTemplate = buildTextNote(text);
         try {
           const signed = this._finalizeEvent(evtTemplate);
-          await this.pool.publish(this.relays, signed);
+          const { success, failCount, error } = await this._safePublish(signed);
+          if (!success) {
+            this.logger.warn(`[NOSTR] Post failed on all ${failCount} relays: ${error}`);
+            throw new Error(error);
+          }
           this.logger.info(`[POST] Published note (${text.length} chars, type: ${postType})`);
           return true;
         } catch (err) {
@@ -4554,6 +4558,28 @@ Response (YES/NO):`;
     }
   }
 
+  /**
+   * Safely publish an event to relays, handling per-relay errors gracefully.
+   * Returns { success: boolean, successCount: number, failCount: number, error?: string }
+   */
+  async _safePublish(signed) {
+    try {
+      const publishResults = this.pool.publish(this.relays, signed);
+      const results = await Promise.allSettled(
+        Array.isArray(publishResults) ? publishResults : [publishResults]
+      );
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const failCount = results.filter(r => r.status === 'rejected').length;
+      if (successCount === 0) {
+        const firstError = results.find(r => r.status === 'rejected')?.reason;
+        return { success: false, successCount, failCount, error: firstError?.message || String(firstError) };
+      }
+      return { success: true, successCount, failCount };
+    } catch (err) {
+      return { success: false, successCount: 0, failCount: this.relays.length, error: err?.message || String(err) };
+    }
+  }
+
   async handleMention(evt) {
     try {
       if (!evt || !evt.id) return;
@@ -4868,7 +4894,11 @@ Response (YES/NO):`;
         logger.info(`[NOSTR] postReply tags: e=${eCount} p=${pCount} parent=${String(parentId).slice(0, 8)} root=${rootId ? String(rootId).slice(0, 8) : '-'}${expectPk ? ` mentionExpected=${hasExpected ? 'yes' : 'no'}` : ''}`);
       } catch { }
       const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
+      const { success, failCount, error } = await this._safePublish(signed);
+      if (!success) {
+        logger.warn(`[NOSTR] Reply failed on all ${failCount} relays: ${error}`);
+        return false;
+      }
       const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
       this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content}"`);
 
@@ -4905,7 +4935,17 @@ Response (YES/NO):`;
       if (this.pkHex && isSelfAuthor(parentEvt, this.pkHex)) { logger.debug('[NOSTR] Skipping reaction to self-authored event'); return false; }
       const evtTemplate = buildReaction(parentEvt, symbol);
       const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
+
+      const { success, successCount, failCount, error } = await this._safePublish(signed);
+
+      if (!success) {
+        logger.debug(`[NOSTR] Reaction failed on all ${failCount} relays: ${error}`);
+        return false;
+      }
+
+      if (failCount > 0) {
+        logger.debug(`[NOSTR] Reaction partially succeeded: ${successCount} ok, ${failCount} failed`);
+      }
       this.logger.info(`[NOSTR] Reacted to ${parentEvt.id.slice(0, 8)} with "${symbol}" (content: "${parentEvt.content.slice(0, 200)}${parentEvt.content.length > 200 ? '...' : ''}")`);
       // Record reaction as a lightweight interaction for the author
       try {
@@ -4963,7 +5003,11 @@ Response (YES/NO):`;
       if (!evtTemplate) return false;
 
       const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
+      const { success, failCount, error } = await this._safePublish(signed);
+      if (!success) {
+        logger.warn(`[NOSTR] DM send failed on all ${failCount} relays: ${error}`);
+        return false;
+      }
 
       this.logger.info(`[NOSTR] Sent DM to ${recipientPubkey.slice(0, 8)} (${text.length} chars)`);
       return true;
@@ -6019,7 +6063,11 @@ Response (YES/NO):`;
 
       const evtTemplate = buildRepost(parentEvt);
       const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
+      const { success, failCount, error } = await this._safePublish(signed);
+      if (!success) {
+        logger.warn(`[NOSTR] Repost failed on all ${failCount} relays: ${error}`);
+        return false;
+      }
       this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)} from ${parentEvt.pubkey.slice(0, 8)} (content: "${parentEvt.content.slice(0, 200)}${parentEvt.content.length > 200 ? '...' : ''}")`);
 
       this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
@@ -6051,7 +6099,11 @@ Response (YES/NO):`;
 
       const evtTemplate = buildQuoteRepost(parentEvt, quoteText);
       const signed = this._finalizeEvent(evtTemplate);
-      await this.pool.publish(this.relays, signed);
+      const { success, failCount, error } = await this._safePublish(signed);
+      if (!success) {
+        logger.warn(`[NOSTR] Quote repost failed on all ${failCount} relays: ${error}`);
+        return false;
+      }
       this.logger.info(`[NOSTR] Quote reposted ${parentEvt.id.slice(0, 8)} with: "${quoteText}"`);
 
       this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);

@@ -186,7 +186,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
         runtime,
         {
           id,
-          entityId,
+          userId: entityId,
           roomId,
           agentId: runtime.agentId,
           content,
@@ -205,7 +205,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   // Fallbacks
   if (typeof runtime?.createMemory === 'function') {
     try {
-      return await runtime.createMemory({ id, entityId, roomId, agentId: runtime.agentId, content, createdAt: Date.now() }, 'messages');
+      return await runtime.createMemory({ id, userId: entityId, roomId, agentId: runtime.agentId, content, createdAt: Date.now() }, 'messages');
     } catch (e) {
       logger?.debug?.('[NOSTR] saveInteractionMemory direct create failed:', e?.message || e);
     }

@@ -157,7 +157,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   const body = { platform: 'nostr', kind, eventId: evt?.id, author: evt?.pubkey, content: evt?.content, timestamp: Date.now(), ...extra };
 
   // Compute context IDs
-  let roomId, id, entityId;
+  let roomId, id, entityId, worldId;
   try {
     roomId = createUniqueUuid(runtime, getConversationIdFromEvent(evt));
   } catch { }
@@ -166,7 +166,13 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   } catch { }
   try {
     entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
+    worldId = entityId; // Use the same pubkey-based ID for simplicity, matching ensureNostrContext
   } catch { }
+
+  // Also try to get worldId from extra if provided
+  if (extra && extra.worldId) {
+    worldId = extra.worldId;
+  }
 
   // Persist a top-level inReplyTo for replies so _restoreHandledEventIds can recover handled IDs across restarts
   const isReplyKind = typeof kind === 'string' && kind.toLowerCase().includes('reply');
@@ -181,32 +187,30 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   // Use createMemorySafe with retries and duplicate tolerance
   try {
     if (id && entityId && roomId && typeof runtime?.createMemory === 'function') {
-      const { createMemorySafe } = require('./context');
-      const created = await createMemorySafe(
-        runtime,
-        {
-          id,
-          userId: entityId,
-          entityId, // Include both for compatibility with plugin-sql (entityId) and adapter-postgres (userId)
-          roomId,
-          agentId: runtime.agentId,
-          content,
-          createdAt: Date.now(),
-        },
-        'messages',
-        3,
-        logger
-      );
+      const memory = {
+        id,
+        userId: entityId,
+        entityId,
+        roomId,
+        agentId: runtime.agentId,
+        worldId: worldId || entityId, // worldId is crucial for plugin-sql
+        world_id: worldId || entityId, // some adapters use snake_case
+        content,
+        unique: true,
+        metadata: extra?.metadata || {},
+        createdAt: Date.now(),
+      };
+      const created = await createMemorySafe(runtime, memory, 'messages', 3, logger);
       return created;
     }
   } catch (e) {
-    logger?.debug?.('[NOSTR] saveInteractionMemory createMemorySafe failed, attempting direct create:', e?.message || e);
+    logger?.debug?.('[NOSTR] saveInteractionMemory createMemorySafe failed:', e?.message || e);
   }
 
   // Fallbacks
   if (typeof runtime?.createMemory === 'function') {
     try {
-      return await runtime.createMemory({ id, userId: entityId, entityId, roomId, agentId: runtime.agentId, content, createdAt: Date.now() }, 'messages');
+      return await runtime.createMemory({ id, userId: entityId, entityId, roomId, agentId: runtime.agentId, worldId, content, createdAt: Date.now() }, 'messages');
     } catch (e) {
       logger?.debug?.('[NOSTR] saveInteractionMemory direct create failed:', e?.message || e);
     }

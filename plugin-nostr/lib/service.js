@@ -5694,77 +5694,51 @@ Response (YES/NO):`;
     if (!this.relays.length || !this.pool || !this.pkHex) {
       return;
     }
-
     // Setup main event subscriptions
     try {
-      // NOTE: Passing array of filters as expected by standard
-      const filter = { kinds: [1, 4, 7, 14, 9735], '#p': [this.pkHex] };
-      logger.info(`[NOSTR] Subscribing with merged filter: ${JSON.stringify(filter)}`);
+      const safePk = String(this.pkHex || '').trim();
+      const filter = { kinds: [1, 4, 7, 14, 9735], '#p': [safePk] };
 
-      this.listenUnsub = this.pool.subscribeMany(
+      const sub = this.pool.subscribeMany(
         this.relays,
-        [filter],
+        filter,
         {
           onevent: (evt) => {
             try {
-              this.lastEventReceived = Date.now(); // Update last event timestamp
+              this.lastEventReceived = Date.now();
+              if (evt.created_at && evt.created_at < this.messageCutoff) return;
 
-              // Fresh start failsafe: skip events before cutoff (Jan 1, 2026 default)
-              if (evt.created_at && evt.created_at < this.messageCutoff) {
-                // Skip noise from old mentions/DMs
-                return;
-              }
+              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${String(evt.content || '').slice(0, 140)}`);
+              if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
 
-              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${evt.content.slice(0, 140)}`);
-              if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { logger.debug('[NOSTR] Skipping self-authored event'); return; }
+              if (this.handledEventIds.has(evt.id)) return;
+              this.handledEventIds.add(evt.id);
 
-              // Ignore known bot pubkeys to prevent loops
-              const botPubkeys = new Set([
-                '9e3004e9b0a3ae9ed3ae524529557f746ee4ff13e8cc36aee364b3233b548bb8' // satscan bot
-              ]);
-              if (botPubkeys.has(evt.pubkey)) {
-                logger.debug(`[NOSTR] Ignoring event from known bot ${evt.pubkey.slice(0, 8)}`);
-                return;
-              }
+              const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
+              if (botPatterns.some(pattern => pattern.test(evt.content))) return;
 
-              // Ignore bot-like content patterns
-              const botPatterns = [
-                /^Unknown command\. Try: /i,
-                /^\/help/i,
-                /^Command not found/i,
-                /^Please use \/help/i
-              ];
-              if (botPatterns.some(pattern => pattern.test(evt.content))) {
-                logger.debug(`[NOSTR] Ignoring bot-like content from ${evt.pubkey.slice(0, 8)}`);
-                return;
-              }
+              if (evt.kind === 7) return;
 
-              if (evt.kind === 7) {
-                const targetTag = evt.tags.find(t => t && t[0] === 'e');
-                logger.info(`[LIKE] Received reaction "${evt.content}" from ${evt.pubkey.slice(0, 8)} for event ${targetTag ? targetTag[1].slice(0, 8) : 'unknown'}`);
-                return;
-              }
-
-              if (evt.kind === 4) { this.handleDM(evt).catch((err) => logger.debug('[NOSTR] handleDM error:', err?.message || err)); return; }
-              if (evt.kind === 14) { this.handleSealedDM(evt).catch((err) => logger.debug('[NOSTR] handleSealedDM error:', err?.message || err)); return; }
-              if (evt.kind === 9735) { this.handleZap(evt).catch((err) => logger.debug('[NOSTR] handleZap error:', err?.message || err)); return; }
-              if (evt.kind === 1) { this.handleMention(evt).catch((err) => logger.warn('[NOSTR] handleMention error:', err?.message || err)); return; }
-              logger.debug(`[NOSTR] Unhandled event kind ${evt.kind} from ${evt.pubkey}`);
+              if (evt.kind === 4) { this.handleDM(evt).catch(() => { }); return; }
+              if (evt.kind === 14) { this.handleSealedDM(evt).catch(() => { }); return; }
+              if (evt.kind === 9735) { this.handleZap(evt).catch(() => { }); return; }
+              if (evt.kind === 1) { this.handleMention(evt).catch(() => { }); return; }
             } catch (outerErr) {
               logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
             }
           },
           oneose: () => {
             logger.debug('[NOSTR] Mention subscription OSE');
-            this.lastEventReceived = Date.now(); // Update on EOSE as well
+            this.lastEventReceived = Date.now();
           },
           onclose: (reason) => {
             logger.warn(`[NOSTR] Subscription closed: ${reason}`);
-            // Don't immediately reconnect here as it might cause a loop
-            // Let the connection monitor handle it
           }
         }
       );
+
+      this.listenUnsub = () => { try { sub.close(); } catch { } };
+
       logger.info(`[NOSTR] Subscriptions established on ${this.relays.length} relays`);
     } catch (err) {
       logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
@@ -5792,34 +5766,52 @@ Response (YES/NO):`;
         return;
       }
 
-      const authors = contacts.size ? Array.from(contacts) : [];
+      const authors = (Array.from(contacts) || []).filter(Boolean).map(s => String(s).trim());
+      if (!authors.length) {
+        logger.debug('[NOSTR] No valid authors to follow for home feed');
+        return;
+      }
       logger.info(`[NOSTR] Starting home feed with ${authors.length} followed users`);
 
-      // Subscribe to posts from followed users
-      this.homeFeedUnsub = this.pool.subscribeMany(
-        this.relays,
-        [{ kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last 24 hours
+      // Chunk authors and use array of filters
+      const CHUNK_SIZE = 50;
+      const filters = [];
+      for (let i = 0; i < authors.length; i += CHUNK_SIZE) {
+        filters.push({
+          kinds: [1],
+          authors: authors.slice(i, i + CHUNK_SIZE),
+          limit: 10,
+          since: Math.floor(Date.now() / 1000) - 86400
+        });
+      }
+
+      const request = [];
+      this.relays.forEach(url => {
+        filters.forEach(filter => {
+          request.push({ url, filter });
+        });
+      });
+
+      const sub = this.pool.subscribeMap(
+        request,
         {
           onevent: (evt) => {
-            this.lastEventReceived = Date.now(); // Update last event timestamp for connection health
+            this.lastEventReceived = Date.now();
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
-            // Filter out muted users at the earliest stage
-            if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) {
-              // Removed low-value debug log
-              return;
-            }
-            // Real-time event handling for quality tracking only
+            if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
             this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
           },
           oneose: () => {
             logger.debug('[NOSTR] Home feed subscription OSE');
-            this.lastEventReceived = Date.now(); // Update on EOSE as well
+            this.lastEventReceived = Date.now();
           },
-          onclose: (reason) => {
-            logger.warn(`[NOSTR] Home feed subscription closed: ${reason}`);
+          onclose: (reasons) => {
+            logger.warn(`[NOSTR] Home feed subscription closed: ${JSON.stringify(reasons)}`);
           }
         }
       );
+
+      this.homeFeedUnsub = () => { try { sub.close(); } catch { } };
 
       // Schedule periodic home feed processing
       this.scheduleNextHomeFeedCheck();

@@ -39,8 +39,8 @@ async function poolList(pool, relays, filters) {
     })
     .filter(o => o && typeof o === 'object' && Object.keys(o).length > 0);
 
-  // Workaround: Unbox single filter to avoid "not an object" array error in subscribeMany
-  const subArg = sanitized.length === 1 ? sanitized[0] : sanitized;
+  // Ensure we always pass an array of filters as expected by nostr-tools v2
+  const subArg = sanitized;
 
   return await new Promise((resolve) => {
     const events = [];
@@ -60,11 +60,19 @@ async function poolList(pool, relays, filters) {
     };
 
     try {
-      // If there are no valid filters after sanitization, return empty
-      if (!subArg || (Array.isArray(subArg) && subArg.length === 0)) return resolve([]);
+      // If there are no valid filters after sanitization, or it's empty, return empty
+      if (!subArg || !Array.isArray(subArg) || subArg.length === 0) {
+        return resolve([]);
+      }
 
-      // Send all filters in one subscription to avoid opening multiple REQs per relay
-      unsub = pool.subscribeMany(relays, subArg, {
+      const request = [];
+      relays.forEach(url => {
+        subArg.forEach(filter => {
+          request.push({ url, filter });
+        });
+      });
+
+      const sub = pool.subscribeMap(request, {
         onevent: (evt) => {
           if (evt && evt.id && !seen.has(evt.id)) {
             seen.add(evt.id);
@@ -73,12 +81,13 @@ async function poolList(pool, relays, filters) {
         },
         oneose: () => {
           if (settleTimer) clearTimeout(settleTimer);
-          // small settle to allow late events to flush
           settleTimer = setTimeout(finish, 200);
-        },
+        }
       });
+      unsub = () => { try { sub.close(); } catch { } };
+
       // safety in case relays misbehave
-      safetyTimer = setTimeout(finish, 2500);
+      safetyTimer = setTimeout(finish, 4000);
     } catch (err) {
       // If subscribe fails due to invalid filter shapes, log and return empty
       try { console.warn('[NOSTR][poolList] subscribeMany failed:', err?.message || err); } catch { }

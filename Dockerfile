@@ -50,4 +50,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget --spider -q http://localhost:3003/health || exit 1
 
 # Start agent directly (logs go to stdout for docker logs)
-CMD ["bun", "./node_modules/@elizaos/cli/dist/index.js", "start", "--character", "./character.json", "--port", "3003"]
+# Preload suppress-warnings.ts to disable AI SDK logging
+CMD ["bun", "-r", "./suppress-warnings.ts", "./node_modules/@elizaos/cli/dist/index.js", "start", "--character", "./character.json", "--port", "3003"]

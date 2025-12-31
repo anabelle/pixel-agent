@@ -39,6 +39,12 @@ WORKDIR /app
 COPY --chown=bun:bun package.json bun.lock* ./
 RUN bun install --trust
 
+# Fix Telegram plugin image processing bug (useModel expects object, not string)
+RUN sed -i 's/ModelType.IMAGE_DESCRIPTION,$/ModelType.IMAGE_DESCRIPTION,/' \
+    node_modules/@elizaos/plugin-telegram/dist/index.js && \
+    sed -i 's/          imageUrl$/          { imageUrl }/' \
+    node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # Copy source and build
 COPY --chown=bun:bun . .
 RUN bun run build && bun run build:character

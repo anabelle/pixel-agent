@@ -23,7 +23,7 @@ export const settings = {
   OPENROUTER_LARGE_MODEL:
     process.env.OPENROUTER_LARGE_MODEL || "anthropic/claude-3.5-sonnet",
   OPENROUTER_SMALL_MODEL:
-    process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-4o-mini",
+    process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
   OPENROUTER_IMAGE_MODEL:
     process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-4o",
   OPENROUTER_BASE_URL:

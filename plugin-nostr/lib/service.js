@@ -179,7 +179,12 @@ class NostrService {
           return 'mock-uuid';
         }
       } catch { }
-      return `${seed}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+      // Generate a valid UUID v4 from seed + random data
+      // This ensures the fallback produces valid UUIDs that PGLite can accept
+      const crypto = require('crypto');
+      const hash = crypto.createHash('sha256').update(`${seed}:${Date.now()}:${Math.random()}`).digest('hex');
+      // Format as UUID v4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+      return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)]}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     };
     const extractCoreUuid = (mod) => {
       if (!mod) return null;

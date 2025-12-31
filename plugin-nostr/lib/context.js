@@ -6,9 +6,9 @@ async function ensureNostrContext(runtime, userPubkey, usernameLike, conversatio
   const roomId = createUniqueUuid(runtime, conversationId);
   const entityId = createUniqueUuid(runtime, userPubkey);
   logger?.info?.(`[NOSTR] Ensuring context world/room/connection for pubkey=${String(userPubkey).slice(0, 8)} conv=${String(conversationId).slice(0, 8)}`);
-  await runtime.ensureWorldExists({ id: worldId, name: `${usernameLike || String(userPubkey).slice(0, 8)}'s Nostr`, agentId: runtime.agentId, serverId: userPubkey, metadata: { ownership: { ownerId: userPubkey }, nostr: { pubkey: userPubkey }, }, }).catch(() => {});
-  await runtime.ensureRoomExists({ id: roomId, name: `Nostr thread ${String(conversationId).slice(0, 8)}`, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: conversationId, serverId: userPubkey, worldId, }).catch(() => {});
-  await runtime.ensureConnection({ entityId, roomId, userName: usernameLike || userPubkey, name: usernameLike || userPubkey, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => {});
+  await runtime.ensureWorldExists({ id: worldId, name: `${usernameLike || String(userPubkey).slice(0, 8)}'s Nostr`, agentId: runtime.agentId, serverId: userPubkey, metadata: { ownership: { ownerId: userPubkey }, nostr: { pubkey: userPubkey }, }, }).catch(() => { });
+  await runtime.ensureRoomExists({ id: roomId, name: `Nostr thread ${String(conversationId).slice(0, 8)}`, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: conversationId, serverId: userPubkey, worldId, }).catch(() => { });
+  await runtime.ensureConnection({ entityId, roomId, userName: usernameLike || userPubkey, name: usernameLike || userPubkey, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => { });
   logger?.info?.(`[NOSTR] Context ensured world=${worldId} room=${roomId} entity=${entityId}`);
   return { worldId, roomId, entityId };
 }
@@ -21,11 +21,11 @@ async function ensureLNPixelsContext(runtime, deps) {
   const entityId = createUniqueUuid(runtime, 'lnpixels:system');
   try {
     logger?.info?.('[NOSTR] Ensuring LNPixels context (world/rooms/connection)');
-    await runtime.ensureWorldExists({ id: worldId, name: 'LNPixels', agentId: runtime.agentId, serverId: 'lnpixels', metadata: { system: true, source: 'lnpixels' } }).catch(() => {});
-    await runtime.ensureRoomExists({ id: canvasRoomId, name: 'LNPixels Canvas', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'lnpixels:canvas', serverId: 'lnpixels', worldId, }).catch(() => {});
-    await runtime.ensureConnection({ entityId, roomId: canvasRoomId, userName: 'lnpixels', name: 'LNPixels System', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => {});
+    await runtime.ensureWorldExists({ id: worldId, name: 'LNPixels', agentId: runtime.agentId, serverId: 'lnpixels', metadata: { system: true, source: 'lnpixels' } }).catch(() => { });
+    await runtime.ensureRoomExists({ id: canvasRoomId, name: 'LNPixels Canvas', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'lnpixels:canvas', serverId: 'lnpixels', worldId, }).catch(() => { });
+    await runtime.ensureConnection({ entityId, roomId: canvasRoomId, userName: 'lnpixels', name: 'LNPixels System', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => { });
     logger?.info?.(`[NOSTR] LNPixels context ensured world=${worldId} canvasRoom=${canvasRoomId} entity=${entityId}`);
-  } catch {}
+  } catch { }
   // Use canvas room as the locks room as well (avoids schema issues for extra room types)
   const locksRoomId = canvasRoomId;
   return { worldId, canvasRoomId, locksRoomId, entityId };
@@ -46,7 +46,10 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
         logger?.debug?.('[NOSTR] Failed to create UUID for seed', seed, err?.message || err);
       }
     }
-    return seed;
+    // Fallback: generate a valid UUID v4 from the seed
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(`${seed}:${Date.now()}:${Math.random()}`).digest('hex');
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)]}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   };
 
   const worldId = makeId('nostr:context');
@@ -71,8 +74,32 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
       agentId: runtime.agentId,
       serverId: 'nostr:context',
       metadata: { system: true, source: 'nostr' }
-    }).catch(() => {});
+    }).catch(() => { });
 
+    // Create the entity ONCE before creating rooms to avoid duplicate entity creation errors
+    // Each room will just link to this existing entity
+    await runtime.ensureConnection({
+      entityId,
+      roomId: rooms.dailyReports, // Use any room as the initial connection point
+      userName: 'nostr-context',
+      name: 'Nostr Context Engine',
+      source: 'nostr',
+      type: ChannelType ? ChannelType.FEED : undefined,
+      worldId,
+      metadata: {
+        name: 'Nostr Context Engine',
+        userName: 'nostr-context',
+        system: true,
+        source: 'nostr',
+        category: 'context-engine',
+        nostr: {
+          name: 'Nostr Context Engine',
+          userName: 'nostr-context'
+        }
+      }
+    }).catch(() => { });
+
+    // Now create rooms sequentially to avoid race conditions on entity creation
     const ensureRoom = async (roomId, name, channelId) => {
       if (!roomId) return;
       await runtime.ensureRoomExists({
@@ -83,29 +110,11 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
         channelId,
         serverId: 'nostr:context',
         worldId
-      }).catch(() => {});
-      await runtime.ensureConnection({
-        entityId,
-        roomId,
-        userName: 'nostr-context',
-        name: 'Nostr Context Engine',
-        source: 'nostr',
-        type: ChannelType ? ChannelType.FEED : undefined,
-        worldId,
-        metadata: {
-          name: 'Nostr Context Engine',
-          userName: 'nostr-context',
-          system: true,
-          source: 'nostr',
-          category: 'context-engine',
-          nostr: {
-            name: 'Nostr Context Engine',
-            userName: 'nostr-context'
-          }
-        }
-      }).catch(() => {});
+      }).catch(() => { });
+      // Skip ensureConnection here - entity already created above
     };
 
+    // Create rooms (entity already exists, so no duplicate entity errors)
     await Promise.all([
       ensureRoom(rooms.emergingStories, 'Nostr Emerging Stories', 'nostr:context:emerging'),
       ensureRoom(rooms.hourlyDigests, 'Nostr Hourly Digests', 'nostr:context:hourly'),
@@ -130,13 +139,13 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
   let lastErr = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-  logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
+      logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
       await runtime.createMemory(memory, tableName);
-  logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
-  return { created: true };
+      logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
+      return { created: true };
     } catch (err) {
       lastErr = err; const msg = String(err?.message || err || '');
-  if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return true; }
+      if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return true; }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }
   }
@@ -151,13 +160,13 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   let roomId, id, entityId;
   try {
     roomId = createUniqueUuid(runtime, getConversationIdFromEvent(evt));
-  } catch {}
+  } catch { }
   try {
     id = createUniqueUuid(runtime, `${evt?.id || 'nostr'}:${kind}`);
-  } catch {}
+  } catch { }
   try {
     entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
-  } catch {}
+  } catch { }
 
   // Persist a top-level inReplyTo for replies so _restoreHandledEventIds can recover handled IDs across restarts
   const isReplyKind = typeof kind === 'string' && kind.toLowerCase().includes('reply');

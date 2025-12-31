@@ -20,10 +20,27 @@ async function poolList(pool, relays, filters) {
       return [];
     }
   }
-  // Handle input variations (object or array)
+
+  // Normalize input to an array of filter objects and sanitize
   const filtersArr = Array.isArray(filters) ? filters : [filters || {}];
+
+  // Sanitize filters: keep only plain objects, remove empty entries and empty arrays
+  const sanitized = filtersArr
+    .filter(f => f && typeof f === 'object')
+    .map(f => {
+      const out = {};
+      for (const key of Object.keys(f)) {
+        const val = f[key];
+        if (val === undefined || val === null) continue;
+        if (Array.isArray(val) && val.length === 0) continue; // drop empty arrays
+        out[key] = val;
+      }
+      return out;
+    })
+    .filter(o => o && typeof o === 'object' && Object.keys(o).length > 0);
+
   // Workaround: Unbox single filter to avoid "not an object" array error in subscribeMany
-  const subArg = filtersArr.length === 1 ? filtersArr[0] : filtersArr;
+  const subArg = sanitized.length === 1 ? sanitized[0] : sanitized;
 
   return await new Promise((resolve) => {
     const events = [];
@@ -43,6 +60,9 @@ async function poolList(pool, relays, filters) {
     };
 
     try {
+      // If there are no valid filters after sanitization, return empty
+      if (!subArg || (Array.isArray(subArg) && subArg.length === 0)) return resolve([]);
+
       // Send all filters in one subscription to avoid opening multiple REQs per relay
       unsub = pool.subscribeMany(relays, subArg, {
         onevent: (evt) => {
@@ -59,7 +79,9 @@ async function poolList(pool, relays, filters) {
       });
       // safety in case relays misbehave
       safetyTimer = setTimeout(finish, 2500);
-    } catch {
+    } catch (err) {
+      // If subscribe fails due to invalid filter shapes, log and return empty
+      try { console.warn('[NOSTR][poolList] subscribeMany failed:', err?.message || err); } catch { }
       resolve([]);
     }
   });

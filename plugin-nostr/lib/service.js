@@ -7519,7 +7519,27 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
     try {
       // Workaround: Unboxing single-element filter arrays to avoid "not an object" errors
       const finalFilters = (Array.isArray(filters) && filters.length === 1) ? filters[0] : filters;
-      const f = Array.isArray(finalFilters) ? finalFilters : [finalFilters];
+      let f = Array.isArray(finalFilters) ? finalFilters : [finalFilters];
+
+      // Sanitize filters: remove non-objects and drop empty arrays/keys so nostr-tools receives plain objects
+      try {
+        f = (Array.isArray(f) ? f : [f])
+          .filter(x => x && typeof x === 'object')
+          .map((flt) => {
+            const out = {};
+            for (const k of Object.keys(flt)) {
+              const v = flt[k];
+              if (v === undefined || v === null) continue;
+              if (Array.isArray(v) && v.length === 0) continue; // skip empty arrays
+              out[k] = v;
+            }
+            return out;
+          })
+          .filter(o => o && typeof o === 'object' && Object.keys(o).length > 0);
+      } catch (sanErr) {
+        try { logger.debug('[NOSTR] Filter sanitization failed:', sanErr?.message || sanErr); } catch { }
+        f = (Array.isArray(finalFilters) ? finalFilters : [finalFilters]).filter(x => x && typeof x === 'object');
+      }
 
       const events = [];
       const _this = this;

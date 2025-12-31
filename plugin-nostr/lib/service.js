@@ -5697,13 +5697,13 @@ Response (YES/NO):`;
 
     // Setup main event subscriptions
     try {
-      // NOTE: Passing a single filter object instead of array to avoid "not an object" errors
+      // NOTE: Passing array of filters as expected by standard
       const filter = { kinds: [1, 4, 7, 14, 9735], '#p': [this.pkHex] };
       logger.info(`[NOSTR] Subscribing with merged filter: ${JSON.stringify(filter)}`);
 
       this.listenUnsub = this.pool.subscribeMany(
         this.relays,
-        filter,
+        [filter],
         {
           onevent: (evt) => {
             try {
@@ -5798,7 +5798,7 @@ Response (YES/NO):`;
       // Subscribe to posts from followed users
       this.homeFeedUnsub = this.pool.subscribeMany(
         this.relays,
-        { kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }, // Last 24 hours
+        [{ kinds: [1], authors, limit: 20, since: Math.floor(Date.now() / 1000) - 86400 }], // Last 24 hours
         {
           onevent: (evt) => {
             this.lastEventReceived = Date.now(); // Update last event timestamp for connection health

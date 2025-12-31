@@ -154,7 +154,6 @@ docker compose logs -f agent
 ### Option 2: Local Development
 **Prerequisites:**
 - Bun runtime (v1.3+): `curl -fsSL https://bun.sh/install | bash`
-- PostgreSQL 15+ (or use Docker: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15-alpine`)
 
 ```bash
 # Install dependencies (includes @elizaos/cli)

@@ -403,7 +403,7 @@ class NostrService {
 
     // Narrative Memory - Historical narrative storage and temporal analysis
     const { NarrativeMemory } = require('./narrativeMemory');
-    this.narrativeMemory = new NarrativeMemory(runtime, this.logger);
+    this.narrativeMemory = new NarrativeMemory(runtime, this.logger, { createUniqueUuid: this.createUniqueUuid });
     this.logger.debug(`[NOSTR] Narrative memory initialized`);
 
     // Topic Evolution - small-LLM subtopic labeling + phase detection for contextual scoring
@@ -5752,7 +5752,46 @@ Response (YES/NO):`;
               this.lastEventReceived = Date.now();
               if (evt.created_at && evt.created_at < this.messageCutoff) return;
 
-              logger.info(`[NOSTR] Event kind ${evt.kind} from ${evt.pubkey}: ${String(evt.content || '').slice(0, 140)}`);
+              let logContent = String(evt.content || '');
+              try {
+                // Humanize NIP-19 entities for better readability
+                if (logContent.includes('nostr:nprofile1')) {
+                  const match = logContent.match(/nostr:(nprofile1\w+)/);
+                  if (match && nip19) {
+                    const { data } = nip19.decode(match[1]);
+                    logContent = logContent.replace(match[0], `[Profile: ${data.pubkey?.slice(0, 8)}...]`);
+                  }
+                }
+                if (logContent.includes('nostr:nevent1')) {
+                  const match = logContent.match(/nostr:(nevent1\w+)/);
+                  if (match && nip19) {
+                    const { data } = nip19.decode(match[1]);
+                    logContent = logContent.replace(match[0], `[Event: ${data.id?.slice(0, 8)}...]`);
+                  }
+                }
+              } catch { }
+
+              const kindNames = {
+                1: 'Text Note',
+                3: 'Contacts',
+                4: 'Direct Message',
+                6: 'Repost',
+                7: 'Reaction',
+                14: 'Sealed DM',
+                1311: 'Live Chat',
+                10000: 'Mute List',
+                10002: 'Relay List',
+                30023: 'Long-form Content',
+                31922: 'Calendar Event',
+                9735: 'Zap'
+              };
+              const kindName = kindNames[evt.kind] || `Kind ${evt.kind}`;
+              let authorDisplay = evt.pubkey.slice(0, 8);
+              try {
+                if (nip19) authorDisplay = nip19.npubEncode(evt.pubkey);
+              } catch { }
+
+              logger.info(`[NOSTR] ${kindName} from ${authorDisplay}: ${logContent.slice(0, 140)}`);
               if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
 
               if (this.handledEventIds.has(evt.id)) return;

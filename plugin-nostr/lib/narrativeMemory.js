@@ -2,9 +2,10 @@
 // Enables Pixel to learn from past narratives and track evolution over time
 
 class NarrativeMemory {
-  constructor(runtime, logger) {
+  constructor(runtime, logger, options = {}) {
     this.runtime = runtime;
     this.logger = logger || console;
+    this.createUniqueUuid = options.createUniqueUuid || (runtime ? runtime.createUniqueUuid : null);
 
     // In-memory cache of recent narratives
     this.hourlyNarratives = []; // Last 7 days of hourly narratives
@@ -111,6 +112,104 @@ class NarrativeMemory {
 
     this.initialized = true;
     this.logger.info('[NARRATIVE-MEMORY] Initialized with historical context');
+    this._dumpInitialLogs();
+  }
+
+  _dumpInitialLogs() {
+    try {
+      const fs = require('fs');
+      const logPath = '/app/public/agent_memories.json';
+
+      const allMemories = [
+        ...this.hourlyNarratives,
+        ...this.dailyNarratives,
+        ...this.weeklyNarratives,
+        ...this.timelineLore
+      ].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+      // Filter out invalid entries
+      const validMemories = allMemories.filter(m => m && m.timestamp);
+
+      const entries = validMemories.map(m => {
+        // Extract title/headline
+        let title = m.headline || m.title;
+        // If headline is inside narrative object
+        if (!title && m.narrative && typeof m.narrative === 'object') {
+          title = m.narrative.headline;
+        }
+        if (!title) title = `Agent ${m.type} Update`;
+
+        // Extract summary/narrative
+        let summary = '';
+        if (typeof m.narrative === 'string') {
+          summary = m.narrative;
+        } else if (m.narrative && typeof m.narrative === 'object') {
+          summary = m.narrative.summary || m.narrative.content || JSON.stringify(m.narrative);
+        } else if (m.summary && typeof m.summary === 'string') {
+          summary = m.summary;
+        } else if (m.summary && typeof m.summary === 'object') {
+          summary = m.summary.summary || m.summary.content || '';
+        } else if (typeof m.content === 'string') {
+          summary = m.content;
+        }
+
+        return JSON.stringify({
+          timestamp: new Date(m.timestamp).toISOString(),
+          type: `agent_memory_${m.type}`,
+          ...m,
+          title,
+          summary,
+          source: 'pixel_agent'
+        });
+      }).join('\n') + '\n';
+
+      fs.writeFileSync(logPath, entries);
+      this.logger.info(`[NARRATIVE-MEMORY] Dumped ${validMemories.length} memories to public log`);
+    } catch (err) {
+      // Use debug to avoid spamming logs if volume not mounted
+      this.logger.debug('[NARRATIVE-MEMORY] Failed to dump initial logs (volume might not be mounted):', err.message);
+    }
+  }
+
+  _appendPublicLog(data, type) {
+    try {
+      const fs = require('fs');
+      const logPath = '/app/public/agent_memories.json';
+
+      const entry = {
+        timestamp: new Date().toISOString(),
+        type: `agent_memory_${type}`,
+        ...data,
+        source: 'pixel_agent'
+      };
+
+      // Extract title/headline
+      let title = data.headline || data.title;
+      if (!title && data.narrative && typeof data.narrative === 'object') {
+        title = data.narrative.headline;
+      }
+      if (!title) title = `Agent ${type} Update`;
+      entry.title = title;
+
+      // Extract summary/narrative
+      let summary = '';
+      if (typeof data.narrative === 'string') {
+        summary = data.narrative;
+      } else if (data.narrative && typeof data.narrative === 'object') {
+        summary = data.narrative.summary || data.narrative.content || JSON.stringify(data.narrative);
+      } else if (data.summary && typeof data.summary === 'string') {
+        summary = data.summary;
+      } else if (data.summary && typeof data.summary === 'object') {
+        summary = data.summary.summary || data.summary.content || '';
+      } else if (typeof data.content === 'string') {
+        summary = data.content;
+      }
+      entry.summary = summary;
+
+      fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
+    } catch (err) {
+      // Silent fail
+    }
   }
 
   async storeHourlyNarrative(narrative) {
@@ -766,13 +865,22 @@ OUTPUT JSON:
     }
 
     try {
+      const createUniqueUuid = this.createUniqueUuid || (this.runtime ? this.runtime.createUniqueUuid : null);
+      if (typeof createUniqueUuid !== 'function') {
+        throw new Error('createUniqueUuid is not a function');
+      }
+      const systemContext = await this._getSystemContext();
+      const rooms = systemContext?.rooms || {};
+      const getRoomId = (type) => rooms[`narratives${type.charAt(0).toUpperCase() + type.slice(1)}`] || createUniqueUuid(this.runtime, `nostr-narratives-${type}`);
+
       // Load hourly narratives (last 7 days)
+      const hourlyRoomId = getRoomId('hourly');
       let hourlyMems = [];
       try {
         const res = this.runtime.getMemories({
+          roomId: hourlyRoomId,
           tableName: 'messages',
           count: this.maxHourlyCache,
-          // Filter by content type if your adapter supports it
         });
         hourlyMems = await Promise.resolve(res);
       } catch { hourlyMems = []; }
@@ -789,22 +897,51 @@ OUTPUT JSON:
 
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
 
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+
       // Load daily narratives (last 90 days)
+      // Check both narrative room and daily reports room (from ContextAccumulator)
+      const dailyNarrativeRoomId = getRoomId('daily');
+      const dailyReportsRoomId = rooms.dailyReports || createUniqueUuid(this.runtime, 'nostr-daily-reports');
+
       let dailyMems = [];
       try {
-        const resDaily = this.runtime.getMemories({
-          tableName: 'messages',
-          count: this.maxDailyCache,
+        // Fetch from both sources
+        const [resNarrative, resReports] = await Promise.all([
+          this.runtime.getMemories({
+            roomId: dailyNarrativeRoomId,
+            tableName: 'messages',
+            count: this.maxDailyCache,
+          }).catch(() => []),
+          this.runtime.getMemories({
+            roomId: dailyReportsRoomId,
+            tableName: 'messages',
+            count: this.maxDailyCache,
+          }).catch(() => [])
+        ]);
+
+        dailyMems = [...(resNarrative || []), ...(resReports || [])];
+
+        // Deduplicate by ID
+        const seenIds = new Set();
+        dailyMems = dailyMems.filter(m => {
+          if (seenIds.has(m.id)) return false;
+          seenIds.add(m.id);
+          return true;
         });
-        dailyMems = await Promise.resolve(resDaily);
+
+        // Sort by date desc
+        dailyMems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
       } catch { dailyMems = []; }
 
       for (const mem of dailyMems) {
-        if (mem.content?.type === 'narrative_daily' && mem.content?.data) {
+        // Accept both narrative_daily and daily_report
+        if ((mem.content?.type === 'narrative_daily' || mem.content?.type === 'daily_report') && mem.content?.data) {
           this.dailyNarratives.push({
             ...mem.content.data,
             timestamp: mem.createdAt || Date.now(),
-            type: 'daily'
+            type: 'daily' // Normalize type to 'daily' for internal usage
           });
         }
       }
@@ -812,9 +949,11 @@ OUTPUT JSON:
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
 
       // Load weekly narratives
+      const weeklyRoomId = getRoomId('weekly');
       let weeklyMems = [];
       try {
         const resWeekly = this.runtime.getMemories({
+          roomId: weeklyRoomId,
           tableName: 'messages',
           count: this.maxWeeklyCache,
         });
@@ -834,9 +973,11 @@ OUTPUT JSON:
       this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
       // Load timeline lore entries
+      const timelineRoomId = getRoomId('timeline');
       let timelineMems = [];
       try {
         const resTimeline = this.runtime.getMemories({
+          roomId: timelineRoomId,
           tableName: 'messages',
           count: this.maxTimelineLoreCache,
         });
@@ -925,8 +1066,11 @@ OUTPUT JSON:
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       if (result && (result === true || result.created)) {
         this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative`);
+        this._appendPublicLog(narrative, type);
       } else {
         this.logger.warn(`[NARRATIVE-MEMORY] Failed to persist ${type} narrative (storage)`);
+        // Still try to log to public for visibility even if DB fails
+        this._appendPublicLog(narrative, type);
       }
     } catch (err) {
       this.logger.debug(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);

@@ -5785,15 +5785,17 @@ Response (YES/NO):`;
         });
       }
 
-      const request = [];
-      this.relays.forEach(url => {
-        filters.forEach(filter => {
-          request.push({ url, filter });
-        });
-      });
+      // Use subscribeMap with properly formatted requests (nostr-tools v2 API)
+      // subscribeMap expects: [{ url, filter }, ...] where filter is a single object
+      const requests = [];
+      for (const relay of this.relays) {
+        for (const filter of filters) {
+          requests.push({ url: relay, filter });
+        }
+      }
 
       const sub = this.pool.subscribeMap(
-        request,
+        requests,
         {
           onevent: (evt) => {
             this.lastEventReceived = Date.now();
@@ -7536,10 +7538,18 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
       const events = [];
       const _this = this;
 
-      // Use subscribeMany with Promise wrapper to simulate list()
+      // Use subscribeMap with Promise wrapper to simulate list()
+      // subscribeMap expects: [{ url, filter }, ...] where filter is a single object
+      const requests = [];
+      for (const relay of relays) {
+        for (const filter of f) {
+          requests.push({ url: relay, filter });
+        }
+      }
+
       return await new Promise((resolve) => {
         let completed = false;
-        const sub = _this.pool.subscribeMany(relays, f, {
+        const sub = _this.pool.subscribeMap(requests, {
           onevent(event) {
             events.push(event);
           },

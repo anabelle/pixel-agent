@@ -65,14 +65,16 @@ async function poolList(pool, relays, filters) {
         return resolve([]);
       }
 
-      const request = [];
-      relays.forEach(url => {
-        subArg.forEach(filter => {
-          request.push({ url, filter });
-        });
-      });
+      // Use subscribeMap with properly formatted requests (nostr-tools v2 API)
+      // subscribeMap expects: [{ url, filter }, ...] where filter is a single object
+      const requests = [];
+      for (const relay of relays) {
+        for (const filter of subArg) {
+          requests.push({ url: relay, filter });
+        }
+      }
 
-      const sub = pool.subscribeMap(request, {
+      const sub = pool.subscribeMap(requests, {
         onevent: (evt) => {
           if (evt && evt.id && !seen.has(evt.id)) {
             seen.add(evt.id);

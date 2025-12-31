@@ -14,13 +14,13 @@ function extractImageUrls(content) {
   // Special handling for blossom.primal.net URLs which may or may not have extensions
   const imageUrlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+\.(?:jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?)(?:\?[^\s<>"{}|\\^`[\]]*)?/gi;
 
-   // Also match blossom.primal.net URLs that might not have extensions (for other media types)
-   const blossomRegex = /https:\/\/blossom\.primal\.net\/[a-fA-F0-9]+(?:\.(?:jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?))?/gi;
+  // Also match blossom.primal.net URLs that might not have extensions (for other media types)
+  const blossomRegex = /https:\/\/blossom\.primal\.net\/[a-fA-F0-9]+(?:\.(?:jpg|jpeg|png|gif|webp|bmp|svg|avif|tiff?))?/gi;
 
-   const imageMatches = normalized.match(imageUrlRegex) || [];
-   const blossomMatches = normalized.match(blossomRegex) || [];
-   const matches = [...new Set([...imageMatches, ...blossomMatches])]; // Deduplicate URLs
-   logger.info('[NOSTR] Regex found ' + matches.length + ' potential image URLs: ' + matches.join(' | '));
+  const imageMatches = normalized.match(imageUrlRegex) || [];
+  const blossomMatches = normalized.match(blossomRegex) || [];
+  const matches = [...new Set([...imageMatches, ...blossomMatches])]; // Deduplicate URLs
+  logger.info('[NOSTR] Regex found ' + matches.length + ' potential image URLs: ' + matches.join(' | '));
 
   // Filter for valid image URLs (basic validation)
   const filtered = matches.filter(url => {
@@ -112,7 +112,7 @@ async function analyzeImageWithVision(imageUrl, runtime) {
     logger.info(`[NOSTR] OpenAI API key configured: ${!!apiKey}`);
     if (apiKey) {
       logger.info('[NOSTR] 👁️  Calling OpenAI vision API for: ' + imageUrl);
-      logger.info(`[NOSTR] OpenAI model: ${runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MODEL') || 'gpt-4o-mini'}`);
+      logger.info(`[NOSTR] OpenAI model: ${runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MODEL') || 'gpt-5-mini'}`);
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -120,7 +120,7 @@ async function analyzeImageWithVision(imageUrl, runtime) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MODEL') || 'gpt-4o-mini',
+          model: runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MODEL') || 'gpt-5-mini',
           messages: [{
             role: 'user',
             content: [
@@ -217,9 +217,9 @@ async function analyzeImageWithVision(imageUrl, runtime) {
 
 async function generateNaturalReply(originalContent, imageDescription, runtime) {
   const characterSystem = runtime.character?.system || '';
-  
+
   const prompt = 'You are Pixel, reacting to a Nostr mention with an image. \nOriginal message: ' + originalContent + '\n\nYou "saw" the image: ' + imageDescription + '\n\nRespond naturally as Pixel would - with humor, melancholy, existential wit. \nReference the image elements without directly quoting the description. \nMake it feel like you actually saw and reacted to the visual content.\nKeep it conversational and engaging. End with an invitation to collaborate on the canvas if appropriate.\n\nCharacter system reminder: ' + characterSystem.slice(0, 500) + '...';
-  
+
   // Use OpenRouter or OpenAI for generation (prefer the main model)
   const apiKey = runtime.getSetting('OPENROUTER_API_KEY') || runtime.getSetting('OPENAI_API_KEY');
   if (!apiKey) {
@@ -229,7 +229,7 @@ async function generateNaturalReply(originalContent, imageDescription, runtime) 
 
   const isOpenRouter = !!runtime.getSetting('OPENROUTER_API_KEY');
   const url = isOpenRouter ? 'https://openrouter.ai/api/v1/chat/completions' : 'https://api.openai.com/v1/chat/completions';
-  
+
   try {
     logger.info('[NOSTR] 💭 Generating natural reply using ' + (isOpenRouter ? 'OpenRouter' : 'OpenAI'));
     const response = await fetch(url, {
@@ -243,9 +243,9 @@ async function generateNaturalReply(originalContent, imageDescription, runtime) 
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: isOpenRouter 
+        model: isOpenRouter
           ? (runtime.getSetting('OPENROUTER_MODEL') || 'tngtech/deepseek-r1t2-chimera:free')
-          : (runtime.getSetting('OPENAI_MODEL') || 'gpt-4o-mini'),
+          : (runtime.getSetting('OPENAI_MODEL') || 'gpt-5-mini'),
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 200,
         temperature: 0.8

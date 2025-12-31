@@ -21,7 +21,7 @@ export const settings = {
   OPENROUTER_MODEL:
     process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
   OPENROUTER_LARGE_MODEL:
-    process.env.OPENROUTER_LARGE_MODEL || "anthropic/claude-3.5-sonnet",
+    process.env.OPENROUTER_LARGE_MODEL || "deepseek/deepseek-r1:free",
   OPENROUTER_SMALL_MODEL:
     process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
   OPENROUTER_IMAGE_MODEL:
@@ -29,7 +29,7 @@ export const settings = {
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-  OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
+  OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-5-mini",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
   // Enable OpenAI for text embeddings
   USE_OPENAI_EMBEDDING: "true",

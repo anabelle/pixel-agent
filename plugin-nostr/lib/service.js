@@ -664,7 +664,7 @@ class NostrService {
         () => 'NO' // Fallback to no
       );
       const result = response?.trim().toUpperCase();
-      const isRelevant = result.startsWith('YES');
+      const isRelevant = result.replace(/^[^A-Z]+/, '').startsWith('YES');
       const resultStr = isRelevant ? 'YES' : 'NO';
       logger.info(`[NOSTR] Home feed analysis result for ${evt.id.slice(0, 8)}: ${resultStr} - "${response?.slice(0, 150)}"`);
       return isRelevant;
@@ -741,7 +741,7 @@ Response (YES/NO):`;
         () => 'YES' // Fallback to YES (respond by default)
       );
       const result = response?.trim().toUpperCase();
-      const isRelevant = result.startsWith('YES');
+      const isRelevant = result.replace(/^[^A-Z]+/, '').startsWith('YES');
       logger.info(`[NOSTR] Relevance check for ${evt.id.slice(0, 8)}: ${isRelevant ? 'YES' : 'NO'} - ${response?.slice(0, 100)}`);
       return isRelevant;
     } catch (err) {
@@ -6176,7 +6176,7 @@ Response:`;
       () => 'NO' // Default to no if LLM fails
     );
     const response = String(text || '').trim().toUpperCase();
-    const isWorthy = response.startsWith('YES');
+    const isWorthy = response.replace(/^[^A-Z]+/, '').startsWith('YES');
     logger.debug(`[NOSTR] Repost relevancy result for ${evt.id.slice(0, 8)}: ${isWorthy ? 'YES' : 'NO'} - "${text?.slice(0, 150)}"`);
     return isWorthy;
   }

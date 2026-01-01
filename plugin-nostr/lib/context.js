@@ -2,6 +2,24 @@
 
 async function ensureNostrContext(runtime, userPubkey, usernameLike, conversationId, deps) {
   const { createUniqueUuid, ChannelType, logger } = deps;
+
+  // SCHEMA HACK: PGLite in this environment crashes on boolean parameter binding.
+  // We replace the "unique" boolean column with an INTEGER column to avoid binding booleans.
+  const adapter = runtime?.databaseAdapter;
+  const queryFunc = adapter && (
+    (typeof adapter.query === 'function' ? adapter.query.bind(adapter) : null) ||
+    (adapter.db && typeof adapter.db.query === 'function' ? adapter.db.query.bind(adapter.db) : null)
+  );
+
+  if (queryFunc) {
+    try {
+      await queryFunc('ALTER TABLE memories DROP COLUMN IF EXISTS "unique"');
+      await queryFunc('ALTER TABLE memories ADD COLUMN IF NOT EXISTS "unique" INTEGER DEFAULT 0');
+    } catch (e) {
+      logger?.debug?.('[NOSTR] Schema hack failed:', e.message);
+    }
+  }
+
   const worldId = createUniqueUuid(runtime, userPubkey);
   const roomId = createUniqueUuid(runtime, conversationId);
   const entityId = createUniqueUuid(runtime, userPubkey);
@@ -138,6 +156,12 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
 async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetries = 3, logger) {
   let lastErr = null;
 
+  // ElizaOS 1.6.2 plugin-sql uses BOOLEAN for the unique column
+  // Pass true (boolean) not 1 (integer)
+  if (memory && typeof memory === 'object') {
+    memory.unique = true;
+  }
+
   // Ensure worldId is always present - ElizaOS SQL adapter requires it
   if (!memory.worldId && !memory.world_id) {
     // Fallback 1: Use roomId as worldId (common pattern for Nostr contexts)
@@ -168,12 +192,22 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
       logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
       return { created: true };
     } catch (err) {
-      lastErr = err; const msg = String(err?.message || err || '');
-      if (msg.includes('duplicate') || msg.includes('constraint')) { logger?.debug?.('[NOSTR] Memory already exists, skipping'); return true; }
+      lastErr = err;
+      const msg = String(err?.message || err || '').toLowerCase();
+      // Catch duplicate key errors (23505) and other constraint violations
+      if (err?.code === '23505' || msg.includes('duplicate') || msg.includes('constraint') || msg.includes('exists') || msg.includes('violates unique')) {
+        logger?.debug?.('[NOSTR] Memory already exists, skipping');
+        return true;
+      }
+      // Log detailed error for foreign key violations
+      if (err?.code === '23503' || msg.includes('foreign key')) {
+        logger?.warn?.(`[NOSTR] FK violation: entity=${memory.entityId} room=${memory.roomId} world=${memory.worldId} agent=${memory.agentId}`);
+      }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }
   }
-  logger?.warn?.('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr);
+  // Include error code in log for better debugging
+  logger?.warn?.('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr, lastErr?.code ? `(code: ${lastErr.code})` : '');
   return false;
 }
 
@@ -192,6 +226,25 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
     entityId = createUniqueUuid(runtime, evt?.pubkey || 'nostr');
     worldId = entityId; // Use the same pubkey-based ID for simplicity, matching ensureNostrContext
   } catch { }
+
+  // Ensure the context (room, world, connection) exists to satisfy FK constraints before saving memory
+  if (evt?.pubkey && roomId && worldId && entityId) {
+    try {
+      const convId = typeof getConversationIdFromEvent === 'function' ? getConversationIdFromEvent(evt) : (evt?.id || 'nostr');
+      const ctx = await ensureNostrContext(runtime, evt.pubkey, null, convId, { createUniqueUuid, logger }).catch(err => {
+        logger?.debug?.('[NOSTR] ensureNostrContext failed:', err);
+        return null;
+      });
+      // Update IDs to match exactly what was ensured in the DB (fixes FK violations if createUniqueUuid differs)
+      if (ctx) {
+        if (ctx.entityId) entityId = ctx.entityId;
+        if (ctx.worldId) worldId = ctx.worldId;
+        if (ctx.roomId) roomId = ctx.roomId;
+      }
+    } catch (e) {
+      logger?.debug?.('[NOSTR] saveInteractionMemory context ensure failed:', e.message);
+    }
+  }
 
   // Also try to get worldId from extra if provided
   if (extra && extra.worldId) {
@@ -220,7 +273,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
         worldId: worldId || entityId, // worldId is crucial for plugin-sql
         world_id: worldId || entityId, // some adapters use snake_case
         content,
-        unique: true,
+        // unique: true, // REMOVED: causes PGLite crash (Aborted) in Bun
         metadata: extra?.metadata || {},
         createdAt: Date.now(),
       };
@@ -234,7 +287,18 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   // Fallbacks
   if (typeof runtime?.createMemory === 'function') {
     try {
-      return await runtime.createMemory({ id, userId: entityId, entityId, roomId, agentId: runtime.agentId, worldId, content, createdAt: Date.now() }, 'messages');
+      // Ensure worldId/world_id on fallback call too
+      return await runtime.createMemory({
+        id,
+        userId: entityId,
+        entityId,
+        roomId,
+        agentId: runtime.agentId,
+        worldId: worldId || entityId,
+        world_id: worldId || entityId,
+        content,
+        createdAt: Date.now()
+      }, 'messages');
     } catch (e) {
       logger?.debug?.('[NOSTR] saveInteractionMemory direct create failed:', e?.message || e);
     }

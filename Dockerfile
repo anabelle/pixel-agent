@@ -40,6 +40,12 @@ RUN bun install --trust
 # Copy source files
 COPY . .
 
+# Patch telegram plugin's processImage to wrap imageUrl in object
+# Fixes: "paramsObj is not an Object. (evaluating '"prompt" in paramsObj')"
+# The code spans multiple lines, so we use perl for multi-line replacement
+RUN perl -i -0pe 's/(this\.runtime\.useModel\(\s*ModelType\.IMAGE_DESCRIPTION,\s*)imageUrl(\s*\))/$1\{ imageUrl \}$2/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # Build TypeScript and generate character.json
 RUN bun run build && bun run build:character
 

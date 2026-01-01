@@ -6,6 +6,11 @@
  * which resolves plugins by name from character.json.
  */
 
+// Suppress AI SDK warnings about unsupported model settings (presencePenalty, frequencyPenalty, stopSequences)
+// @ts-ignore - global flag not typed
+globalThis.AI_SDK_LOG_WARNINGS = false;
+
+
 // Stability: Global error handlers to prevent PM2 restart loops from unhandled rejections
 // This is critical for network-heavy plugins like Nostr that can have unstable connections
 process.on('unhandledRejection', (reason, promise) => {

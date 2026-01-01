@@ -137,9 +137,33 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
 
 async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetries = 3, logger) {
   let lastErr = null;
+
+  // Ensure worldId is always present - ElizaOS SQL adapter requires it
+  if (!memory.worldId && !memory.world_id) {
+    // Fallback 1: Use roomId as worldId (common pattern for Nostr contexts)
+    // Fallback 2: Use entityId
+    // Fallback 3: Generate a stable system worldId
+    if (memory.roomId) {
+      memory.worldId = memory.roomId;
+      memory.world_id = memory.roomId;
+    } else if (memory.entityId) {
+      memory.worldId = memory.entityId;
+      memory.world_id = memory.entityId;
+    } else {
+      // Generate a stable fallback worldId for system memories
+      const crypto = require('crypto');
+      const seed = `nostr:system:${runtime?.agentId || 'default'}`;
+      const hash = crypto.createHash('sha256').update(seed).digest('hex');
+      const fallbackWorldId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+      memory.worldId = fallbackWorldId;
+      memory.world_id = fallbackWorldId;
+    }
+    logger?.debug?.(`[NOSTR] Memory worldId not provided, using fallback: ${memory.worldId}`);
+  }
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} attempt=${attempt + 1}/${maxRetries}`);
+      logger?.debug?.(`[NOSTR] Creating memory id=${memory.id} room=${memory.roomId} world=${memory.worldId} attempt=${attempt + 1}/${maxRetries}`);
       await runtime.createMemory(memory, tableName);
       logger?.debug?.(`[NOSTR] Memory created id=${memory.id}`);
       return { created: true };

@@ -6,10 +6,6 @@
  * which resolves plugins by name from character.json.
  */
 
-// Disable AI SDK Warnings (must be before imports)
-// @ts-ignore
-globalThis.AI_SDK_LOG_WARNINGS = false;
-
 // Stability: Global error handlers to prevent PM2 restart loops from unhandled rejections
 // This is critical for network-heavy plugins like Nostr that can have unstable connections
 process.on('unhandledRejection', (reason, promise) => {

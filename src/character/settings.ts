@@ -17,7 +17,7 @@ export const settings = {
   INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
   IMAGE_DESCRIPTION:
-    process.env.OPENROUTER_MODEL || "openai/gpt-4o",
+    process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
   OPENROUTER_MODEL:
     process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
   OPENROUTER_LARGE_MODEL:
@@ -25,7 +25,7 @@ export const settings = {
   OPENROUTER_SMALL_MODEL:
     process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
   OPENROUTER_IMAGE_MODEL:
-    process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-4o",
+    process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-5-mini",
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",

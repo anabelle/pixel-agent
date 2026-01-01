@@ -17,6 +17,7 @@ export const character: Character = {
   ...characterManifest,
   plugins: [
     '@elizaos/plugin-bootstrap',
+    '@elizaos/adapter-postgres', 
     '@elizaos/plugin-sql',
     '@elizaos/plugin-openai',
     '@elizaos/plugin-openrouter',

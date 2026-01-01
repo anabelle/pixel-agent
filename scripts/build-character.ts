@@ -24,7 +24,7 @@ const PLUGIN_NAMES = [
   '@elizaos/plugin-bootstrap',
   // Database adapter (PostgreSQL for production)
   '@elizaos/adapter-postgres',
-  '@elizaos/plugin-sql',
+  // '@elizaos/plugin-sql',
   // AI providers
   '@elizaos/plugin-openai',
   '@elizaos/plugin-openrouter',

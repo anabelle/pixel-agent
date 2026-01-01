@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libvips-dev \
     ca-certificates \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Create node and npm shims for compatibility with packages that expect Node.js

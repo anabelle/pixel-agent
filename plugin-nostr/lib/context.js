@@ -193,21 +193,30 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
       return { created: true };
     } catch (err) {
       lastErr = err;
-      const msg = String(err?.message || err || '').toLowerCase();
+      // DrizzleQueryError wraps the actual DB error in .cause
+      const cause = err?.cause;
+      const causeMsg = cause?.message || '';
+      const causeCode = cause?.code || err?.code;
+      const msg = String(err?.message || causeMsg || err || '').toLowerCase();
+      
       // Catch duplicate key errors (23505) and other constraint violations
-      if (err?.code === '23505' || msg.includes('duplicate') || msg.includes('constraint') || msg.includes('exists') || msg.includes('violates unique')) {
+      if (causeCode === '23505' || msg.includes('duplicate') || msg.includes('constraint') || msg.includes('exists') || msg.includes('violates unique')) {
         logger?.debug?.('[NOSTR] Memory already exists, skipping');
         return true;
       }
       // Log detailed error for foreign key violations
-      if (err?.code === '23503' || msg.includes('foreign key')) {
+      if (causeCode === '23503' || msg.includes('foreign key')) {
         logger?.warn?.(`[NOSTR] FK violation: entity=${memory.entityId} room=${memory.roomId} world=${memory.worldId} agent=${memory.agentId}`);
+        logger?.warn?.(`[NOSTR] FK cause: ${causeMsg}`);
       }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }
   }
-  // Include error code in log for better debugging
-  logger?.warn?.('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr, lastErr?.code ? `(code: ${lastErr.code})` : '');
+  // Include error code and cause in log for better debugging
+  const cause = lastErr?.cause;
+  const causeMsg = cause?.message || cause || '';
+  const causeCode = cause?.code || lastErr?.code;
+  logger?.warn?.('[NOSTR] Failed to persist memory:', lastErr?.message || lastErr, causeCode ? `(code: ${causeCode})` : '', causeMsg ? `cause: ${causeMsg}` : '');
   return false;
 }
 

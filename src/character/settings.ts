@@ -1,4 +1,7 @@
 export const settings = {
+  // Database settings - Use PostgreSQL to prevent PGLite corruption
+  POSTGRES_URL: process.env.POSTGRES_URL || "",
+  
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "",
   TWITTER_API_KEY: process.env.TWITTER_API_KEY || "",
   TWITTER_API_SECRET_KEY: process.env.TWITTER_API_SECRET_KEY || "",

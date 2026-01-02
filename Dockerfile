@@ -53,9 +53,12 @@ RUN bun run build && bun run build:character
 EXPOSE 3003
 
 # Health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD wget --spider -q http://localhost:3003/health || exit 1
 
-# Start agent directly (logs go to stdout for docker logs)
-# --preload flag sets AI_SDK_LOG_WARNINGS=false before the AI SDK loads
-CMD ["bun", "--preload", "./suppress-ai-warnings.js", "./node_modules/@elizaos/cli/dist/index.js", "start", "--character", "./character.json", "--port", "3003"]
+# Copy startup script
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Start agent via wrapper script for better debugging
+CMD ["/app/start.sh"]

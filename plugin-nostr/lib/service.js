@@ -314,6 +314,7 @@ class NostrService {
     this.timelineLoreProcessing = false;
     this.timelineLoreCandidateMinWords = 12;
     this.timelineLoreCandidateMinChars = 80;
+    this.timelineLoreMaxPostsInPrompt = 10; // Limit posts in digest prompt to reduce token usage
 
     // Awareness dry-run scheduler (no posting)
     this.awarenessDryRunTimer = null;
@@ -997,7 +998,7 @@ Response (YES/NO):`;
             if (!digest) {
               try {
                 await svc.contextAccumulator.generateHourlyDigest();
-                logger?.info?.('[NOSTR] Startup warm-up: generated hourly digest');
+                logger?.debug?.('[NOSTR] Startup: generated hourly digest');
               } catch (e) {
                 logger?.debug?.('[NOSTR] Startup warm-up: hourly digest generation failed:', e?.message || e);
               }
@@ -7009,9 +7010,9 @@ CONTENT:
       }
 
       if (entry && entry.headline) {
-        this.logger.info(`[LORE] Captured: "${entry.headline}" (derived from ${batch.length} posts)`);
+        this.logger.debug(`[LORE] Captured: "${entry.headline}" (${batch.length} posts)`);
       } else {
-        this.logger.info(`[LORE] Captured timeline signal from ${batch.length} posts`);
+        this.logger.debug(`[LORE] Captured timeline signal from ${batch.length} posts`);
       }
 
       const usedIds = new Set(batch.map((item) => item.id));
@@ -7068,11 +7069,10 @@ CONTENT:
         ].join('\n');
       }).join('\n\n');
 
-      // Sanity check: warn if prompt is still very long
+      // Sanity check: log if prompt is still very long (debug level)
       if (postLines.length > 8000) {
-        this.logger?.warn?.(
-          `[NOSTR] Timeline lore prompt very long (${postLines.length} chars, ${recentBatch.length} posts). ` +
-          `Consider reducing timelineLoreMaxPostsInPrompt.`
+        this.logger?.debug?.(
+          `[NOSTR] Timeline lore prompt long (${postLines.length} chars, ${recentBatch.length} posts)`
         );
       }
 

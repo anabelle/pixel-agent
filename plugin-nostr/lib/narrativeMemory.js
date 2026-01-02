@@ -103,7 +103,7 @@ class NarrativeMemory {
   async initialize() {
     if (this.initialized) return;
 
-    this.logger.info('[NARRATIVE-MEMORY] Initializing historical narrative memory...');
+    this.logger.debug('[NARRATIVE-MEMORY] Initializing...');
 
     // Load recent narratives from memory
     await this._loadRecentNarratives();
@@ -112,7 +112,7 @@ class NarrativeMemory {
     await this._rebuildTrends();
 
     this.initialized = true;
-    this.logger.info('[NARRATIVE-MEMORY] Initialized with historical context');
+    this.logger.debug('[NARRATIVE-MEMORY] Ready');
     this._dumpInitialLogs();
   }
 
@@ -254,7 +254,7 @@ class NarrativeMemory {
   async storeTimelineLore(entry) {
     if (!entry || (typeof entry !== 'object')) return;
 
-    this.logger.info(`[NARRATIVE-MEMORY] storeTimelineLore called with headline: ${entry.headline?.substring(0, 50) || 'no headline'}`);
+    this.logger.debug(`[NARRATIVE-MEMORY] storeTimelineLore: ${entry.headline?.substring(0, 50) || 'no headline'}`);
 
     const record = {
       ...entry,
@@ -291,9 +291,9 @@ class NarrativeMemory {
 
     try {
       await this._persistNarrative(record, 'timeline');
-      this.logger.info(`[NARRATIVE-MEMORY] Timeline lore persist completed`);
+      this.logger.debug('[NARRATIVE-MEMORY] Timeline lore persisted');
     } catch (err) {
-      this.logger.info('[NARRATIVE-MEMORY] Failed to persist timeline lore:', err?.message || err);
+      this.logger.debug('[NARRATIVE-MEMORY] Timeline lore persist failed:', err?.message || err);
     }
   }
 
@@ -517,7 +517,7 @@ class NarrativeMemory {
 
     await this._persistNarrative(summary, 'weekly');
 
-    this.logger.info(`[NARRATIVE-MEMORY] 📅 Generated weekly summary: ${summary.totalEvents} events, ${summary.uniqueUsers} users`);
+    this.logger.debug(`[NARRATIVE-MEMORY] Weekly summary: ${summary.totalEvents} events, ${summary.uniqueUsers} users`);
 
     return summary;
   }
@@ -1695,7 +1695,7 @@ OUTPUT JSON:
     }
 
     if (added.length) {
-      this.logger?.info?.(`[WATCHLIST] Added ${added.length} items: ${added.join(', ')}`);
+      this.logger?.debug?.(`[WATCHLIST] Added ${added.length} items: ${added.join(', ')}`);
     }
 
     // Cleanup expired items

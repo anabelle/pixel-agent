@@ -154,7 +154,7 @@ docker compose logs -f agent
 ### Option 2: Local Development
 **Prerequisites:**
 - Bun runtime (v1.3+): `curl -fsSL https://bun.sh/install | bash`
-- PostgreSQL 15+ (or use Docker: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:15-alpine`)
+- PostgreSQL 15+ with `pgvector` (or use Docker: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg15`)
 
 ```bash
 # Install dependencies (includes @elizaos/cli)
@@ -165,7 +165,7 @@ bun run build
 bun run start
 ```
 
-**Note:** ElizaOS v1.6+ uses **embedded PGLite** (PostgreSQL 17) stored at `.eliza/.elizadb/`. No external database configuration needed - the agent manages its own persistence automatically.
+**Note:** In the Pixel repo Docker setup, the agent is configured to use external PostgreSQL via `POSTGRES_URL`.
 
 ## 🔧 Platform-Specific Setup
 

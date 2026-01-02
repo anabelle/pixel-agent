@@ -12,6 +12,8 @@
     "start:patched": "./start-with-twitter-patch.sh",
     "test": "bun ./node_modules/@elizaos/cli/dist/index.js test",
     "test:plugin-nostr": "cd plugin-nostr && npm test",
+    "test:diary": "bun test src/diary/__tests__/diary-service.test.ts",
+    "diary": "bun src/diary/cli.ts",
     "clean-db": "./clean-db.sh"
   },
   "trustedDependencies": [
@@ -42,14 +44,18 @@
     "onnxruntime-node": "^1.17.0",
     "openai": "4.77.0",
     "pixel-plugin-nostr": "file:./plugin-nostr",
+    "pg": "^8.11.3",
+    "express": "^4.18.2",
     "sharp": "^0.34.5",
     "telegram": "^2.26.8",
     "whatwg-url": "^7.1.0",
     "ws": "^8.18.0",
-    "@elizaos/cli": "1.7.0"
+    "@elizaos/cli": "1.7.0",
+    "@types/express": "^4.17.21"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
     "typescript": "^5.0.0"
   },
   "keywords": [

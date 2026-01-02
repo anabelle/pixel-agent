@@ -13,6 +13,7 @@
     "test": "bun ./node_modules/@elizaos/cli/dist/index.js test",
     "test:plugin-nostr": "cd plugin-nostr && npm test",
     "test:diary": "bun test src/diary/__tests__/diary-service.test.ts",
+    "test:twitter": "bun test src/__tests__/twitter-plugin.test.ts",
     "diary": "bun src/diary/cli.ts",
     "clean-db": "./clean-db.sh"
   },

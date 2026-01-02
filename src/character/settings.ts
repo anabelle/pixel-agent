@@ -1,12 +1,13 @@
 export const settings = {
   // Database settings - Use PostgreSQL to prevent PGLite corruption
   POSTGRES_URL: process.env.POSTGRES_URL || "",
-  
+
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "",
   TWITTER_API_KEY: process.env.TWITTER_API_KEY || "",
   TWITTER_API_SECRET_KEY: process.env.TWITTER_API_SECRET_KEY || "",
   TWITTER_ACCESS_TOKEN: process.env.TWITTER_ACCESS_TOKEN || "",
   TWITTER_ACCESS_TOKEN_SECRET: process.env.TWITTER_ACCESS_TOKEN_SECRET || "",
+  ENABLE_TWITTER_PLUGIN: process.env.ENABLE_TWITTER_PLUGIN || "true",
   TWITTER_POST_ENABLE: process.env.TWITTER_POST_ENABLE || "true",
   TWITTER_POST_IMMEDIATELY: process.env.TWITTER_POST_IMMEDIATELY || "false",
   TWITTER_POST_INTERVAL_MIN: process.env.TWITTER_POST_INTERVAL_MIN || "120",

@@ -36,6 +36,13 @@ class RateLimitAwareTwitterService extends Service {
   }
 
   static async start(runtime: IAgentRuntime): Promise<RateLimitAwareTwitterService> {
+    const enabled = runtime.getSetting('ENABLE_TWITTER_PLUGIN');
+    if (enabled === 'false' || enabled === '0') {
+      logger.info('[TWITTER WRAPPER] Twitter plugin disabled via ENABLE_TWITTER_PLUGIN setting');
+      const service = new RateLimitAwareTwitterService(runtime);
+      return service;
+    }
+
     logger.info('[TWITTER WRAPPER] Starting Twitter service with rate limit handling');
 
     const service = new RateLimitAwareTwitterService(runtime);
@@ -154,12 +161,21 @@ class RateLimitAwareTwitterService extends Service {
         joined: user.created_at ? new Date(user.created_at) : undefined,
       };
     } catch (error: any) {
+      // Handle 401 authentication errors - disable Twitter plugin
+      if (error.code === 401 || error.statusCode === 401) {
+        logger.error('[TWITTER WRAPPER] Authentication failed (401 Unauthorized). Twitter plugin will be disabled.');
+        logger.error('[TWITTER WRAPPER] Please check your TWITTER_API_KEY, TWITTER_API_SECRET_KEY, TWITTER_ACCESS_TOKEN, and TWITTER_ACCESS_TOKEN_SECRET.');
+        this.v2Client = null; // Disable the client
+        return null;
+      }
+
       // Handle rate limit errors gracefully
       if (error.code === 429 || error.statusCode === 429) {
         this.parseRateLimitHeaders(error.headers || error.response?.headers);
         logger.warn('[TWITTER WRAPPER] Profile fetch rate limited, continuing gracefully');
         return null; // Return null instead of throwing
       }
+
       throw error;
     }
   }
@@ -176,14 +192,16 @@ class RateLimitAwareTwitterService extends Service {
   }
 }
 
-// Create the plugin wrapper
+export { RateLimitAwareTwitterService };
+
+// Create's plugin wrapper
 export const twitterWrapperPlugin: Plugin = {
   name: 'twitter-wrapper',
   description: 'Twitter plugin with rate limit handling',
 
   services: [RateLimitAwareTwitterService],
 
-  // Add any actions, providers, etc. that the original Twitter plugin has
+  // Add any actions, providers, etc. that of original Twitter plugin has
   // For now, we'll keep it minimal and focused on the rate limit issue
 };
 

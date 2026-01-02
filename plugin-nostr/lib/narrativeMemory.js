@@ -898,30 +898,33 @@ OUTPUT JSON:
 
   async _loadNarrativesFromDatabase() {
     // Direct database query by content type - works across all rooms
-    const adapter = this.runtime?.databaseAdapter;
-    const queryFunc = adapter && (
-      (typeof adapter.query === 'function' ? adapter.query.bind(adapter) : null) ||
-      (adapter.db && typeof adapter.db.query === 'function' ? adapter.db.query.bind(adapter.db) : null)
-    );
+    // ElizaOS uses runtime.db (getter) for direct DB access via Drizzle ORM
+    const db = this.runtime?.db;
     
-    if (!queryFunc) {
-      this.logger.debug('[NARRATIVE-MEMORY] No direct query function available');
+    // Get the underlying pg client for raw SQL queries
+    // Drizzle wraps pg Pool, so $client should give us access
+    const pgClient = db?.$client;
+    
+    if (!pgClient || typeof pgClient.query !== 'function') {
+      this.logger.debug('[NARRATIVE-MEMORY] No pg client available, will use room-based loading');
       return false;
     }
+
+    this.logger.info('[NARRATIVE-MEMORY] Direct DB query available via pg client, loading narratives...');
 
     try {
       // Query hourly digests/narratives
       const hourlyTypes = ['hourly_digest', 'narrative_hourly'];
-      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)).toISOString();
       
-      const hourlyResult = await queryFunc(
+      const hourlyResult = await pgClient.query(
         `SELECT id, content, created_at FROM memories 
          WHERE content->>'type' = ANY($1) 
-         AND created_at > $2 
+         AND created_at > $2::timestamp 
          ORDER BY created_at DESC 
          LIMIT $3`,
         [hourlyTypes, sevenDaysAgo, this.maxHourlyCache]
-      ).catch(() => null);
+      ).catch((e) => { this.logger.debug('[NARRATIVE-MEMORY] Hourly query failed:', e?.message); return null; });
 
       if (hourlyResult?.rows) {
         for (const row of hourlyResult.rows) {
@@ -940,16 +943,16 @@ OUTPUT JSON:
 
       // Query daily reports/narratives
       const dailyTypes = ['daily_report', 'narrative_daily'];
-      const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+      const ninetyDaysAgo = new Date(Date.now() - (90 * 24 * 60 * 60 * 1000)).toISOString();
       
-      const dailyResult = await queryFunc(
+      const dailyResult = await pgClient.query(
         `SELECT id, content, created_at FROM memories 
          WHERE content->>'type' = ANY($1) 
-         AND created_at > $2 
+         AND created_at > $2::timestamp 
          ORDER BY created_at DESC 
          LIMIT $3`,
         [dailyTypes, ninetyDaysAgo, this.maxDailyCache]
-      ).catch(() => null);
+      ).catch((e) => { this.logger.debug('[NARRATIVE-MEMORY] Daily query failed:', e?.message); return null; });
 
       if (dailyResult?.rows) {
         for (const row of dailyResult.rows) {
@@ -968,16 +971,16 @@ OUTPUT JSON:
 
       // Query weekly narratives
       const weeklyTypes = ['narrative_weekly'];
-      const yearAgo = Date.now() - (365 * 24 * 60 * 60 * 1000);
+      const yearAgo = new Date(Date.now() - (365 * 24 * 60 * 60 * 1000)).toISOString();
       
-      const weeklyResult = await queryFunc(
+      const weeklyResult = await pgClient.query(
         `SELECT id, content, created_at FROM memories 
          WHERE content->>'type' = ANY($1) 
-         AND created_at > $2 
+         AND created_at > $2::timestamp 
          ORDER BY created_at DESC 
          LIMIT $3`,
         [weeklyTypes, yearAgo, this.maxWeeklyCache]
-      ).catch(() => null);
+      ).catch((e) => { this.logger.debug('[NARRATIVE-MEMORY] Weekly query failed:', e?.message); return null; });
 
       if (weeklyResult?.rows) {
         for (const row of weeklyResult.rows) {
@@ -997,13 +1000,13 @@ OUTPUT JSON:
       // Query timeline lore
       const timelineTypes = ['narrative_timeline'];
       
-      const timelineResult = await queryFunc(
+      const timelineResult = await pgClient.query(
         `SELECT id, content, created_at FROM memories 
          WHERE content->>'type' = ANY($1) 
          ORDER BY created_at DESC 
          LIMIT $2`,
         [timelineTypes, this.maxTimelineLoreCache]
-      ).catch(() => null);
+      ).catch((e) => { this.logger.debug('[NARRATIVE-MEMORY] Timeline query failed:', e?.message); return null; });
 
       if (timelineResult?.rows) {
         for (const row of timelineResult.rows) {

@@ -31,7 +31,7 @@ const PLUGIN_NAMES = [
   // Platform integrations
   '@elizaos/plugin-telegram',
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured
-  // '@elizaos/plugin-twitter', // Disabled - re-enable when API credentials are configured
+  '@elizaos/plugin-twitter',
   // Additional features
   '@elizaos/plugin-knowledge',
   // Custom plugins (local)

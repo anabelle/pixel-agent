@@ -67,7 +67,8 @@ class NarrativeMemory {
     if (!this._systemContextPromise) {
       try {
         const { ensureNostrContextSystem } = require('./context');
-        const createUniqueUuid = this.runtime?.createUniqueUuid;
+        // Use this.createUniqueUuid (set from options in constructor) not runtime.createUniqueUuid
+        const createUniqueUuid = this.createUniqueUuid || (this.runtime ? this.runtime.createUniqueUuid : null);
         let channelType = null;
         try {
           if (this.runtime?.ChannelType) {
@@ -253,6 +254,8 @@ class NarrativeMemory {
   async storeTimelineLore(entry) {
     if (!entry || (typeof entry !== 'object')) return;
 
+    this.logger.info(`[NARRATIVE-MEMORY] storeTimelineLore called with headline: ${entry.headline?.substring(0, 50) || 'no headline'}`);
+
     const record = {
       ...entry,
       timestamp: entry.timestamp || Date.now(),
@@ -288,8 +291,9 @@ class NarrativeMemory {
 
     try {
       await this._persistNarrative(record, 'timeline');
+      this.logger.info(`[NARRATIVE-MEMORY] Timeline lore persist completed`);
     } catch (err) {
-      this.logger.debug('[NARRATIVE-MEMORY] Failed to persist timeline lore:', err?.message || err);
+      this.logger.info('[NARRATIVE-MEMORY] Failed to persist timeline lore:', err?.message || err);
     }
   }
 
@@ -1189,12 +1193,17 @@ OUTPUT JSON:
 
   async _persistNarrative(narrative, type) {
     if (!this.runtime || typeof this.runtime.createMemory !== 'function') {
+      this.logger.info(`[NARRATIVE-MEMORY] Cannot persist ${type}: runtime.createMemory not available`);
       return;
     }
 
     try {
-      const createUniqueUuid = this.runtime.createUniqueUuid;
-      if (!createUniqueUuid) return;
+      // Use this.createUniqueUuid (set from options in constructor) not runtime.createUniqueUuid
+      const createUniqueUuid = this.createUniqueUuid || (this.runtime ? this.runtime.createUniqueUuid : null);
+      if (!createUniqueUuid) {
+        this.logger.info(`[NARRATIVE-MEMORY] Cannot persist ${type}: createUniqueUuid not available`);
+        return;
+      }
 
       const timestamp = Date.now();
       const systemContext = await this._getSystemContext();
@@ -1212,8 +1221,10 @@ OUTPUT JSON:
       const memoryId = createUniqueUuid(this.runtime, `nostr-narrative-${type}-${timestamp}`);
       const worldId = systemContext?.worldId;
 
+      this.logger.info(`[NARRATIVE-MEMORY] _persistNarrative(${type}) roomId=${roomId} entityId=${entityId} memoryId=${memoryId} worldId=${worldId}`);
+
       if (!roomId || !entityId || !memoryId) {
-        this.logger.debug(`[NARRATIVE-MEMORY] Failed to generate UUIDs for ${type} narrative`);
+        this.logger.info(`[NARRATIVE-MEMORY] Failed to generate UUIDs for ${type} narrative`);
         return;
       }
 
@@ -1236,17 +1247,19 @@ OUTPUT JSON:
 
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
+      this.logger.info(`[NARRATIVE-MEMORY] Calling createMemorySafe for ${type} with content.type=${memory.content.type}`);
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
+      this.logger.info(`[NARRATIVE-MEMORY] createMemorySafe result for ${type}: ${JSON.stringify(result)}`);
       if (result && (result === true || result.created)) {
-        this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative`);
+        this.logger.info(`[NARRATIVE-MEMORY] Persisted ${type} narrative successfully`);
         this._appendPublicLog(narrative, type);
       } else {
-        this.logger.warn(`[NARRATIVE-MEMORY] Failed to persist ${type} narrative (storage)`);
+        this.logger.warn(`[NARRATIVE-MEMORY] Failed to persist ${type} narrative (storage) result=${JSON.stringify(result)}`);
         // Still try to log to public for visibility even if DB fails
         this._appendPublicLog(narrative, type);
       }
     } catch (err) {
-      this.logger.debug(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);
+      this.logger.info(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);
     }
   }
 

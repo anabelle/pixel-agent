@@ -230,45 +230,60 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
           causeMsg.includes('memories_entity_id_entities_id_fk') ||
           (causeMsg.includes('entity_id') && causeMsg.includes('entities'));
 
+        const isRoomFk =
+          causeMsg.includes('memories_room_id_rooms_id_fk') ||
+          (causeMsg.includes('room_id') && causeMsg.includes('rooms'));
+
+        // Attempt to recover from FK violations by ensuring the required entities exist
         if (
-          isEntityFk &&
-          runtime?.ensureConnection &&
-          memory?.entityId &&
+          (isEntityFk || isRoomFk) &&
           memory?.roomId &&
           (memory?.worldId || memory?.world_id)
         ) {
           const source = memory?.content?.source || 'nostr';
           const worldId = memory.worldId || memory.world_id;
           const roomType = 'FEED';
-          const name = memory?.content?.name || memory?.content?.userName || memory.entityId;
-          const userName = memory?.content?.userName || memory.entityId;
+          const name = memory?.content?.name || memory?.content?.userName || memory.entityId || 'Nostr System';
+          const userName = memory?.content?.userName || memory.entityId || 'system';
 
-          logger?.warn?.(`[NOSTR] FK recovery: ensuring world/room/connection for entity=${memory.entityId}`);
-          await runtime.ensureWorldExists?.({
-            id: worldId,
-            name: 'Nostr',
-            agentId: runtime.agentId,
-            serverId: source,
-            metadata: { source }
-          }).catch(() => { });
-          await runtime.ensureRoomExists?.({
-            id: memory.roomId,
-            name: 'Nostr',
-            source,
-            type: roomType,
-            channelId: memory.roomId,
-            serverId: source,
-            worldId
-          }).catch(() => { });
-          await runtime.ensureConnection({
-            entityId: memory.entityId,
-            roomId: memory.roomId,
-            userName,
-            name,
-            source,
-            type: roomType,
-            worldId
-          }).catch(() => { });
+          logger?.info?.(`[NOSTR] FK recovery: ensuring world/room/entity for room=${memory.roomId} world=${worldId}`);
+          
+          // Always ensure world exists first (rooms depend on it)
+          if (runtime?.ensureWorldExists) {
+            await runtime.ensureWorldExists({
+              id: worldId,
+              name: 'Nostr',
+              agentId: runtime.agentId,
+              serverId: source,
+              metadata: { source }
+            }).catch((e) => logger?.debug?.('[NOSTR] ensureWorldExists failed:', e?.message));
+          }
+          
+          // Always ensure room exists (memories depend on it)
+          if (runtime?.ensureRoomExists) {
+            await runtime.ensureRoomExists({
+              id: memory.roomId,
+              name: 'Nostr',
+              source,
+              type: roomType,
+              channelId: memory.roomId,
+              serverId: source,
+              worldId
+            }).catch((e) => logger?.debug?.('[NOSTR] ensureRoomExists failed:', e?.message));
+          }
+          
+          // If entity FK, also ensure connection
+          if (isEntityFk && runtime?.ensureConnection && memory?.entityId) {
+            await runtime.ensureConnection({
+              entityId: memory.entityId,
+              roomId: memory.roomId,
+              userName,
+              name,
+              source,
+              type: roomType,
+              worldId
+            }).catch((e) => logger?.debug?.('[NOSTR] ensureConnection failed:', e?.message));
+          }
         }
       }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));

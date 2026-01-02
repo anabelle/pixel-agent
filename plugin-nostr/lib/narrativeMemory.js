@@ -873,128 +873,17 @@ OUTPUT JSON:
       const rooms = systemContext?.rooms || {};
       const getRoomId = (type) => rooms[`narratives${type.charAt(0).toUpperCase() + type.slice(1)}`] || createUniqueUuid(this.runtime, `nostr-narratives-${type}`);
 
-      // Load hourly narratives (last 7 days)
-      const hourlyRoomId = getRoomId('hourly');
-      let hourlyMems = [];
-      try {
-        const res = this.runtime.getMemories({
-          roomId: hourlyRoomId,
-          tableName: 'messages',
-          count: this.maxHourlyCache,
-        });
-        hourlyMems = await Promise.resolve(res);
-      } catch { hourlyMems = []; }
+      // Try direct database query first (queries ALL rooms by content type)
+      // This handles historical data that may be in different rooms
+      const directQuerySuccess = await this._loadNarrativesFromDatabase();
 
-      for (const mem of hourlyMems) {
-        if (mem.content?.type === 'narrative_hourly' && mem.content?.data) {
-          this.hourlyNarratives.push({
-            ...mem.content.data,
-            timestamp: mem.createdAt || Date.now(),
-            type: 'hourly'
-          });
-        }
+      // If direct query succeeded and found data, skip room-based loading
+      if (directQuerySuccess && (this.hourlyNarratives.length > 0 || this.dailyNarratives.length > 0)) {
+        this.logger.info(`[NARRATIVE-MEMORY] Loaded via direct DB query: ${this.hourlyNarratives.length} hourly, ${this.dailyNarratives.length} daily narratives`);
+      } else {
+        // Fallback to room-based loading for future compatibility
+        await this._loadNarrativesFromRooms(rooms, getRoomId, createUniqueUuid);
       }
-
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
-
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
-
-      // Load daily narratives (last 90 days)
-      // Check both narrative room and daily reports room (from ContextAccumulator)
-      const dailyNarrativeRoomId = getRoomId('daily');
-      const dailyReportsRoomId = rooms.dailyReports || createUniqueUuid(this.runtime, 'nostr-daily-reports');
-
-      let dailyMems = [];
-      try {
-        // Fetch from both sources
-        const [resNarrative, resReports] = await Promise.all([
-          this.runtime.getMemories({
-            roomId: dailyNarrativeRoomId,
-            tableName: 'messages',
-            count: this.maxDailyCache,
-          }).catch(() => []),
-          this.runtime.getMemories({
-            roomId: dailyReportsRoomId,
-            tableName: 'messages',
-            count: this.maxDailyCache,
-          }).catch(() => [])
-        ]);
-
-        dailyMems = [...(resNarrative || []), ...(resReports || [])];
-
-        // Deduplicate by ID
-        const seenIds = new Set();
-        dailyMems = dailyMems.filter(m => {
-          if (seenIds.has(m.id)) return false;
-          seenIds.add(m.id);
-          return true;
-        });
-
-        // Sort by date desc
-        dailyMems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-      } catch { dailyMems = []; }
-
-      for (const mem of dailyMems) {
-        // Accept both narrative_daily and daily_report
-        if ((mem.content?.type === 'narrative_daily' || mem.content?.type === 'daily_report') && mem.content?.data) {
-          this.dailyNarratives.push({
-            ...mem.content.data,
-            timestamp: mem.createdAt || Date.now(),
-            type: 'daily' // Normalize type to 'daily' for internal usage
-          });
-        }
-      }
-
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
-
-      // Load weekly narratives
-      const weeklyRoomId = getRoomId('weekly');
-      let weeklyMems = [];
-      try {
-        const resWeekly = this.runtime.getMemories({
-          roomId: weeklyRoomId,
-          tableName: 'messages',
-          count: this.maxWeeklyCache,
-        });
-        weeklyMems = await Promise.resolve(resWeekly);
-      } catch { weeklyMems = []; }
-
-      for (const mem of weeklyMems) {
-        if (mem.content?.type === 'narrative_weekly' && mem.content?.data) {
-          this.weeklyNarratives.push({
-            ...mem.content.data,
-            timestamp: mem.createdAt || Date.now(),
-            type: 'weekly'
-          });
-        }
-      }
-
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
-
-      // Load timeline lore entries
-      const timelineRoomId = getRoomId('timeline');
-      let timelineMems = [];
-      try {
-        const resTimeline = this.runtime.getMemories({
-          roomId: timelineRoomId,
-          tableName: 'messages',
-          count: this.maxTimelineLoreCache,
-        });
-        timelineMems = await Promise.resolve(resTimeline);
-      } catch { timelineMems = []; }
-
-      for (const mem of timelineMems) {
-        if (mem.content?.type === 'narrative_timeline' && mem.content?.data) {
-          this.timelineLore.push({
-            ...mem.content.data,
-            timestamp: mem.createdAt || Date.now(),
-            type: 'timeline'
-          });
-        }
-      }
-
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
 
       // Sort all by timestamp
       this.hourlyNarratives.sort((a, b) => a.timestamp - b.timestamp);
@@ -1005,6 +894,287 @@ OUTPUT JSON:
     } catch (err) {
       this.logger.error('[NARRATIVE-MEMORY] Failed to load narratives:', err.message);
     }
+  }
+
+  async _loadNarrativesFromDatabase() {
+    // Direct database query by content type - works across all rooms
+    const adapter = this.runtime?.databaseAdapter;
+    const queryFunc = adapter && (
+      (typeof adapter.query === 'function' ? adapter.query.bind(adapter) : null) ||
+      (adapter.db && typeof adapter.db.query === 'function' ? adapter.db.query.bind(adapter.db) : null)
+    );
+    
+    if (!queryFunc) {
+      this.logger.debug('[NARRATIVE-MEMORY] No direct query function available');
+      return false;
+    }
+
+    try {
+      // Query hourly digests/narratives
+      const hourlyTypes = ['hourly_digest', 'narrative_hourly'];
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      
+      const hourlyResult = await queryFunc(
+        `SELECT id, content, created_at FROM memories 
+         WHERE content->>'type' = ANY($1) 
+         AND created_at > $2 
+         ORDER BY created_at DESC 
+         LIMIT $3`,
+        [hourlyTypes, sevenDaysAgo, this.maxHourlyCache]
+      ).catch(() => null);
+
+      if (hourlyResult?.rows) {
+        for (const row of hourlyResult.rows) {
+          const content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+          if (content?.data) {
+            this.hourlyNarratives.push({
+              ...content.data,
+              timestamp: row.created_at || Date.now(),
+              type: 'hourly'
+            });
+          }
+        }
+      }
+
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+
+      // Query daily reports/narratives
+      const dailyTypes = ['daily_report', 'narrative_daily'];
+      const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+      
+      const dailyResult = await queryFunc(
+        `SELECT id, content, created_at FROM memories 
+         WHERE content->>'type' = ANY($1) 
+         AND created_at > $2 
+         ORDER BY created_at DESC 
+         LIMIT $3`,
+        [dailyTypes, ninetyDaysAgo, this.maxDailyCache]
+      ).catch(() => null);
+
+      if (dailyResult?.rows) {
+        for (const row of dailyResult.rows) {
+          const content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+          if (content?.data) {
+            this.dailyNarratives.push({
+              ...content.data,
+              timestamp: row.created_at || Date.now(),
+              type: 'daily'
+            });
+          }
+        }
+      }
+
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
+
+      // Query weekly narratives
+      const weeklyTypes = ['narrative_weekly'];
+      const yearAgo = Date.now() - (365 * 24 * 60 * 60 * 1000);
+      
+      const weeklyResult = await queryFunc(
+        `SELECT id, content, created_at FROM memories 
+         WHERE content->>'type' = ANY($1) 
+         AND created_at > $2 
+         ORDER BY created_at DESC 
+         LIMIT $3`,
+        [weeklyTypes, yearAgo, this.maxWeeklyCache]
+      ).catch(() => null);
+
+      if (weeklyResult?.rows) {
+        for (const row of weeklyResult.rows) {
+          const content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+          if (content?.data) {
+            this.weeklyNarratives.push({
+              ...content.data,
+              timestamp: row.created_at || Date.now(),
+              type: 'weekly'
+            });
+          }
+        }
+      }
+
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
+
+      // Query timeline lore
+      const timelineTypes = ['narrative_timeline'];
+      
+      const timelineResult = await queryFunc(
+        `SELECT id, content, created_at FROM memories 
+         WHERE content->>'type' = ANY($1) 
+         ORDER BY created_at DESC 
+         LIMIT $2`,
+        [timelineTypes, this.maxTimelineLoreCache]
+      ).catch(() => null);
+
+      if (timelineResult?.rows) {
+        for (const row of timelineResult.rows) {
+          const content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+          if (content?.data) {
+            this.timelineLore.push({
+              ...content.data,
+              timestamp: row.created_at || Date.now(),
+              type: 'timeline'
+            });
+          }
+        }
+      }
+
+      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
+
+      return true;
+    } catch (err) {
+      this.logger.debug('[NARRATIVE-MEMORY] Direct DB query failed, falling back to room-based:', err?.message);
+      return false;
+    }
+  }
+
+  async _loadNarrativesFromRooms(rooms, getRoomId, createUniqueUuid) {
+    // Room-based loading (original approach - fallback)
+
+    // Load hourly narratives (last 7 days)
+    // Check both narrative room and hourly digests room (from ContextAccumulator)
+    const hourlyNarrativeRoomId = getRoomId('hourly');
+    const hourlyDigestsRoomId = rooms.hourlyDigests || createUniqueUuid(this.runtime, 'nostr-hourly-digests');
+    
+    let hourlyMems = [];
+    try {
+      // Fetch from both sources (narrative memory and context accumulator digests)
+      const [resNarrative, resDigests] = await Promise.all([
+        this.runtime.getMemories({
+          roomId: hourlyNarrativeRoomId,
+          tableName: 'messages',
+          count: this.maxHourlyCache,
+        }).catch(() => []),
+        this.runtime.getMemories({
+          roomId: hourlyDigestsRoomId,
+          tableName: 'messages',
+          count: this.maxHourlyCache,
+        }).catch(() => [])
+      ]);
+
+      hourlyMems = [...(resNarrative || []), ...(resDigests || [])];
+
+      // Deduplicate by ID
+      const seenIds = new Set();
+      hourlyMems = hourlyMems.filter(m => {
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return true;
+      });
+
+      // Sort by date desc
+      hourlyMems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    } catch { hourlyMems = []; }
+
+    for (const mem of hourlyMems) {
+      // Accept both narrative_hourly and hourly_digest (from ContextAccumulator)
+      if ((mem.content?.type === 'narrative_hourly' || mem.content?.type === 'hourly_digest') && mem.content?.data) {
+        this.hourlyNarratives.push({
+          ...mem.content.data,
+          timestamp: mem.createdAt || Date.now(),
+          type: 'hourly'
+        });
+      }
+    }
+
+    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+
+    // Load daily narratives (last 90 days)
+    // Check both narrative room and daily reports room (from ContextAccumulator)
+    const dailyNarrativeRoomId = getRoomId('daily');
+    const dailyReportsRoomId = rooms.dailyReports || createUniqueUuid(this.runtime, 'nostr-daily-reports');
+
+    let dailyMems = [];
+    try {
+      // Fetch from both sources
+      const [resNarrative, resReports] = await Promise.all([
+        this.runtime.getMemories({
+          roomId: dailyNarrativeRoomId,
+          tableName: 'messages',
+          count: this.maxDailyCache,
+        }).catch(() => []),
+        this.runtime.getMemories({
+          roomId: dailyReportsRoomId,
+          tableName: 'messages',
+          count: this.maxDailyCache,
+        }).catch(() => [])
+      ]);
+
+      dailyMems = [...(resNarrative || []), ...(resReports || [])];
+
+      // Deduplicate by ID
+      const seenIds = new Set();
+      dailyMems = dailyMems.filter(m => {
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return true;
+      });
+
+      // Sort by date desc
+      dailyMems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    } catch { dailyMems = []; }
+
+    for (const mem of dailyMems) {
+      // Accept both narrative_daily and daily_report
+      if ((mem.content?.type === 'narrative_daily' || mem.content?.type === 'daily_report') && mem.content?.data) {
+        this.dailyNarratives.push({
+          ...mem.content.data,
+          timestamp: mem.createdAt || Date.now(),
+          type: 'daily' // Normalize type to 'daily' for internal usage
+        });
+      }
+    }
+
+    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
+
+    // Load weekly narratives
+    const weeklyRoomId = getRoomId('weekly');
+    let weeklyMems = [];
+    try {
+      const resWeekly = this.runtime.getMemories({
+        roomId: weeklyRoomId,
+        tableName: 'messages',
+        count: this.maxWeeklyCache,
+      });
+      weeklyMems = await Promise.resolve(resWeekly);
+    } catch { weeklyMems = []; }
+
+    for (const mem of weeklyMems) {
+      if (mem.content?.type === 'narrative_weekly' && mem.content?.data) {
+        this.weeklyNarratives.push({
+          ...mem.content.data,
+          timestamp: mem.createdAt || Date.now(),
+          type: 'weekly'
+        });
+      }
+    }
+
+    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
+
+    // Load timeline lore entries
+    const timelineRoomId = getRoomId('timeline');
+    let timelineMems = [];
+    try {
+      const resTimeline = this.runtime.getMemories({
+        roomId: timelineRoomId,
+        tableName: 'messages',
+        count: this.maxTimelineLoreCache,
+      });
+      timelineMems = await Promise.resolve(resTimeline);
+    } catch { timelineMems = []; }
+
+    for (const mem of timelineMems) {
+      if (mem.content?.type === 'narrative_timeline' && mem.content?.data) {
+        this.timelineLore.push({
+          ...mem.content.data,
+          timestamp: mem.createdAt || Date.now(),
+          type: 'timeline'
+        });
+      }
+    }
+
+    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
   }
 
   async _rebuildTrends() {

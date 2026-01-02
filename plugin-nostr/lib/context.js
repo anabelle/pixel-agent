@@ -66,10 +66,12 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
         logger?.debug?.('[NOSTR] Failed to create UUID for seed', seed, err?.message || err);
       }
     }
-    // Fallback: generate a valid UUID v4 from the seed
+    // Fallback: generate a DETERMINISTIC UUID v5-style from the seed (no Date.now/Math.random)
+    // This ensures room IDs remain consistent across restarts
     const crypto = require('crypto');
-    const hash = crypto.createHash('sha256').update(`${seed}:${Date.now()}:${Math.random()}`).digest('hex');
-    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)]}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+    const agentId = runtime?.agentId || 'default-agent';
+    const hash = crypto.createHash('sha256').update(`${agentId}:${seed}`).digest('hex');
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   };
 
   const worldId = makeId('nostr:context');

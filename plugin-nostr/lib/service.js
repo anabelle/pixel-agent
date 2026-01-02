@@ -5741,11 +5741,17 @@ Response (YES/NO):`;
     // Setup main event subscriptions
     try {
       const safePk = String(this.pkHex || '').trim();
-      const filter = { kinds: [1, 4, 7, 14, 9735], '#p': [safePk] };
+      const filters = [
+        { kinds: [1], '#p': [safePk] },
+        { kinds: [4], '#p': [safePk] },
+        { kinds: [7], '#p': [safePk] },
+        { kinds: [14], '#p': [safePk] },
+        { kinds: [9735], '#p': [safePk] },
+      ];
 
       const sub = this.pool.subscribeMany(
         this.relays,
-        filter,
+        filters,
         {
           onevent: (evt) => {
             try {
@@ -6107,7 +6113,8 @@ Response (YES/NO):`;
         logger.warn(`[NOSTR] Repost failed on all ${failCount} relays: ${error}`);
         return false;
       }
-      this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)} from ${parentEvt.pubkey.slice(0, 8)} (content: "${parentEvt.content.slice(0, 200)}${parentEvt.content.length > 200 ? '...' : ''}")`);
+      const parentContent = typeof parentEvt.content === 'string' ? parentEvt.content : '';
+      this.logger.info(`[NOSTR] Reposted ${parentEvt.id.slice(0, 8)} from ${parentEvt.pubkey.slice(0, 8)} (content: "${parentContent.slice(0, 200)}${parentContent.length > 200 ? '...' : ''}")`);
 
       this.userInteractionCount.set(parentEvt.pubkey, (this.userInteractionCount.get(parentEvt.pubkey) || 0) + 1);
       await this._saveInteractionCounts();
@@ -7601,6 +7608,7 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
 
   async _list(relays, filters) {
     if (!this.pool) return [];
+    const log = this.logger || console;
     try {
       // Workaround: Unboxing single-element filter arrays to avoid "not an object" errors
       const finalFilters = (Array.isArray(filters) && filters.length === 1) ? filters[0] : filters;
@@ -7622,48 +7630,53 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
           })
           .filter(o => o && typeof o === 'object' && Object.keys(o).length > 0);
       } catch (sanErr) {
-        try { logger.debug('[NOSTR] Filter sanitization failed:', sanErr?.message || sanErr); } catch { }
+        try { log.debug?.('[NOSTR] Filter sanitization failed:', sanErr?.message || sanErr); } catch { }
         f = (Array.isArray(finalFilters) ? finalFilters : [finalFilters]).filter(x => x && typeof x === 'object');
       }
 
-      const events = [];
-      const _this = this;
-
-      // Use subscribeMap with Promise wrapper to simulate list()
-      // subscribeMap expects: [{ url, filter }, ...] where filter is a single object
-      const requests = [];
-      for (const relay of relays) {
-        for (const filter of f) {
-          requests.push({ url: relay, filter });
-        }
+      // Prefer SimplePool.list when available
+      if (typeof this.pool.list === 'function') {
+        return await this.pool.list(relays, f);
       }
+
+      const events = [];
+      const seen = new Set();
 
       return await new Promise((resolve) => {
         let completed = false;
-        const sub = _this.pool.subscribeMap(requests, {
-          onevent(event) {
+
+        const sub = this.pool.subscribeMany(relays, f, {
+          onevent: (event) => {
+            const id = event?.id;
+            if (id && seen.has(id)) return;
+            if (id) seen.add(id);
             events.push(event);
           },
-          oneose() {
-            if (!completed) {
-              completed = true;
-              sub.close();
-              resolve(events);
-            }
-          }
+          oneose: () => {
+            if (completed) return;
+            completed = true;
+            try {
+              if (typeof sub === 'function') sub();
+              else sub?.close?.();
+            } catch { }
+            resolve(events);
+          },
         });
 
         // Timeout safety (3s)
         setTimeout(() => {
           if (!completed) {
             completed = true;
-            sub.close();
+            try {
+              if (typeof sub === 'function') sub();
+              else sub?.close?.();
+            } catch { }
             resolve(events);
           }
         }, 3000);
       });
     } catch (e) {
-      logger.error(`[NOSTR] _list failed: ${e.message}`);
+      try { log.error?.(`[NOSTR] _list failed: ${e.message}`); } catch { }
       return [];
     }
   }

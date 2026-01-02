@@ -47,8 +47,8 @@ function generateNostrUri(eventId, authorPubkey, relays = []) {
     // Lazy require to avoid hard dependency during simple tests
     let nip19 = null;
     try {
-      const tools = require('@nostr/tools');
-      nip19 = tools.nip19;
+      const tools = require('nostr-tools');
+      nip19 = tools?.nip19 || tools?.default?.nip19;
     } catch (e) {
       // ES module issue, fallback
     }
@@ -79,8 +79,8 @@ function generateNostrProfileUri(pubkey, relays = []) {
     // Lazy require to avoid hard dependency during simple tests
     let nip19 = null;
     try {
-      const tools = require('@nostr/tools');
-      nip19 = tools.nip19;
+      const tools = require('nostr-tools');
+      nip19 = tools?.nip19 || tools?.default?.nip19;
     } catch (e) {
       // ES module issue, fallback
     }
@@ -112,8 +112,8 @@ function parseNostrUri(uri) {
     // Lazy require to avoid hard dependency during simple tests
     let nip19 = null;
     try {
-      const tools = require('@nostr/tools');
-      nip19 = tools.nip19;
+      const tools = require('nostr-tools');
+      nip19 = tools?.nip19 || tools?.default?.nip19;
     } catch (e) {
       // ES module issue, fallback
     }

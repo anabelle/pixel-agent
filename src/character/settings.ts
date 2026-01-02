@@ -27,7 +27,7 @@ export const settings = {
   OPENROUTER_MODEL:
     process.env.OPENROUTER_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_LARGE_MODEL:
-    process.env.OPENROUTER_LARGE_MODEL || "deepseek/deepseek-r1:free",
+    process.env.OPENROUTER_LARGE_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_SMALL_MODEL:
     process.env.OPENROUTER_SMALL_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_IMAGE_MODEL:

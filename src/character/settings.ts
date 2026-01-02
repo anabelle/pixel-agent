@@ -7,8 +7,10 @@ export const settings = {
   TWITTER_API_SECRET_KEY: process.env.TWITTER_API_SECRET_KEY || "",
   TWITTER_ACCESS_TOKEN: process.env.TWITTER_ACCESS_TOKEN || "",
   TWITTER_ACCESS_TOKEN_SECRET: process.env.TWITTER_ACCESS_TOKEN_SECRET || "",
-  ENABLE_TWITTER_PLUGIN: process.env.ENABLE_TWITTER_PLUGIN || "true",
-  TWITTER_POST_ENABLE: process.env.TWITTER_POST_ENABLE || "true",
+  // Disabled: 24-hour rate limit exhausted (resets ~2026-01-03T22:30 UTC)
+  // Re-enable by setting ENABLE_TWITTER_PLUGIN=true in .env
+  ENABLE_TWITTER_PLUGIN: process.env.ENABLE_TWITTER_PLUGIN || "false",
+  TWITTER_POST_ENABLE: process.env.TWITTER_POST_ENABLE || "false",
   TWITTER_POST_IMMEDIATELY: process.env.TWITTER_POST_IMMEDIATELY || "false",
   TWITTER_POST_INTERVAL_MIN: process.env.TWITTER_POST_INTERVAL_MIN || "120",
   TWITTER_POST_INTERVAL_MAX: process.env.TWITTER_POST_INTERVAL_MAX || "240",
@@ -21,22 +23,22 @@ export const settings = {
   INSTAGRAM_USER_ID: process.env.INSTAGRAM_USER_ID || "",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || "",
   IMAGE_DESCRIPTION:
-    process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+    process.env.OPENROUTER_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_MODEL:
-    process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free",
+    process.env.OPENROUTER_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_LARGE_MODEL:
     process.env.OPENROUTER_LARGE_MODEL || "deepseek/deepseek-r1:free",
   OPENROUTER_SMALL_MODEL:
-    process.env.OPENROUTER_SMALL_MODEL || "openai/gpt-5-mini",
+    process.env.OPENROUTER_SMALL_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_IMAGE_MODEL:
-    process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-5-mini",
+    process.env.OPENROUTER_IMAGE_MODEL || "xiaomi/mimo-v2-flash:free",
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-5-mini",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
-  // Enable OpenAI for text embeddings
-  USE_OPENAI_EMBEDDING: "true",
+  // Disable OpenAI embeddings - use OpenRouter instead
+  USE_OPENAI_EMBEDDING: process.env.USE_OPENAI_EMBEDDING || "false",
   TEXT_EMBEDDING_MODEL: "text-embedding-3-small",
   GOOGLE_GENERATIVE_AI_API_KEY:
     process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",

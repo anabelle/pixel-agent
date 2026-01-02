@@ -16,22 +16,28 @@ import { resolve } from 'path';
 
 // Import only the pure data parts of the character (no plugin instances)
 import { characterManifest } from '../src/character/manifest';
+import { settings } from '../src/character/settings';
+
+// Check if Twitter should be enabled (honors rate limits when disabled)
+const enableTwitter = settings.ENABLE_TWITTER_PLUGIN === 'true';
 
 // Plugin names that the ElizaOS CLI will resolve at runtime
 // Order matters: bootstrap first, then adapters, then features
+// NOTE: OpenRouter BEFORE OpenAI so it handles TEXT_SMALL/TEXT_LARGE first (free models)
 const PLUGIN_NAMES = [
   // Core bootstrapping
   '@elizaos/plugin-bootstrap',
   // Database adapter (PostgreSQL for production)
   '@elizaos/adapter-postgres',
   // '@elizaos/plugin-sql',
-  // AI providers
-  '@elizaos/plugin-openai',
+  // AI providers - OpenRouter first for free models!
   '@elizaos/plugin-openrouter',
+  '@elizaos/plugin-openai', // Fallback for embeddings if needed
   // Platform integrations
   '@elizaos/plugin-telegram',
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured
-  '@elizaos/plugin-twitter',
+  // Twitter: conditionally included based on ENABLE_TWITTER_PLUGIN setting
+  ...(enableTwitter ? ['@elizaos/plugin-twitter'] : []),
   // Additional features
   '@elizaos/plugin-knowledge',
   // Custom plugins (local)
@@ -53,6 +59,7 @@ writeFileSync(outputPath, JSON.stringify(character, null, 2));
 console.log(`✅ Character file generated: ${outputPath}`);
 console.log(`   - Name: ${character.name}`);
 console.log(`   - Plugins: ${PLUGIN_NAMES.length}`);
+console.log(`   - Twitter: ${enableTwitter ? 'ENABLED' : 'DISABLED (rate limit protection)'}`);
 
 // Verify the file was created
 if (existsSync(outputPath)) {

@@ -165,7 +165,7 @@ class NarrativeMemory {
       }).join('\n') + '\n';
 
       fs.writeFileSync(logPath, entries);
-      this.logger.info(`[NARRATIVE-MEMORY] Dumped ${validMemories.length} memories to public log`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Dumped ${validMemories.length} memories to public log`);
     } catch (err) {
       // Use debug to avoid spamming logs if volume not mounted
       this.logger.debug('[NARRATIVE-MEMORY] Failed to dump initial logs (volume might not be mounted):', err.message);
@@ -883,7 +883,7 @@ OUTPUT JSON:
 
       // If direct query succeeded and found data, skip room-based loading
       if (directQuerySuccess && (this.hourlyNarratives.length > 0 || this.dailyNarratives.length > 0)) {
-        this.logger.info(`[NARRATIVE-MEMORY] Loaded via direct DB query: ${this.hourlyNarratives.length} hourly, ${this.dailyNarratives.length} daily narratives`);
+        this.logger.debug(`[NARRATIVE-MEMORY] Loaded via direct DB query: ${this.hourlyNarratives.length} hourly, ${this.dailyNarratives.length} daily narratives`);
       } else {
         // Fallback to room-based loading for future compatibility
         await this._loadNarrativesFromRooms(rooms, getRoomId, createUniqueUuid);
@@ -914,7 +914,7 @@ OUTPUT JSON:
       return false;
     }
 
-    this.logger.info('[NARRATIVE-MEMORY] Direct DB query available via pg client, loading narratives...');
+    this.logger.debug('[NARRATIVE-MEMORY] Direct DB query available via pg client, loading narratives...');
 
     try {
       // Query hourly digests/narratives
@@ -943,7 +943,7 @@ OUTPUT JSON:
         }
       }
 
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
 
       // Query daily reports/narratives
       const dailyTypes = ['daily_report', 'narrative_daily'];
@@ -971,7 +971,7 @@ OUTPUT JSON:
         }
       }
 
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
 
       // Query weekly narratives
       const weeklyTypes = ['narrative_weekly'];
@@ -999,7 +999,7 @@ OUTPUT JSON:
         }
       }
 
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
       // Query timeline lore
       const timelineTypes = ['narrative_timeline'];
@@ -1025,7 +1025,7 @@ OUTPUT JSON:
         }
       }
 
-      this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
 
       return true;
     } catch (err) {
@@ -1084,7 +1084,7 @@ OUTPUT JSON:
       }
     }
 
-    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
+    this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.hourlyNarratives.length} hourly narratives`);
 
     // Load daily narratives (last 90 days)
     // Check both narrative room and daily reports room (from ContextAccumulator)
@@ -1133,7 +1133,7 @@ OUTPUT JSON:
       }
     }
 
-    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
+    this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.dailyNarratives.length} daily narratives`);
 
     // Load weekly narratives
     const weeklyRoomId = getRoomId('weekly');
@@ -1157,7 +1157,7 @@ OUTPUT JSON:
       }
     }
 
-    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
+    this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.weeklyNarratives.length} weekly narratives`);
 
     // Load timeline lore entries
     const timelineRoomId = getRoomId('timeline');
@@ -1181,7 +1181,7 @@ OUTPUT JSON:
       }
     }
 
-    this.logger.info(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
+    this.logger.debug(`[NARRATIVE-MEMORY] Loaded ${this.timelineLore.length} timeline lore entries`);
   }
 
   async _rebuildTrends() {
@@ -1193,7 +1193,7 @@ OUTPUT JSON:
 
   async _persistNarrative(narrative, type) {
     if (!this.runtime || typeof this.runtime.createMemory !== 'function') {
-      this.logger.info(`[NARRATIVE-MEMORY] Cannot persist ${type}: runtime.createMemory not available`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Cannot persist ${type}: runtime.createMemory not available`);
       return;
     }
 
@@ -1201,7 +1201,7 @@ OUTPUT JSON:
       // Use this.createUniqueUuid (set from options in constructor) not runtime.createUniqueUuid
       const createUniqueUuid = this.createUniqueUuid || (this.runtime ? this.runtime.createUniqueUuid : null);
       if (!createUniqueUuid) {
-        this.logger.info(`[NARRATIVE-MEMORY] Cannot persist ${type}: createUniqueUuid not available`);
+        this.logger.debug(`[NARRATIVE-MEMORY] Cannot persist ${type}: createUniqueUuid not available`);
         return;
       }
 
@@ -1221,10 +1221,10 @@ OUTPUT JSON:
       const memoryId = createUniqueUuid(this.runtime, `nostr-narrative-${type}-${timestamp}`);
       const worldId = systemContext?.worldId;
 
-      this.logger.info(`[NARRATIVE-MEMORY] _persistNarrative(${type}) roomId=${roomId} entityId=${entityId} memoryId=${memoryId} worldId=${worldId}`);
+      this.logger.debug(`[NARRATIVE-MEMORY] _persistNarrative(${type}) roomId=${roomId} entityId=${entityId} memoryId=${memoryId} worldId=${worldId}`);
 
       if (!roomId || !entityId || !memoryId) {
-        this.logger.info(`[NARRATIVE-MEMORY] Failed to generate UUIDs for ${type} narrative`);
+        this.logger.debug(`[NARRATIVE-MEMORY] Failed to generate UUIDs for ${type} narrative`);
         return;
       }
 
@@ -1247,11 +1247,11 @@ OUTPUT JSON:
 
       // Use createMemorySafe from context.js for retry logic
       const { createMemorySafe } = require('./context');
-      this.logger.info(`[NARRATIVE-MEMORY] Calling createMemorySafe for ${type} with content.type=${memory.content.type}`);
+      this.logger.debug(`[NARRATIVE-MEMORY] Calling createMemorySafe for ${type} with content.type=${memory.content.type}`);
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
-      this.logger.info(`[NARRATIVE-MEMORY] createMemorySafe result for ${type}: ${JSON.stringify(result)}`);
+      this.logger.debug(`[NARRATIVE-MEMORY] createMemorySafe result for ${type}: ${JSON.stringify(result)}`);
       if (result && (result === true || result.created)) {
-        this.logger.info(`[NARRATIVE-MEMORY] Persisted ${type} narrative successfully`);
+        this.logger.debug(`[NARRATIVE-MEMORY] Persisted ${type} narrative successfully`);
         this._appendPublicLog(narrative, type);
       } else {
         this.logger.warn(`[NARRATIVE-MEMORY] Failed to persist ${type} narrative (storage) result=${JSON.stringify(result)}`);
@@ -1259,7 +1259,7 @@ OUTPUT JSON:
         this._appendPublicLog(narrative, type);
       }
     } catch (err) {
-      this.logger.info(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);
+      this.logger.debug(`[NARRATIVE-MEMORY] Failed to persist narrative:`, err.message);
     }
   }
 

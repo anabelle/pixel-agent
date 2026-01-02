@@ -30,9 +30,14 @@ class RateLimitAwareTwitterService extends Service {
     pausedUntil: null,
     lastChecked: null
   };
+  private dryRun: boolean = false;
 
   constructor(protected runtime: IAgentRuntime) {
     super();
+    this.dryRun = runtime.getSetting('TWITTER_DRY_RUN') === 'true';
+    if (this.dryRun) {
+      logger.info('[TWITTER WRAPPER] DRY-RUN MODE: No actual posts will be made');
+    }
   }
 
   static async start(runtime: IAgentRuntime): Promise<RateLimitAwareTwitterService> {
@@ -177,6 +182,139 @@ class RateLimitAwareTwitterService extends Service {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Test authentication and retrieve account info
+   */
+  async testAuth(): Promise<{ success: boolean; profile: any | null; error?: string }> {
+    if (!this.v2Client) {
+      return {
+        success: false,
+        profile: null,
+        error: 'Twitter client not initialized'
+      };
+    }
+
+    try {
+      const { data: user } = await this.v2Client.v2.me({
+        "user.fields": [
+          "id",
+          "name",
+          "username",
+          "description",
+          "profile_image_url",
+          "public_metrics",
+          "verified",
+          "location",
+          "created_at"
+        ]
+      });
+
+      const profile = {
+        userId: user.id,
+        username: user.username,
+        name: user.name,
+        biography: user.description,
+        avatar: user.profile_image_url,
+        followersCount: user.public_metrics?.followers_count,
+        followingCount: user.public_metrics?.following_count,
+        isVerified: user.verified,
+        location: user.location || "",
+        joined: user.created_at ? new Date(user.created_at) : undefined,
+      };
+
+      logger.info('[TWITTER WRAPPER] Authentication successful');
+      return { success: true, profile };
+    } catch (error: any) {
+      if (error.code === 401 || error.statusCode === 401) {
+        logger.error('[TWITTER WRAPPER] Authentication failed (401 Unauthorized)');
+        return {
+          success: false,
+          profile: null,
+          error: 'Authentication failed - check credentials'
+        };
+      }
+
+      logger.error('[TWITTER WRAPPER] Auth test error:', error.message);
+      return {
+        success: false,
+        profile: null,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Post tweet (supports dry-run mode)
+   */
+  async postTweet(content: string): Promise<{ success: boolean; tweetId: string | null; dryRun: boolean; error?: string }> {
+    if (this.dryRun) {
+      logger.info('[TWITTER WRAPPER] DRY-RUN MODE - Would post:', content.substring(0, 100));
+      return {
+        success: true,
+        tweetId: null,
+        dryRun: true
+      };
+    }
+
+    if (!this.v2Client) {
+      return {
+        success: false,
+        tweetId: null,
+        dryRun: false,
+        error: 'Twitter client not initialized'
+      };
+    }
+
+    if (this.shouldPauseOperations()) {
+      logger.warn('[TWITTER WRAPPER] Skipping post due to rate limit');
+      return {
+        success: false,
+        tweetId: null,
+        dryRun: false,
+        error: 'Rate limited - operations paused'
+      };
+    }
+
+    try {
+      const { data: tweet } = await this.v2Client.v2.tweet(content);
+      logger.info('[TWITTER WRAPPER] Tweet posted successfully:', tweet.id);
+      return {
+        success: true,
+        tweetId: tweet.id,
+        dryRun: false
+      };
+    } catch (error: any) {
+      if (error.code === 401 || error.statusCode === 401) {
+        logger.error('[TWITTER WRAPPER] Post failed (401 Unauthorized)');
+        return {
+          success: false,
+          tweetId: null,
+          dryRun: false,
+          error: 'Authentication failed'
+        };
+      }
+
+      if (error.code === 429 || error.statusCode === 429) {
+        this.parseRateLimitHeaders(error.headers || error.response?.headers);
+        logger.warn('[TWITTER WRAPPER] Post rate limited');
+        return {
+          success: false,
+          tweetId: null,
+          dryRun: false,
+          error: 'Rate limited'
+        };
+      }
+
+      logger.error('[TWITTER WRAPPER] Post error:', error.message);
+      return {
+        success: false,
+        tweetId: null,
+        dryRun: false,
+        error: error.message
+      };
     }
   }
 

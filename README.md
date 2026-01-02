@@ -122,6 +122,7 @@ pixel-agent/
 │   ├── index.ts                       # Agent runtime and entry point
 │   ├── provider-fallback-plugin.ts    # Fallback AI provider management
 │   ├── twitter-rate-limit-safe-plugin.ts  # Twitter rate limit handling
+│   ├── twitter-wrapper-plugin.ts      # Twitter plugin wrapper
 │   └── plugins/                       # Custom plugins and extensions
 ├── plugin-nostr/                      # Advanced Nostr integration with memory system
 │   ├── lib/
@@ -135,8 +136,6 @@ pixel-agent/
 ├── package.json                       # Dependencies and scripts
 └── README.md                         # This file
 ```
-
-## 🚀 Quick Start
 
 ## 🚀 Quick Start
 
@@ -154,7 +153,7 @@ docker compose logs -f agent
 ### Option 2: Local Development
 **Prerequisites:**
 - Bun runtime (v1.3+): `curl -fsSL https://bun.sh/install | bash`
-- PostgreSQL 15+ with `pgvector` (or use Docker: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg15`)
+- PostgreSQL 15+ with `pgvector` (Recommended) - OR use SQLite (default fallback)
 
 ```bash
 # Install dependencies (includes @elizaos/cli)
@@ -165,7 +164,7 @@ bun run build
 bun run start
 ```
 
-**Note:** In the Pixel repo Docker setup, the agent is configured to use external PostgreSQL via `POSTGRES_URL`.
+**Note:** The repo's Docker setup uses external PostgreSQL via `POSTGRES_URL`. The `clean-db` script is for SQLite only.
 
 ## 🔧 Platform-Specific Setup
 

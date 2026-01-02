@@ -17,10 +17,10 @@
 ### Monitoring Commands
 ```bash
 # Quick status overview
-./check-monitor.sh
+./scripts/monitoring/check-monitor.sh
 
 # Real-time server statistics
-node server-monitor.js --once
+node scripts/monitoring/server-monitor.js --once
 
 # View detailed monitoring logs
 pm2 logs server-monitor
@@ -66,7 +66,7 @@ pm2 logs server-monitor --err
 tail -5 server-monitor.log
 
 # Test monitoring script directly
-node server-monitor.js --once
+node scripts/monitoring/server-monitor.js --once
 ```
 
 ### PM2 Process Issues

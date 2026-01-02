@@ -24,9 +24,10 @@ async function ensureNostrContext(runtime, userPubkey, usernameLike, conversatio
   const roomId = createUniqueUuid(runtime, conversationId);
   const entityId = createUniqueUuid(runtime, userPubkey);
   logger?.info?.(`[NOSTR] Ensuring context world/room/connection for pubkey=${String(userPubkey).slice(0, 8)} conv=${String(conversationId).slice(0, 8)}`);
+  const roomType = ChannelType?.FEED || 'FEED';
   await runtime.ensureWorldExists({ id: worldId, name: `${usernameLike || String(userPubkey).slice(0, 8)}'s Nostr`, agentId: runtime.agentId, serverId: userPubkey, metadata: { ownership: { ownerId: userPubkey }, nostr: { pubkey: userPubkey }, }, }).catch(() => { });
-  await runtime.ensureRoomExists({ id: roomId, name: `Nostr thread ${String(conversationId).slice(0, 8)}`, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, channelId: conversationId, serverId: userPubkey, worldId, }).catch(() => { });
-  await runtime.ensureConnection({ entityId, roomId, userName: usernameLike || userPubkey, name: usernameLike || userPubkey, source: 'nostr', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => { });
+  await runtime.ensureRoomExists({ id: roomId, name: `Nostr thread ${String(conversationId).slice(0, 8)}`, source: 'nostr', type: roomType, channelId: conversationId, serverId: userPubkey, worldId, }).catch(() => { });
+  await runtime.ensureConnection({ entityId, roomId, userName: usernameLike || userPubkey, name: usernameLike || userPubkey, source: 'nostr', type: roomType, worldId, }).catch(() => { });
   logger?.info?.(`[NOSTR] Context ensured world=${worldId} room=${roomId} entity=${entityId}`);
   return { worldId, roomId, entityId };
 }
@@ -39,9 +40,10 @@ async function ensureLNPixelsContext(runtime, deps) {
   const entityId = createUniqueUuid(runtime, 'lnpixels:system');
   try {
     logger?.info?.('[NOSTR] Ensuring LNPixels context (world/rooms/connection)');
+    const roomType = ChannelType?.FEED || 'FEED';
     await runtime.ensureWorldExists({ id: worldId, name: 'LNPixels', agentId: runtime.agentId, serverId: 'lnpixels', metadata: { system: true, source: 'lnpixels' } }).catch(() => { });
-    await runtime.ensureRoomExists({ id: canvasRoomId, name: 'LNPixels Canvas', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, channelId: 'lnpixels:canvas', serverId: 'lnpixels', worldId, }).catch(() => { });
-    await runtime.ensureConnection({ entityId, roomId: canvasRoomId, userName: 'lnpixels', name: 'LNPixels System', source: 'lnpixels', type: ChannelType ? ChannelType.FEED : undefined, worldId, }).catch(() => { });
+    await runtime.ensureRoomExists({ id: canvasRoomId, name: 'LNPixels Canvas', source: 'lnpixels', type: roomType, channelId: 'lnpixels:canvas', serverId: 'lnpixels', worldId, }).catch(() => { });
+    await runtime.ensureConnection({ entityId, roomId: canvasRoomId, userName: 'lnpixels', name: 'LNPixels System', source: 'lnpixels', type: roomType, worldId, }).catch(() => { });
     logger?.info?.(`[NOSTR] LNPixels context ensured world=${worldId} canvasRoom=${canvasRoomId} entity=${entityId}`);
   } catch { }
   // Use canvas room as the locks room as well (avoids schema issues for extra room types)
@@ -96,13 +98,14 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
 
     // Create the entity ONCE before creating rooms to avoid duplicate entity creation errors
     // Each room will just link to this existing entity
+    const systemRoomType = ChannelType?.FEED || 'FEED';
     await runtime.ensureConnection({
       entityId,
       roomId: rooms.dailyReports, // Use any room as the initial connection point
       userName: 'nostr-context',
       name: 'Nostr Context Engine',
       source: 'nostr',
-      type: ChannelType ? ChannelType.FEED : undefined,
+      type: systemRoomType,
       worldId,
       metadata: {
         name: 'Nostr Context Engine',
@@ -124,7 +127,7 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
         id: roomId,
         name,
         source: 'nostr',
-        type: ChannelType ? ChannelType.FEED : undefined,
+        type: systemRoomType,
         channelId,
         serverId: 'nostr:context',
         worldId

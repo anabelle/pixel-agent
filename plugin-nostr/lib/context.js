@@ -96,9 +96,21 @@ async function ensureNostrContextSystem(runtime, deps = {}) {
       metadata: { system: true, source: 'nostr' }
     }).catch(() => { });
 
+    // Ensure the seed room exists before creating the initial connection.
+    // Some adapters require room/world to exist before they can create an entity connection.
+    const systemRoomType = ChannelType?.FEED || 'FEED';
+    await runtime.ensureRoomExists({
+      id: rooms.dailyReports,
+      name: 'Nostr Daily Reports',
+      source: 'nostr',
+      type: systemRoomType,
+      channelId: 'nostr:context:daily',
+      serverId: 'nostr:context',
+      worldId
+    }).catch(() => { });
+
     // Create the entity ONCE before creating rooms to avoid duplicate entity creation errors
     // Each room will just link to this existing entity
-    const systemRoomType = ChannelType?.FEED || 'FEED';
     await runtime.ensureConnection({
       entityId,
       roomId: rooms.dailyReports, // Use any room as the initial connection point
@@ -211,6 +223,51 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
       if (causeCode === '23503' || msg.includes('foreign key')) {
         logger?.warn?.(`[NOSTR] FK violation: entity=${memory.entityId} room=${memory.roomId} world=${memory.worldId} agent=${memory.agentId}`);
         logger?.warn?.(`[NOSTR] FK cause: ${causeMsg}`);
+
+        const isEntityFk =
+          causeMsg.includes('memories_entity_id_entities_id_fk') ||
+          (causeMsg.includes('entity_id') && causeMsg.includes('entities'));
+
+        if (
+          isEntityFk &&
+          runtime?.ensureConnection &&
+          memory?.entityId &&
+          memory?.roomId &&
+          (memory?.worldId || memory?.world_id)
+        ) {
+          const source = memory?.content?.source || 'nostr';
+          const worldId = memory.worldId || memory.world_id;
+          const roomType = 'FEED';
+          const name = memory?.content?.name || memory?.content?.userName || memory.entityId;
+          const userName = memory?.content?.userName || memory.entityId;
+
+          logger?.warn?.(`[NOSTR] FK recovery: ensuring world/room/connection for entity=${memory.entityId}`);
+          await runtime.ensureWorldExists?.({
+            id: worldId,
+            name: 'Nostr',
+            agentId: runtime.agentId,
+            serverId: source,
+            metadata: { source }
+          }).catch(() => { });
+          await runtime.ensureRoomExists?.({
+            id: memory.roomId,
+            name: 'Nostr',
+            source,
+            type: roomType,
+            channelId: memory.roomId,
+            serverId: source,
+            worldId
+          }).catch(() => { });
+          await runtime.ensureConnection({
+            entityId: memory.entityId,
+            roomId: memory.roomId,
+            userName,
+            name,
+            source,
+            type: roomType,
+            worldId
+          }).catch(() => { });
+        }
       }
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
     }

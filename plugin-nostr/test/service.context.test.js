@@ -42,6 +42,46 @@ describe('context helpers', () => {
     expect(ok).toBe(true);
   });
 
+  it('createMemorySafe attempts FK recovery for missing entity', async () => {
+    const { runtime, calls } = makeRuntime();
+    let first = true;
+    let createMemoryCalls = 0;
+
+    runtime.createMemory = async () => {
+      createMemoryCalls += 1;
+      if (first) {
+        first = false;
+        const e = new Error('FK violation');
+        e.cause = {
+          code: '23503',
+          message: 'insert or update on table "memories" violates foreign key constraint "memories_entity_id_entities_id_fk"'
+        };
+        throw e;
+      }
+      return true;
+    };
+
+    const ok = await createMemorySafe(
+      runtime,
+      {
+        id: 'm1',
+        entityId: 'e1',
+        roomId: 'r1',
+        worldId: 'w1',
+        agentId: 'agent-1',
+        content: { source: 'nostr', text: 'hello' },
+        createdAt: Date.now()
+      },
+      'messages',
+      2,
+      logger
+    );
+
+    expect(ok).toBeTruthy();
+    expect(calls.ensureConnection.length).toBeGreaterThan(0);
+    expect(createMemoryCalls).toBe(2);
+  });
+
   it('saveInteractionMemory uses runtime.createMemory', async () => {
     const { runtime, calls } = makeRuntime();
     await saveInteractionMemory(runtime, makeCUU, getConv, { id: 'evt1', pubkey: 'pk1', content: 'hello' }, 'reply', { replied: true }, logger);

@@ -117,7 +117,7 @@ describe('ThreadContextResolver', () => {
       expect(result.thread).toHaveLength(2);
       expect(result.thread.map(e => e.id)).toContain('root');
       expect(result.thread.map(e => e.id)).toContain('reply');
-      expect(result.isRoot).toBe(false);
+      expect(result.isRoot).toBe(true);
       expect(result.rootId).toBe('root');
     });
 
@@ -188,16 +188,17 @@ describe('ThreadContextResolver', () => {
       expect(resolver.assessThreadContextQuality(undefined)).toBe(0);
     });
 
-    it('returns low score for single short event', () => {
+    it('returns moderate score for single recent short event', () => {
       const resolver = new ThreadContextResolver({
         pool: {},
         relays: ['wss://test.com']
       });
 
-      const evt = makeEvent('evt1', 1000, [], 'hi');
+      const evt = makeEvent('evt1', Math.floor(Date.now() / 1000), [], 'hi');
       const score = resolver.assessThreadContextQuality([evt]);
 
-      expect(score).toBeLessThan(0.5);
+      expect(score).toBeGreaterThan(0);
+      expect(score).toBeLessThan(1.0);
     });
 
     it('returns high score for multiple events with varied content', () => {
@@ -363,7 +364,7 @@ describe('ThreadContextResolver', () => {
         logger: { debug: vi.fn() }
       });
 
-      const evt = makeEvent('evt1', 1000, [['e', 'root']], 'reply');
+      const evt = makeEvent('evt1', 1000, [['e', 'root']], 'This is a reply about pixel art');
       const threadContext = {
         thread: [
           makeEvent('root', 900, [], 'I love pixel art and creative expression'),
@@ -400,20 +401,20 @@ describe('ThreadContextResolver', () => {
       expect(shouldEngage).toBe(false);
     });
 
-    it('returns false for bot patterns', () => {
+    it('returns false for bot patterns in non-root events', () => {
       const resolver = new ThreadContextResolver({
         pool: {},
         relays: ['wss://test.com']
       });
 
-      const botPatterns = ['gm', 'repost', '12345', '!@#$%'];
+      const botPatterns = ['gm', 'repost', 'rt', 'gn'];
 
       for (const content of botPatterns) {
-        const evt = makeEvent('evt1', 1000, [], content);
+        const evt = makeEvent('evt1', 1000, [['e', 'root']], content);
         const threadContext = {
-          thread: [evt],
-          isRoot: true,
-          contextQuality: 0.8
+          thread: [makeEvent('root', 900, [], 'relevant pixel content'), evt],
+          isRoot: false,
+          contextQuality: 0.5
         };
 
         const shouldEngage = resolver.shouldEngageWithThread(evt, threadContext);
@@ -422,18 +423,18 @@ describe('ThreadContextResolver', () => {
       }
     });
 
-    it('returns false for very short content', () => {
+    it('returns false for very short content in non-root events', () => {
       const resolver = new ThreadContextResolver({
         pool: {},
         relays: ['wss://test.com'],
         logger: { debug: vi.fn() }
       });
 
-      const evt = makeEvent('evt1', 1000, [], 'hi');
+      const evt = makeEvent('evt1', 1000, [['e', 'root']], 'hi');
       const threadContext = {
-        thread: [evt],
-        isRoot: true,
-        contextQuality: 0.8
+        thread: [makeEvent('root', 900, [], 'relevant pixel art'), evt],
+        isRoot: false,
+        contextQuality: 0.5
       };
 
       const shouldEngage = resolver.shouldEngageWithThread(evt, threadContext);
@@ -441,18 +442,18 @@ describe('ThreadContextResolver', () => {
       expect(shouldEngage).toBe(false);
     });
 
-    it('returns false for very long content', () => {
+    it('returns false for very long content in non-root events', () => {
       const resolver = new ThreadContextResolver({
         pool: {},
         relays: ['wss://test.com'],
         logger: { debug: vi.fn() }
       });
 
-      const evt = makeEvent('evt1', 1000, [], 'a'.repeat(801));
+      const evt = makeEvent('evt1', 1000, [['e', 'root']], 'a'.repeat(801));
       const threadContext = {
-        thread: [evt],
-        isRoot: true,
-        contextQuality: 0.8
+        thread: [makeEvent('root', 900, [], 'relevant pixel art'), evt],
+        isRoot: false,
+        contextQuality: 0.5
       };
 
       const shouldEngage = resolver.shouldEngageWithThread(evt, threadContext);

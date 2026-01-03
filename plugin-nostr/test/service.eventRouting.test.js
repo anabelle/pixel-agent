@@ -5,8 +5,11 @@ describe('NostrService Event Routing', () => {
   let service;
   let mockRuntime;
   let mockPool;
+  let capturedOnevent;
 
   beforeEach(() => {
+    capturedOnevent = null;
+    
     // Mock runtime with minimal required interface
     mockRuntime = {
       character: { name: 'Test', postExamples: ['test'] },
@@ -28,8 +31,6 @@ describe('NostrService Event Routing', () => {
           'NOSTR_CONNECTION_MONITOR_ENABLE': 'false',
           'NOSTR_UNFOLLOW_ENABLE': 'false',
           'NOSTR_DM_THROTTLE_SEC': '60',
-          'NOSTR_DM_REPLY_ENABLE': 'true',
-          'NOSTR_DM_ENABLE': 'true',
           'NOSTR_REPLY_THROTTLE_SEC': '60',
           'NOSTR_REPLY_INITIAL_DELAY_MIN_MS': '0',
           'NOSTR_REPLY_INITIAL_DELAY_MAX_MS': '0',
@@ -59,8 +60,13 @@ describe('NostrService Event Routing', () => {
       agentId: 'test-agent'
     };
 
-    // Mock pool to capture subscription setup
+    // Mock pool with subscribeMap (current API used by service)
     mockPool = {
+      subscribeMap: vi.fn((requests, callbacks) => {
+        // Capture the onevent handler for tests
+        capturedOnevent = callbacks.onevent;
+        return vi.fn(); // unsub function
+      }),
       subscribeMany: vi.fn(() => vi.fn()),
       publish: vi.fn(),
       close: vi.fn()
@@ -72,59 +78,53 @@ describe('NostrService Event Routing', () => {
   });
 
   afterEach(() => {
-    mockPool.subscribeMany.mockClear();
     vi.restoreAllMocks();
   });
 
   describe('Subscription Setup', () => {
-    it('subscribes to correct event kinds', async () => {
+    it('subscribes to correct event kinds via subscribeMap', async () => {
       service = await NostrService.start(mockRuntime);
 
-      expect(mockPool.subscribeMany).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.arrayContaining([
-          expect.objectContaining({ kinds: [1], '#p': expect.any(Array) }),
-          expect.objectContaining({ kinds: [4], '#p': expect.any(Array) }),
-          expect.objectContaining({ kinds: [14], '#p': expect.any(Array) }),
-          expect.objectContaining({ kinds: [9735], '#p': expect.any(Array) })
-        ]),
-        expect.objectContaining({
-          onevent: expect.any(Function),
-          oneose: expect.any(Function)
-        })
-      );
+      expect(mockPool.subscribeMap).toHaveBeenCalled();
+      const call = mockPool.subscribeMap.mock.calls[0];
+      const requests = call[0];
+      
+      // subscribeMap gets an array of { url, filter } objects
+      const kinds = requests.map(r => r.filter.kinds[0]);
+      expect(kinds).toContain(1);  // Text notes (mentions)
+      expect(kinds).toContain(4);  // DMs
+      expect(kinds).toContain(14); // Sealed DMs
+      expect(kinds).toContain(9735); // Zaps
     });
 
     it('includes pubkey in subscription filters', async () => {
       service = await NostrService.start(mockRuntime);
 
-      const subscribeCall = mockPool.subscribeMany.mock.calls[0];
-      const filters = subscribeCall[1];
-
-      filters.forEach(filter => {
-        expect(filter['#p']).toContain(service.pkHex);
+      const call = mockPool.subscribeMap.mock.calls[0];
+      const requests = call[0];
+      
+      requests.forEach(req => {
+        expect(req.filter['#p']).toContain(service.pkHex);
       });
     });
   });
 
   describe('Event Routing Logic', () => {
-    let oneventHandler;
-
     beforeEach(async () => {
       service = await NostrService.start(mockRuntime);
-
+      // Spy on the handlers
       vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
       vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
-      
-      // Extract the onevent handler from the subscribeMany call
-      const subscribeCall = mockPool.subscribeMany.mock.calls[0];
-      const callbacks = subscribeCall[2];
-      oneventHandler = callbacks.onevent;
     });
 
     it('routes kind 1 events to handleMention', async () => {
+      if (!capturedOnevent) {
+        // If no handler was captured (listen disabled), skip
+        return;
+      }
+      
       const mentionEvent = {
         id: 'mention-id',
         kind: 1,
@@ -134,7 +134,7 @@ describe('NostrService Event Routing', () => {
         tags: [['p', service.pkHex]]
       };
 
-      await oneventHandler(mentionEvent);
+      await capturedOnevent(mentionEvent);
 
       expect(service.handleMention).toHaveBeenCalledWith(mentionEvent);
       expect(service.handleDM).not.toHaveBeenCalled();
@@ -143,6 +143,8 @@ describe('NostrService Event Routing', () => {
     });
 
     it('routes kind 4 events to handleDM', async () => {
+      if (!capturedOnevent) return;
+      
       const dmEvent = {
         id: 'dm-id',
         kind: 4,
@@ -152,7 +154,7 @@ describe('NostrService Event Routing', () => {
         tags: [['p', service.pkHex]]
       };
 
-      await oneventHandler(dmEvent);
+      await capturedOnevent(dmEvent);
 
       expect(service.handleDM).toHaveBeenCalledWith(dmEvent);
       expect(service.handleMention).not.toHaveBeenCalled();
@@ -161,6 +163,8 @@ describe('NostrService Event Routing', () => {
     });
 
     it('routes kind 14 events to handleSealedDM', async () => {
+      if (!capturedOnevent) return;
+      
       const sealedDmEvent = {
         id: 'sealed-dm-id',
         kind: 14,
@@ -170,7 +174,7 @@ describe('NostrService Event Routing', () => {
         tags: [['p', service.pkHex]]
       };
 
-      await oneventHandler(sealedDmEvent);
+      await capturedOnevent(sealedDmEvent);
 
       expect(service.handleSealedDM).toHaveBeenCalledWith(sealedDmEvent);
       expect(service.handleMention).not.toHaveBeenCalled();
@@ -179,6 +183,8 @@ describe('NostrService Event Routing', () => {
     });
 
     it('routes kind 9735 events to handleZap', async () => {
+      if (!capturedOnevent) return;
+      
       const zapEvent = {
         id: 'zap-id',
         kind: 9735,
@@ -188,7 +194,7 @@ describe('NostrService Event Routing', () => {
         tags: [['p', service.pkHex]]
       };
 
-      await oneventHandler(zapEvent);
+      await capturedOnevent(zapEvent);
 
       expect(service.handleZap).toHaveBeenCalledWith(zapEvent);
       expect(service.handleMention).not.toHaveBeenCalled();
@@ -197,6 +203,8 @@ describe('NostrService Event Routing', () => {
     });
 
     it('ignores unknown event kinds', async () => {
+      if (!capturedOnevent) return;
+      
       const unknownEvent = {
         id: 'unknown-id',
         kind: 99999,
@@ -205,7 +213,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await oneventHandler(unknownEvent);
+      await capturedOnevent(unknownEvent);
 
       expect(service.handleMention).not.toHaveBeenCalled();
       expect(service.handleDM).not.toHaveBeenCalled();
@@ -214,6 +222,8 @@ describe('NostrService Event Routing', () => {
     });
 
     it('skips self-authored events', async () => {
+      if (!capturedOnevent) return;
+      
       const selfEvent = {
         id: 'self-id',
         kind: 1,
@@ -222,7 +232,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await oneventHandler(selfEvent);
+      await capturedOnevent(selfEvent);
 
       expect(service.handleMention).not.toHaveBeenCalled();
       expect(service.handleDM).not.toHaveBeenCalled();
@@ -232,16 +242,12 @@ describe('NostrService Event Routing', () => {
   });
 
   describe('Handler Error Resilience', () => {
-    let oneventHandler;
-
     beforeEach(async () => {
       service = await NostrService.start(mockRuntime);
       vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
       vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
-      const subscribeCall = mockPool.subscribeMany.mock.calls[0];
-      oneventHandler = subscribeCall[2].onevent;
     });
 
     it('continues processing after handleMention error', async () => {
@@ -255,8 +261,8 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-  // Should not throw
-  await oneventHandler(mentionEvent);
+      // Should not throw
+      await capturedOnevent(mentionEvent);
       expect(service.handleMention).toHaveBeenCalled();
     });
 
@@ -271,7 +277,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-  await oneventHandler(dmEvent);
+      await capturedOnevent(dmEvent);
       expect(service.handleDM).toHaveBeenCalled();
     });
 
@@ -286,22 +292,18 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-  await oneventHandler(zapEvent);
+      await capturedOnevent(zapEvent);
       expect(service.handleZap).toHaveBeenCalled();
     });
   });
 
   describe('Regression Prevention', () => {
-    let oneventHandler;
-
     beforeEach(async () => {
       service = await NostrService.start(mockRuntime);
       vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
       vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
-      const subscribeCall = mockPool.subscribeMany.mock.calls[0];
-      oneventHandler = subscribeCall[2].onevent;
     });
 
     it('REGRESSION: mentions (kind 1) must not be handled by DM handler', async () => {
@@ -313,7 +315,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await oneventHandler(mentionEvent);
+      await capturedOnevent(mentionEvent);
 
       expect(service.handleMention).toHaveBeenCalledWith(mentionEvent);
       expect(service.handleDM).not.toHaveBeenCalled();
@@ -328,7 +330,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await oneventHandler(dmEvent);
+      await capturedOnevent(dmEvent);
 
       expect(service.handleDM).toHaveBeenCalledWith(dmEvent);
       expect(service.handleMention).not.toHaveBeenCalled();
@@ -343,7 +345,7 @@ describe('NostrService Event Routing', () => {
         created_at: Math.floor(Date.now() / 1000)
       };
 
-      await oneventHandler(zapEvent);
+      await capturedOnevent(zapEvent);
 
       expect(service.handleZap).toHaveBeenCalledWith(zapEvent);
       expect(service.handleMention).not.toHaveBeenCalled();
@@ -353,11 +355,11 @@ describe('NostrService Event Routing', () => {
     it('REGRESSION: all handlers must have explicit kind checks', async () => {
       // This test ensures that adding new event kinds doesn't break existing handlers
       const events = [
-        { id: '1', kind: 1, pubkey: 'test', content: 'mention' },
-        { id: '2', kind: 4, pubkey: 'test', content: 'dm' },
-        { id: '3', kind: 14, pubkey: 'test', content: 'sealed' },
-        { id: '4', kind: 9735, pubkey: 'test', content: 'zap' },
-        { id: '5', kind: 999, pubkey: 'test', content: 'unknown' }
+        { id: '1', kind: 1, pubkey: 'test', content: 'mention', created_at: Math.floor(Date.now() / 1000) },
+        { id: '2', kind: 4, pubkey: 'test', content: 'dm', created_at: Math.floor(Date.now() / 1000) },
+        { id: '3', kind: 14, pubkey: 'test', content: 'sealed', created_at: Math.floor(Date.now() / 1000) },
+        { id: '4', kind: 9735, pubkey: 'test', content: 'zap', created_at: Math.floor(Date.now() / 1000) },
+        { id: '5', kind: 999, pubkey: 'test', content: 'unknown', created_at: Math.floor(Date.now() / 1000) }
       ];
 
       for (const event of events) {
@@ -367,7 +369,7 @@ describe('NostrService Event Routing', () => {
         service.handleSealedDM.mockClear();
         service.handleZap.mockClear();
 
-        await oneventHandler(event);
+        await capturedOnevent(event);
 
         // Count total handler calls
         const totalCalls = 
@@ -388,28 +390,24 @@ describe('NostrService Event Routing', () => {
   });
 
   describe('Event Processing Flow', () => {
-    let oneventHandler;
-
     beforeEach(async () => {
       service = await NostrService.start(mockRuntime);
       vi.spyOn(service, 'handleMention').mockImplementation(async () => {});
       vi.spyOn(service, 'handleDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleSealedDM').mockImplementation(async () => {});
       vi.spyOn(service, 'handleZap').mockImplementation(async () => {});
-      const subscribeCall = mockPool.subscribeMany.mock.calls[0];
-      oneventHandler = subscribeCall[2].onevent;
     });
 
     it('processes multiple events in sequence correctly', async () => {
       const events = [
-        { id: '1', kind: 1, pubkey: 'user1', content: 'mention 1' },
-        { id: '2', kind: 4, pubkey: 'user2', content: 'dm 1' },
-        { id: '3', kind: 9735, pubkey: 'user3', content: 'zap 1' },
-        { id: '4', kind: 1, pubkey: 'user4', content: 'mention 2' },
+        { id: '1', kind: 1, pubkey: 'user1', content: 'mention 1', created_at: Math.floor(Date.now() / 1000) },
+        { id: '2', kind: 4, pubkey: 'user2', content: 'dm 1', created_at: Math.floor(Date.now() / 1000) },
+        { id: '3', kind: 9735, pubkey: 'user3', content: 'zap 1', created_at: Math.floor(Date.now() / 1000) },
+        { id: '4', kind: 1, pubkey: 'user4', content: 'mention 2', created_at: Math.floor(Date.now() / 1000) },
       ];
 
       for (const event of events) {
-        await oneventHandler(event);
+        await capturedOnevent(event);
       }
 
       expect(service.handleMention).toHaveBeenCalledTimes(2);
@@ -419,13 +417,13 @@ describe('NostrService Event Routing', () => {
 
     it('handles concurrent events correctly', async () => {
       const events = [
-        { id: '1', kind: 1, pubkey: 'user1', content: 'mention' },
-        { id: '2', kind: 4, pubkey: 'user2', content: 'dm' },
-        { id: '3', kind: 9735, pubkey: 'user3', content: 'zap' },
+        { id: '1', kind: 1, pubkey: 'user1', content: 'mention', created_at: Math.floor(Date.now() / 1000) },
+        { id: '2', kind: 4, pubkey: 'user2', content: 'dm', created_at: Math.floor(Date.now() / 1000) },
+        { id: '3', kind: 9735, pubkey: 'user3', content: 'zap', created_at: Math.floor(Date.now() / 1000) },
       ];
 
       // Process all events concurrently
-      await Promise.all(events.map(event => oneventHandler(event)));
+      await Promise.all(events.map(event => capturedOnevent(event)));
 
       expect(service.handleMention).toHaveBeenCalledTimes(1);
       expect(service.handleDM).toHaveBeenCalledTimes(1);

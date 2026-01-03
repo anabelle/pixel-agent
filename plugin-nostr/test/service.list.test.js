@@ -62,15 +62,16 @@ describe('NostrService._list', () => {
     expect(listSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to subscribeMany and collects unique events', async () => {
+  it('falls back to subscribeMap and collects unique events', async () => {
     const svc = makeSvc();
     let handlers;
     const unsub = vi.fn();
-    const subscribeMany = vi.fn((_relays, _filters, cb) => {
+    // Service now uses subscribeMap instead of subscribeMany
+    const subscribeMap = vi.fn((_requests, cb) => {
       handlers = cb; // capture callbacks
       return unsub;
     });
-    svc.pool = { subscribeMany };
+    svc.pool = { subscribeMap };
 
     const p = svc._list(['wss://x'], [{ kinds: [1], limit: 5 }]);
 

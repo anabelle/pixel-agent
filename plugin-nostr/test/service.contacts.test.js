@@ -1,21 +1,37 @@
-const { describe, it, expect } = globalThis;
+const { describe, it, expect, vi, beforeEach, afterEach } = globalThis;
 const { loadCurrentContacts, publishContacts } = require('../lib/contacts.js');
 
-function makePoolList(events) {
+function makePoolWithEvents(events) {
+  // poolList uses subscribeMap, not list
   return {
-    list: (_relays, _filters) => Promise.resolve(events),
+    subscribeMap: (requests, callbacks) => {
+      // Simulate async delivery
+      setTimeout(() => {
+        events.forEach(evt => callbacks.onevent(evt));
+        callbacks.oneose();
+      }, 0);
+      return { close: () => {} };
+    }
   };
 }
 
 describe('contacts helpers', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('loadCurrentContacts extracts latest p-tags', async () => {
     const now = Math.floor(Date.now() / 1000);
     const events = [
-      { created_at: now - 100, tags: [['p', 'pkA'], ['p', 'pkB'], ['e', 'zzz']] },
-      { created_at: now - 10, tags: [['p', 'pkC'], ['p', 'pkD']] }, // latest
+      { id: '1', created_at: now - 100, tags: [['p', 'pkA'], ['p', 'pkB'], ['e', 'zzz']] },
+      { id: '2', created_at: now - 10, tags: [['p', 'pkC'], ['p', 'pkD']] }, // latest
     ];
-    const pool = makePoolList(events);
-    const set = await loadCurrentContacts(pool, ['wss://x'], 'myPubHex');
+    const pool = makePoolWithEvents(events);
+    const promise = loadCurrentContacts(pool, ['wss://x'], 'myPubHex');
+    
+    // Allow async callbacks to fire
+    await vi.advanceTimersByTimeAsync(300);
+    
+    const set = await promise;
     expect(set instanceof Set).toBe(true);
     expect(set.has('pkC')).toBe(true);
     expect(set.has('pkD')).toBe(true);
@@ -23,8 +39,10 @@ describe('contacts helpers', () => {
   });
 
   it('loadCurrentContacts returns empty set on no data', async () => {
-    const pool = makePoolList([]);
-    const set = await loadCurrentContacts(pool, ['wss://x'], 'myPubHex');
+    const pool = makePoolWithEvents([]);
+    const promise = loadCurrentContacts(pool, ['wss://x'], 'myPubHex');
+    await vi.advanceTimersByTimeAsync(300);
+    const set = await promise;
     expect(set.size).toBe(0);
   });
 

@@ -4287,12 +4287,6 @@ Response (YES/NO):`;
             this.logger.warn(`[NOSTR] Post failed on all ${failCount} relays: ${error}`);
             throw new Error(error);
           }
-          // Record to bridge for Syntropy feed export
-          try {
-            bridgeRecordPost({ id: signed.id, content: signed.content, created_at: signed.created_at, kind: signed.kind });
-          } catch (bridgeErr) {
-            this.logger.debug('[NOSTR] Bridge record failed:', bridgeErr?.message);
-          }
           this.logger.info(`[POST] Published note (${text.length} chars, type: ${postType})`);
           return true;
         } catch (err) {
@@ -4450,6 +4444,17 @@ Response (YES/NO):`;
         return { success: false, successCount, failCount, error: firstError?.message || String(firstError) };
       }
       logger.info(`[NOSTR] Published event ${signed.id.slice(0, 8)} to ${successCount} relays (kind: ${signed.kind})`);
+
+      // Record to bridge if it's a content post (Kind 1: Note, 6: Repost, 42: Channel Msg)
+      // This ensures Syntropy can see all agent output, including replies and scheduled posts
+      if (signed.kind === 1 || signed.kind === 6 || signed.kind === 42) {
+        try {
+          bridgeRecordPost({ id: signed.id, content: signed.content, created_at: signed.created_at, kind: signed.kind });
+        } catch (bridgeErr) {
+          try { logger?.debug?.('[NOSTR] Bridge record failed:', bridgeErr?.message); } catch { }
+        }
+      }
+
       return { success: true, successCount, failCount };
     } catch (err) {
       return { success: false, successCount: 0, failCount: this.relays.length, error: err?.message || String(err) };

@@ -36,7 +36,7 @@ const FORBIDDEN_TOPIC_WORDS = new Set([
 // Includes Nostr infrastructure/services that appear in URLs but aren't meaningful topics
 const TIMELINE_LORE_IGNORED_TERMS_BASE = [
   // Generic crypto/tech terms
-  'bitcoin', 'btc', 'nostr', 'crypto', 'cryptocurrency', 'blockchain',
+  'bitcoin', 'binance', 'this', 'btc', 'mempool', 'fees', 'nostr', 'crypto', 'cryptocurrency', 'blockchain',
   'decentralized', 'lightning', 'ln', 'sats', 'satoshis', 'web3',
   'protocol', 'network', 'technology', 'tech', 'development', 'community',
   'discussion', 'conversation', 'post', 'posts', 'posting',
@@ -48,6 +48,8 @@ const TIMELINE_LORE_IGNORED_TERMS_BASE = [
   'void.cat', 'nostrcheck', 'nostrimg', 'imgproxy', 'image',
   // Common URL/service fragments
   'cdn', 'https', 'http', 'www', 'com', 'org', 'net', 'io',
+  // Common English Words
+  'just',
 ];
 
 // Allow adding custom ignored words via environment variable

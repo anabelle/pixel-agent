@@ -15,7 +15,6 @@
     "test:diary": "bun test src/diary/__tests__/diary-service.test.ts",
     "test:twitter": "bun test src/__tests__/twitter-plugin.test.ts",
     "diary": "bun src/diary/cli.ts",
-    "diary:migrate": "bun src/diary/migrate-to-markdown.ts",
     "clean-db": "./clean-db.sh"
   },
   "trustedDependencies": [

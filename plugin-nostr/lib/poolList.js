@@ -6,22 +6,14 @@
  *
  * @param {object|null} pool - Nostr SimplePool-like instance
  * @param {string[]} relays - relay URLs
- * @param {object[]} filters - nostr filters array
+ * @param {object[]|object} filters - nostr filters array or single filter object
  * @returns {Promise<object[]>}
  */
 async function poolList(pool, relays, filters) {
   if (!pool) return [];
-  const direct = pool.list;
-  if (typeof direct === 'function') {
-    try {
-      // bind to pool in case implementation relies on this
-      return await direct.call(pool, relays, filters);
-    } catch {
-      return [];
-    }
-  }
 
-  // Normalize input to an array of filter objects and sanitize
+  // Normalize input to an array of filter objects and sanitize FIRST
+  // This ensures proper formatting regardless of whether pool.list exists
   const filtersArr = Array.isArray(filters) ? filters : [filters || {}];
 
   // Sanitize filters: keep only plain objects, remove empty entries and empty arrays
@@ -38,6 +30,11 @@ async function poolList(pool, relays, filters) {
       return out;
     })
     .filter(o => o && typeof o === 'object' && Object.keys(o).length > 0);
+
+  // If there are no valid filters after sanitization, return empty
+  if (!sanitized || sanitized.length === 0) {
+    return [];
+  }
 
   // Ensure we always pass an array of filters as expected by nostr-tools v2
   const subArg = sanitized;

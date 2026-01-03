@@ -5750,9 +5750,16 @@ Response (YES/NO):`;
         { kinds: [9735], '#p': [safePk] },
       ];
 
-      const sub = this.pool.subscribeMany(
-        this.relays,
-        filters,
+      // Manually build requests for subscribeMap to avoid subscribeMany bug
+      const requests = [];
+      for (const relay of this.relays) {
+        for (const filter of filters) {
+          requests.push({ url: relay, filter });
+        }
+      }
+
+      const sub = this.pool.subscribeMap(
+        requests,
         {
           onevent: (evt) => {
             try {
@@ -7645,7 +7652,14 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
       return await new Promise((resolve) => {
         let completed = false;
 
-        const sub = this.pool.subscribeMany(relays, f, {
+        const requests = [];
+        for (const relay of relays) {
+          for (const filter of f) {
+            requests.push({ url: relay, filter });
+          }
+        }
+
+        const sub = this.pool.subscribeMap(requests, {
           onevent: (event) => {
             const id = event?.id;
             if (id && seen.has(id)) return;

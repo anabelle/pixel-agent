@@ -21,7 +21,7 @@ class ConnectionManager {
     this.relays = relays;
     this.pkHex = pkHex;
     this.runtime = runtime;
-    this.handlers = handlers; // { onevent, oneose, onclose }
+    this.handlerProvider = handlers; // Function that returns handlers { onevent, oneose, onclose }
     this.config = config; // { checkIntervalMs, maxTimeSinceLastEventMs, maxReconnectAttempts, reconnectDelayMs }
     this.logger = logger || console;
 
@@ -31,6 +31,10 @@ class ConnectionManager {
     this.monitorTimer = null;
     this.reconnectAttempts = 0;
     this.lastEventReceived = Date.now();
+  }
+
+  get handlers() {
+    return typeof this.handlerProvider === 'function' ? this.handlerProvider() : this.handlerProvider;
   }
 
   async setup({ threadResolver, messageCutoff, handledEventIds, homeFeedEnabled, sk, startHomeFeed }) {

@@ -922,7 +922,7 @@ Response (YES/NO):`;
       relays,
       pkHex: svc.pkHex,
       runtime,
-      handlers: {
+      handlers: () => ({
         onevent: (evt) => {
           if (evt.created_at && evt.created_at < svc.messageCutoff) return;
           if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) return;
@@ -933,10 +933,12 @@ Response (YES/NO):`;
           if (botPatterns.some(pattern => pattern.test(evt.content))) return;
 
           if (evt.kind === 7) return;
-          if (evt.kind === 4) { svc.handleDM(evt).catch(() => { }); return; }
-          if (evt.kind === 14) { svc.handleSealedDM(evt).catch(() => { }); return; }
-          if (evt.kind === 9735) { svc.handleZap(evt).catch(() => { }); return; }
-          if (evt.kind === 1) { svc.handleMention(evt).catch(() => { }); return; }
+          const handleMethod = evt.kind === 1 ? svc.handleMention
+            : evt.kind === 4 ? svc.handleDM
+            : evt.kind === 14 ? svc.handleSealedDM
+            : evt.kind === 9735 ? svc.handleZap
+            : null;
+          if (handleMethod) handleMethod(evt).catch(() => { });
         },
         oneose: () => {
           svc.lastEventReceived = Date.now();
@@ -944,7 +946,7 @@ Response (YES/NO):`;
         onclose: (reason) => {
           logger.warn(`[NOSTR] Subscription closed: ${reason}`);
         }
-      },
+      }),
       config: {
         checkIntervalMs: svc.connectionCheckIntervalMs,
         maxTimeSinceLastEventMs: svc.maxTimeSinceLastEventMs,

@@ -39,7 +39,7 @@ class ConnectionManager {
 
   async setup({ threadResolver, messageCutoff, handledEventIds, homeFeedEnabled, sk, startHomeFeed }) {
     await ensureDeps();
-    
+
     const enablePing = String(this.runtime?.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
     const poolFactory = typeof this.runtime?.createSimplePool === 'function'
       ? this.runtime.createSimplePool.bind(this.runtime)
@@ -64,9 +64,9 @@ class ConnectionManager {
     if (!this.relays.length || !this.pool || !this.pkHex) {
       return this.pool;
     }
-    
+
     const { nip19 } = await import('nostr-tools');
-    
+
     const safePk = String(this.pkHex || '').trim();
     const filters = [
       { kinds: [1], '#p': [safePk] },
@@ -130,20 +130,33 @@ class ConnectionManager {
             } catch { }
 
             this.logger.info(`[NOSTR] ${kindName} from ${authorDisplay}: ${logContent.slice(0, 140)}`);
-            
-            if (this.handlers?.onevent) {
-              this.handlers.onevent(evt);
-            }
           } catch (outerErr) {
             this.logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
+          }
+
+          const handlers = this.handlers;
+          if (handlers?.onevent) {
+            try {
+              handlers.onevent(evt);
+            } catch (handlerErr) {
+              this.logger.error(`[NOSTR] Handler error: ${handlerErr?.message || handlerErr}`);
+            }
           }
         },
         oneose: () => {
           this.logger.debug('[NOSTR] Mention subscription OSE');
           this.lastEventReceived = Date.now();
+          const handlers = this.handlers;
+          if (handlers?.oneose) {
+            handlers.oneose();
+          }
         },
         onclose: (reason) => {
           this.logger.warn(`[NOSTR] Subscription closed: ${reason}`);
+          const handlers = this.handlers;
+          if (handlers?.onclose) {
+            handlers.onclose(reason);
+          }
         }
       }
     );

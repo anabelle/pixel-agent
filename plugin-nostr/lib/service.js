@@ -34,6 +34,7 @@ const { buildTextNote, buildReplyNote, buildReaction, buildRepost, buildQuoteRep
 const { ContextAccumulator } = require('./contextAccumulator');
 const { NarrativeContextProvider } = require('./narrativeContextProvider');
 const { SelfReflectionEngine } = require('./selfReflection');
+const { PrimalTrendingFeed } = require('./primalTrending');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -320,6 +321,16 @@ class NostrService {
     this.homeFeedProcessedEvents = new Set(); // Track processed events (for interactions)
     this.homeFeedQualityTracked = new Set(); // Track events for quality scoring (dedup across relays)
     this.homeFeedUnsub = null;
+
+    // Primal Trending Feed configuration
+    this.primalTrendingEnabled = true; // Enabled by default
+    this.primalTrendingIntervalMs = 60 * 60 * 1000; // Check every hour
+    this.primalTrendingLastCheck = 0;
+    this.primalTrendingMinScore = 20; // Minimum score (likes+zaps+etc) to consider
+    this.primalTrendingStartDelay = 2 * 60 * 1000; // Wait 2 mins after start before first fetch
+    this.primalTrending = new PrimalTrendingFeed({
+      minFetchIntervalMs: 15 * 60 * 1000 // Cache locally for 15 mins
+    });
 
     // Timeline lore buffering (home feed intelligence digestion)
     this.timelineLoreBuffer = [];
@@ -3723,25 +3734,43 @@ Response (YES/NO):`;
     } catch (e) { try { (this.logger || console).debug?.('[NOSTR] user history section error:', e?.message || e); } catch { } }
 
     // Optionally build a concise global timeline snapshot (feature-flagged)
+    // Now enriched with Primal Trending Data if available
     let globalTimelineSection = null;
     try {
-      const globalEnabled = String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'false').toLowerCase() === 'true';
-      if (globalEnabled && this.contextAccumulator && this.contextAccumulator.enabled) {
-        const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({
-          maxTopics: 5
-        }));
-        const activity = this.getCurrentActivity();
+      const globalEnabled = String(this.runtime?.getSetting?.('CTX_GLOBAL_TIMELINE_ENABLE') ?? process?.env?.CTX_GLOBAL_TIMELINE_ENABLE ?? 'true').toLowerCase() === 'true';
+      if (globalEnabled) {
         const parts = [];
-        if (stories && stories.length) {
-          const top = stories[0];
-          parts.push(`Trending: "${top.topic}" (${top.mentions} mentions, ${top.users} users)`);
-          const also = stories.slice(1, 3).map(s => s.topic);
-          if (also.length) parts.push(`Also: ${also.join(', ')}`);
+
+        // 1. Primal Trending (External/Global Truth)
+        if (this.currentTrendingSummary && this.currentTrendingSummary.length > 0) {
+          const trending24h = this.currentTrendingSummary.find(s => s.type === '24h_trending');
+          if (trending24h && trending24h.topTopics) {
+            const topics = trending24h.topTopics.map(t => t.topic).join(', ');
+            parts.push(`Global Trending (Primal): ${topics}`);
+          }
+          const zapped = this.currentTrendingSummary.find(s => s.type === '4h_most_zapped');
+          if (zapped && zapped.topNotes) {
+            const topZap = zapped.topNotes[0];
+            parts.push(`Top Zapped (4h): "${topZap.preview}..." by ${topZap.author}`);
+          }
         }
-        if (activity && activity.events) {
-          const hot = (activity.topics || []).slice(0, 3).map(t => t.topic).join(', ');
-          parts.push(`Activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot: ${hot}` : ''}`);
+
+        // 2. Local Context (Internal Accumulator)
+        if (this.contextAccumulator && this.contextAccumulator.enabled) {
+          const stories = this.getEmergingStories(this._getEmergingStoryContextOptions({
+            maxTopics: 5
+          }));
+          const activity = this.getCurrentActivity();
+          if (stories && stories.length) {
+            const top = stories[0];
+            parts.push(`Local Context: "${top.topic}" (${top.mentions} mentions)`);
+          }
+          if (activity && activity.events) {
+            const hot = (activity.topics || []).slice(0, 3).map(t => t.topic).join(', ');
+            parts.push(`Activity: ${activity.events} posts by ${activity.users} users${hot ? ` • Hot: ${hot}` : ''}`);
+          }
         }
+
         if (parts.length) {
           globalTimelineSection = `GLOBAL TIMELINE:\n${parts.join('\n')}`;
         }
@@ -5542,6 +5571,8 @@ Response (YES/NO):`;
     if (this.homeFeedEnabled && this.sk) {
       try {
         await this.startHomeFeed();
+        // Start Primal Trending Feed (delayed start handled internally)
+        this.startPrimalTrending().catch(err => logger.warn('[NOSTR] Failed to start Primal Trending:', err.message));
       } catch (err) {
         this.logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
       }
@@ -7118,6 +7149,111 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
       return null;
     }
   }
+
+  async startPrimalTrending() {
+    if (!this.primalTrendingEnabled) return;
+
+    logger.info(`[NOSTR] Primal Trending Feed enabled. First check in ${this.primalTrendingStartDelay / 1000}s`);
+
+    setTimeout(() => {
+      this.processPrimalTrending().then(() => {
+        this.scheduleNextPrimalTrendingCheck();
+      });
+    }, this.primalTrendingStartDelay);
+  }
+
+  scheduleNextPrimalTrendingCheck() {
+    const jitter = Math.floor(Math.random() * (15 * 60 * 1000)); // 0-15 min jitter
+    const nextDelay = this.primalTrendingIntervalMs + jitter;
+
+    if (this.primalTrendingTimer) clearTimeout(this.primalTrendingTimer);
+    this.primalTrendingTimer = setTimeout(() => {
+      this.processPrimalTrending().then(() => {
+        this.scheduleNextPrimalTrendingCheck();
+      });
+    }, nextDelay);
+
+    logger.info(`[NOSTR] Next Primal Trending check in ~${Math.floor(nextDelay / 60000)}m`);
+  }
+
+  async processPrimalTrending(force = false) {
+    if (!this.primalTrendingEnabled) return;
+
+    try {
+      logger.info('[NOSTR] Fetching global trending feed from Primal...');
+
+      const [trending24h, mostZapped4h] = await Promise.all([
+        this.primalTrending.fetchTrending24h(force),
+        this.primalTrending.fetchMostZapped4h(force)
+      ]);
+
+      // Store summary for context injection in future replies
+      this.currentTrendingSummary = this.primalTrending.getTrendingSummary();
+
+      if (this.currentTrendingSummary && this.currentTrendingSummary.length > 0) {
+        const topTopics = this.currentTrendingSummary[0].topTopics || [];
+        const topicStr = topTopics.slice(0, 5).map(t => t.topic).join(', ');
+        logger.info(`[NOSTR] Current Trending Topics: ${topicStr}`);
+      }
+
+      // Potential Engagement
+      // To start, we will just observe and log candidates. 
+      // If we decide to auto-engage, we would call generateReply/Reaction here.
+      // Use the 'findEngagementCandidate' helper to find something interesting.
+
+      const candidate = this.primalTrending.findEngagementCandidate({
+        excludeIds: this.homeFeedProcessedEvents, // Reuse the processed set to avoid dupes
+        muteList: this.mutedUsers,
+        preferHighZaps: true
+      });
+
+      if (candidate) {
+        logger.info(`[NOSTR] Found trending engagement candidate (${candidate.reason}): ${candidate.note.id.slice(0, 8)} by ${candidate.note.pubkey.slice(0, 8)}`);
+        logger.debug(`[NOSTR] Trending candidate stats: zaps=${candidate.note.stats?.zaps}, score24h=${candidate.note.stats?.score24h}`);
+
+        // AUTO-ENGAGEMENT LOGIC (Conservative)
+        // 1. Valid candidate found
+        // 2. High enough score (double check)
+        // 3. Roll the dice for interaction
+
+        const shouldEngage = Math.random() < 0.3; // 30% chance to engage with top trending item per hour
+
+        if (shouldEngage) {
+          logger.info(`[NOSTR] Decided to engage with trending note ${candidate.note.id.slice(0, 8)}`);
+
+          // Re-use logic from home feed for processing
+          // We wrap the candidate note as a standard event structure
+          const evt = candidate.note;
+
+          // Analyze relevance first
+          const analysis = await this._analyzePostForInteraction(evt);
+          if (analysis) {
+            const interactionType = candidate.suggestedAction === 'react' ?
+              (Math.random() > 0.5 ? 'reaction' : 'repost') : 'quote';
+
+            switch (interactionType) {
+              case 'reaction':
+                await this.postReaction(evt, '+');
+                break;
+              case 'repost':
+                await this.postRepost(evt);
+                break;
+              case 'quote':
+                // For quotes, we need to generate text
+                const text = await this.generateReplyTextLLM(evt, this.createUniqueUuid(this.runtime, evt.id));
+                if (text) await this.postQuoteRepost(evt);
+                break;
+            }
+            this.homeFeedProcessedEvents.add(evt.id);
+          }
+        }
+      }
+
+    } catch (err) {
+      logger.warn(`[NOSTR] Error processing Primal trending: ${err.message}`);
+    }
+  }
+
 
   async _checkForUnfollowCandidates() {
     if (!this.unfollowEnabled) return;

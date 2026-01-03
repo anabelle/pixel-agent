@@ -580,6 +580,40 @@ class NostrService {
     } catch { }
   }
 
+  async _loadProcessedEvents() {
+    try {
+      this.processedEventsFile = '/app/.eliza/nostr_processed_events.json';
+      const fs = require('fs');
+      if (fs.existsSync(this.processedEventsFile)) {
+        const data = JSON.parse(fs.readFileSync(this.processedEventsFile, 'utf-8'));
+        if (Array.isArray(data)) {
+          // Keep last 1000 to avoid infinite growth
+          const recent = data.slice(-1000);
+          this.homeFeedProcessedEvents = new Set(recent);
+          logger.info(`[NOSTR] Hydrated ${this.homeFeedProcessedEvents.size} processed events from file`);
+        }
+      }
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to load processed events:', err?.message || err);
+    }
+  }
+
+  async _saveProcessedEvents() {
+    try {
+      if (!this.processedEventsFile) return;
+      // Debounce: verify last save time if needed, but simple overwrite is fine for now
+      // as handleHomeFeed only runs periodically.
+      const fs = require('fs');
+      const data = JSON.stringify(Array.from(this.homeFeedProcessedEvents));
+      // Atomic write
+      const tempFile = this.processedEventsFile + '.tmp';
+      fs.writeFileSync(tempFile, data);
+      fs.renameSync(tempFile, this.processedEventsFile);
+    } catch (err) {
+      this.logger.debug('[NOSTR] Failed to save processed events:', err?.message || err);
+    }
+  }
+
   async _loadInteractionCounts() {
     try {
       const memories = await this.runtime.getMemories({ tableName: 'messages', count: 10 });
@@ -856,6 +890,7 @@ Response (YES/NO):`;
     }
     await svc._loadInteractionCounts();
     await svc._loadLastDailyDigestPostDate();
+    await svc._loadProcessedEvents(); // Load persisted processed events (dedup)
     svc._setupResetTimer();
     const current = await svc._loadCurrentContacts();
     svc.followedUsers = current;
@@ -5816,6 +5851,7 @@ Response (YES/NO):`;
 
           if (success) {
             this.homeFeedProcessedEvents.add(evt.id);
+            this._saveProcessedEvents();
             interactions++;
             logger.info(`[NOSTR] Home feed ${interactionType} completed for ${evt.pubkey.slice(0, 8)}`);
           }
@@ -7261,6 +7297,7 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
                 break;
             }
             this.homeFeedProcessedEvents.add(evt.id);
+            this._saveProcessedEvents();
           }
         }
       }

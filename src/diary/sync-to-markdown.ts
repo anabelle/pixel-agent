@@ -44,14 +44,15 @@ interface DiaryEntryForSync {
 
 /**
  * Get the markdown filename for a given date
- * Format: "Jan-02.md" for consistent naming with existing files
+ * Format: "2026-Jan-02.md" for clarity across years
  */
 function getMarkdownFilename(date: Date): string {
+    const year = date.getFullYear();
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const month = months[date.getMonth()];
     const day = date.getDate().toString().padStart(2, '0');
-    return `${month}-${day}.md`;
+    return `${year}-${month}-${day}.md`;
 }
 
 /**

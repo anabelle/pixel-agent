@@ -2,6 +2,7 @@
 
 import { Client } from 'pg';
 import { randomUUID } from 'crypto';
+import { syncEntryToMarkdown } from './sync-to-markdown';
 
 const POSTGRES_URL = process.env.POSTGRES_URL || 'postgresql://postgres:postgres@localhost:5432/pixel_agent';
 
@@ -94,10 +95,22 @@ class DiaryCLI {
       [id, author, content, tags, now, now]
     );
 
+    // Sync to markdown for knowledge vectorization
+    const syncResult = await syncEntryToMarkdown({
+      id,
+      author,
+      content,
+      tags,
+      created_at: now
+    });
+
     console.log(`Entry created: ${id}`);
     console.log(`Author: ${author}`);
     console.log(`Tags: ${tags.join(', ') || 'none'}`);
     console.log(`Content: ${content}`);
+    if (syncResult.success) {
+      console.log(`Synced to: ${syncResult.filePath}`);
+    }
   }
 
   async updateEntry(id: string, content?: string, tags?: string[]): Promise<void> {

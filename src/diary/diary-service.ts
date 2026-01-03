@@ -7,9 +7,10 @@ import type {
   UpdateDiaryEntryInput,
   DiaryServiceInterface,
 } from './types';
+import { syncEntryToMarkdown } from './sync-to-markdown';
 
 export class PostgresDiaryService implements DiaryServiceInterface {
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool) { }
 
   async createEntry(input: CreateDiaryEntryInput): Promise<DiaryEntry> {
     const id = randomUUID();
@@ -25,7 +26,18 @@ export class PostgresDiaryService implements DiaryServiceInterface {
     const values = [id, input.author, input.content, tags, now, now];
     const result = await this.pool.query(query, values);
 
-    return this.mapRowToEntry(result.rows[0]);
+    const entry = this.mapRowToEntry(result.rows[0]);
+
+    // Sync to markdown for knowledge vectorization
+    await syncEntryToMarkdown({
+      id: entry.id,
+      author: entry.author,
+      content: entry.content,
+      tags: entry.tags,
+      created_at: entry.created_at
+    });
+
+    return entry;
   }
 
   async listEntries(options: ListDiaryEntriesOptions = {}): Promise<DiaryEntry[]> {

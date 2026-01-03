@@ -6,9 +6,18 @@ This module provides a diary feature for Pixel, allowing Syntropy and other comp
 
 The diary integration consists of:
 - **PostgreSQL Table**: `diary_entries` with full-text search and tagging support
+- **Markdown Sync**: Auto-sync to `docs/v1/diary/*.md` for knowledge vectorization
 - **Service Layer**: TypeScript service for CRUD operations
 - **REST API**: Express routes for external access
 - **CLI Commands**: Helper scripts for manual operations
+
+### Unified Write Path
+
+All diary entries written through any interface (Syntropy tools, REST API, CLI) are automatically:
+1. **Persisted to PostgreSQL** - For structured queries and CRUD operations
+2. **Synced to Markdown** - For vectorization by `@elizaos/plugin-knowledge`
+
+This ensures that Pixel's memories are both queryable (database) AND available as contextual knowledge for conversations (vectorized markdown).
 
 ## Database Schema
 

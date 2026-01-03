@@ -1,5 +1,7 @@
 // Text-related helpers: prompt builders and sanitization
 
+const { sanitizeUnicode } = require('./utils');
+
 const TOPIC_LIST_LIMIT = (() => {
   const envVal = parseInt(process.env.PROMPT_TOPICS_LIMIT, 10);
   return Number.isFinite(envVal) && envVal > 0 ? envVal : 15;
@@ -63,7 +65,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
 
       const sample = topTopics.find(t => t?.sample?.content);
       if (sample && sample.sample.content) {
-        const rawSample = String(sample.sample.content);
+        const rawSample = sanitizeUnicode(String(sample.sample.content));
         const compactSample = rawSample.replace(/\s+/g, ' ').trim();
         const snippet = compactSample.slice(0, 120);
         const ellipsis = compactSample.length > snippet.length ? '…' : '';
@@ -233,7 +235,7 @@ function buildReplyPrompt(character, evt, recentMessages, threadContext = null, 
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
   const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
-  const userText = (evt?.content || '').slice(0, 800);
+  const userText = sanitizeUnicode(evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 10
       ? ch.postExamples
@@ -251,7 +253,7 @@ function buildReplyPrompt(character, evt, recentMessages, threadContext = null, 
       .slice(0, 5) // Limit to 5 events to avoid token overflow
       .map((e, i) => {
         const author = e.pubkey?.slice(0, 8) || 'unknown';
-        const content = (e.content || '').slice(0, 150);
+        const content = sanitizeUnicode(e.content || '').slice(0, 150);
         const isTarget = e.id === evt.id;
         return `${i + 1}. ${author}${isTarget ? ' [TARGET]' : ''}: "${content}"`;
       })
@@ -291,7 +293,7 @@ TRENDING NOW: "${topStory.topic}" - ${topStory.mentions} mentions from ${topStor
       
       if (topStory.recentEvents && topStory.recentEvents.length > 0) {
         const recentSample = topStory.recentEvents.slice(0, 2).map(e => 
-          `"${e.content.slice(0, 80)}..."`
+          `"${sanitizeUnicode(e.content).slice(0, 80)}..."`
         ).join(' | ');
         narrativeContextSection += `\nRecent samples: ${recentSample}`;
       }
@@ -539,7 +541,7 @@ function buildDmReplyPrompt(character, evt, recentMessages) {
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
   const whitelist = 'Whitelist rules (DM): Only include URLs/handles if the user explicitly asked and they are on this list: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
-  const userText = (evt?.content || '').slice(0, 800);
+  const userText = sanitizeUnicode(evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 8
       ? ch.postExamples
@@ -779,7 +781,7 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
       if (tnames.length) contextLines.push(`Topics now: ${tnames.join(' • ')}`);
       const sample = topTopics.find(t => t?.sample?.content);
       if (sample && sample.sample?.content) {
-        const raw = String(sample.sample.content).replace(/\s+/g, ' ').trim();
+        const raw = sanitizeUnicode(String(sample.sample.content)).replace(/\s+/g, ' ').trim();
         const snip = raw.slice(0, 120) + (raw.length > 120 ? '…' : '');
         contextLines.push(`sample: "${snip}"`);
       }

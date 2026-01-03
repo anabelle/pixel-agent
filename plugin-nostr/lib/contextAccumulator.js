@@ -1,6 +1,7 @@
 // Context Accumulator - Builds continuous understanding of Nostr activity
 const { extractTopicsFromEvent } = require('./nostr');
 const { AdaptiveTrending } = require('./adaptiveTrending');
+const { sanitizeUnicode } = require('./utils');
 
 class ContextAccumulator {
   constructor(runtime, logger, options = {}) {
@@ -253,7 +254,7 @@ class ContextAccumulator {
         this.dailyEvents.push({
           id: evt.id,
           author: evt.pubkey,
-          content: evt.content.slice(0, 200),
+          content: sanitizeUnicode(evt.content).slice(0, 200),
           topics: extracted.topics,
           sentiment: extracted.sentiment,
           timestamp: evt.created_at || Date.now()
@@ -716,7 +717,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       eventId: evt.id,
       author: evt.pubkey,
       timestamp: evt.created_at || Date.now(),
-      content: evt.content.slice(0, 100)
+      content: sanitizeUnicode(evt.content).slice(0, 100)
     });
 
     // Keep only recent events per topic
@@ -746,7 +747,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       story.users.add(evt.pubkey);
       story.events.push({
         id: evt.id,
-        content: evt.content.slice(0, 150),
+        content: sanitizeUnicode(evt.content).slice(0, 150),
         author: evt.pubkey,
         timestamp: evt.created_at || Date.now()
       });
@@ -994,7 +995,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
       const sampleContent = recentEvents
         .sort(() => 0.5 - Math.random()) // Shuffle for diversity
         .slice(0, this.llmNarrativeSampleSize) // Use configurable sample size (default 100)
-        .map(e => `[${e.author}] ${e.content}`)
+        .map(e => `[${e.author}] ${sanitizeUnicode(e.content)}`)
         .join('\n\n')
         .slice(0, this.llmNarrativeMaxContentLength); // Limit total content length
 
@@ -1006,7 +1007,7 @@ Respond with one sentiment per line in order (Post 1, Post 2, etc.):`;
           if (!Array.isArray(e.topics)) continue;
           for (const t of e.topics) {
             if (buckets.has(t) && buckets.get(t).length < 3) {
-              buckets.get(t).push(`[${e.author}] ${String(e.content || '').slice(0, 280)}`);
+              buckets.get(t).push(`[${e.author}] ${sanitizeUnicode(String(e.content || '')).slice(0, 280)}`);
               break; // only bucket once per event
             }
           }
@@ -1289,7 +1290,7 @@ Make it fascinating! Find the human story in the data.`;
         const evt = this.dailyEvents[i];
         sampledEvents.push({
           author: evt.author.slice(0, 8),
-          content: evt.content.slice(0, 400),
+          content: sanitizeUnicode(evt.content).slice(0, 400),
           topics: evt.topics.slice(0, 3),
           sentiment: evt.sentiment
         });

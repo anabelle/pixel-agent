@@ -1,5 +1,41 @@
 // Extracted small pure helpers from index.js for testability
 
+/**
+ * Sanitize text to remove invalid Unicode surrogate pairs that break PostgreSQL JSON parsing.
+ * Removes lone high surrogates (U+D800-U+DBFF) not followed by low surrogates (U+DC00-U+DFFF),
+ * and lone low surrogates not preceded by high surrogates.
+ * @param {string} text - Input text that may contain malformed Unicode
+ * @returns {string} - Sanitized text safe for JSON storage
+ */
+function sanitizeUnicode(text) {
+  if (typeof text !== 'string') return text;
+  // Remove lone surrogates that would break JSON parsing
+  // Handle both high surrogates without low surrogates and vice versa
+  let result = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      // High surrogate - check if followed by low surrogate
+      const nextCode = i + 1 < text.length ? text.charCodeAt(i + 1) : 0;
+      if (nextCode >= 0xDC00 && nextCode <= 0xDFFF) {
+        // Valid surrogate pair - keep both
+        result += text[i] + text[i + 1];
+        i++; // Skip the low surrogate
+      } else {
+        // Lone high surrogate - replace with replacement character
+        result += '\uFFFD';
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      // Lone low surrogate (not preceded by high) - replace
+      result += '\uFFFD';
+    } else {
+      // Normal character
+      result += text[i];
+    }
+  }
+  return result;
+}
+
 function hexToBytesLocal(hex) {
   if (typeof hex !== "string") return null;
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -144,4 +180,5 @@ module.exports = {
   generateNostrUri,
   generateNostrProfileUri,
   parseNostrUri,
+  sanitizeUnicode,
 };

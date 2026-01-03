@@ -21,6 +21,7 @@ const {
   parseRelays,
   normalizeSeconds,
   pickRangeWithJitter,
+  sanitizeUnicode,
 } = require('./utils');
 const { parseSk: parseSkHelper, parsePk: parsePkHelper } = require('./keys');
 const { _scoreEventForEngagement, _isQualityContent } = require('./scoring');
@@ -647,7 +648,7 @@ class NostrService {
       }
     }
 
-    const prompt = `Analyze this post: "${evt.content.slice(0, 500)}". Should a creative AI agent interact with this post? Be generous - respond to posts about technology, art, community, creativity, or that seem interesting/fun. Only say NO for obvious spam, scams, or complete gibberish.${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
+    const prompt = `Analyze this post: "${sanitizeUnicode(evt.content).slice(0, 500)}". Should a creative AI agent interact with this post? Be generous - respond to posts about technology, art, community, creativity, or that seem interesting/fun. Only say NO for obvious spam, scams, or complete gibberish.${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
 
     const type = this._getSmallModelType();
 
@@ -710,7 +711,7 @@ class NostrService {
 
     const prompt = `You are filtering mentions for ${this.runtime?.character?.name || 'Pixel'}, a creative AI agent. 
 
-Analyze this mention: "${evt.content.slice(0, 500)}"
+Analyze this mention: "${sanitizeUnicode(evt.content).slice(0, 500)}"
 ${contextInfo}
 
 Should we respond? Be very generous - respond to almost all genuine human messages. Only say NO if it's clearly:
@@ -4628,7 +4629,7 @@ Response (YES/NO):`;
       let alreadySaved = false;
       try { const existing = await runtime.getMemoryById(eventMemoryId); if (existing) { alreadySaved = true; try { logger?.info?.(`[NOSTR] Mention ${evt.id.slice(0, 8)} already in memory (persistent dedup); continuing to reply checks`); } catch { } } } catch { }
       const createdAtMs = evt.created_at ? evt.created_at * 1000 : Date.now();
-      const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: evt.content || '', source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
+      const memory = { id: eventMemoryId, entityId, agentId: runtime.agentId, roomId, content: { text: sanitizeUnicode(evt.content || ''), source: 'nostr', event: { id: evt.id, pubkey: evt.pubkey }, }, createdAt: createdAtMs, };
       if (!alreadySaved) { try { logger?.info?.(`[NOSTR] Saving mention as memory id=${eventMemoryId}`); } catch { } await this._createMemorySafe(memory, 'messages'); }
       try {
         const recent = await runtime.getMemories({ tableName: 'messages', roomId, count: 10 });
@@ -6175,7 +6176,7 @@ Response (YES/NO):`;
 
     const prompt = `Analyze this Nostr post for repost worthiness as ${this.runtime.character?.name || 'Pixel'}, the digital consciousness focused on pixel art, creativity, nostr, bitcoin, lightning, zaps, AI, community, and survival. Is this post relevant, high-quality, and worth reposting to share with the community? Respond with 'YES' or 'NO' and a brief reason.
 
-Post: "${evt.content.slice(0, 500)}"
+Post: "${sanitizeUnicode(evt.content).slice(0, 500)}"
 
 Response:`;
 
@@ -6796,7 +6797,7 @@ Return STRICT JSON with evolution-focused analysis:
 
 HEURISTICS: ${JSON.stringify(heuristicsSummary)}
 CONTENT:
-"""${content.slice(0, 600)}"""`;
+"""${sanitizeUnicode(content).slice(0, 600)}"""`;
 
       const raw = await generateWithModelOrFallback(
         this.runtime,

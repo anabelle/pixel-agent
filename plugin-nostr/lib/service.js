@@ -913,11 +913,52 @@ Response (YES/NO):`;
       logger.warn('[NOSTR] No key configured; listening and posting disabled');
     }
 
+    const { ConnectionManager } = require('./connectionManager');
+    const poolFactory = typeof runtime?.createSimplePool === 'function'
+      ? runtime.createSimplePool.bind(runtime)
+      : null;
+    svc.connectionManager = new ConnectionManager({
+      poolFactory,
+      relays,
+      pkHex: svc.pkHex,
+      runtime,
+      handlers: {
+        onevent: (evt) => {
+          if (evt.created_at && evt.created_at < svc.messageCutoff) return;
+          if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) return;
+          if (svc.handledEventIds.has(evt.id)) return;
+          svc.handledEventIds.add(evt.id);
+
+          const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
+          if (botPatterns.some(pattern => pattern.test(evt.content))) return;
+
+          if (evt.kind === 7) return;
+          if (evt.kind === 4) { svc.handleDM(evt).catch(() => { }); return; }
+          if (evt.kind === 14) { svc.handleSealedDM(evt).catch(() => { }); return; }
+          if (evt.kind === 9735) { svc.handleZap(evt).catch(() => { }); return; }
+          if (evt.kind === 1) { svc.handleMention(evt).catch(() => { }); return; }
+        },
+        oneose: () => {
+          svc.lastEventReceived = Date.now();
+        },
+        onclose: (reason) => {
+          logger.warn(`[NOSTR] Subscription closed: ${reason}`);
+        }
+      },
+      config: {
+        checkIntervalMs: svc.connectionCheckIntervalMs,
+        maxTimeSinceLastEventMs: svc.maxTimeSinceLastEventMs,
+        maxReconnectAttempts: svc.maxReconnectAttempts,
+        reconnectDelayMs: svc.reconnectDelayMs
+      },
+      logger: svc.logger
+    });
+
     if (listenEnabled && svc.pkHex) {
       try {
         await svc._setupConnection();
         if (svc.connectionMonitorEnabled) {
-          svc._startConnectionMonitoring(); // Start connection health monitoring
+          svc._startConnectionMonitoring();
         }
       } catch (err) {
         logger.warn(`[NOSTR] Initial connection setup failed: ${err?.message || err}`);
@@ -5442,139 +5483,22 @@ Response (YES/NO):`;
   }
 
   async _setupConnection() {
-    const enablePing = String(this.runtime.getSetting('NOSTR_ENABLE_PING') ?? 'true').toLowerCase() === 'true';
-    const poolFactory = typeof this.runtime?.createSimplePool === 'function'
-      ? this.runtime.createSimplePool.bind(this.runtime)
-      : null;
+    this.pool = await this.connectionManager.setup({
+      threadResolver: this.threadResolver,
+      messageCutoff: this.messageCutoff,
+      handledEventIds: this.handledEventIds,
+      homeFeedEnabled: this.homeFeedEnabled,
+      sk: this.sk,
+      startHomeFeed: () => this.startHomeFeed()
+    });
 
-    try {
-      const poolInstance = poolFactory
-        ? poolFactory({ enablePing })
-        : new SimplePool({ enablePing });
-      this.pool = poolInstance;
-      if (this.threadResolver) {
-        this.threadResolver.pool = poolInstance;
-      }
-    } catch (err) {
-      logger.warn('[NOSTR] Failed to create SimplePool instance:', err?.message || err);
-      this.pool = null;
-      if (this.threadResolver) {
-        this.threadResolver.pool = null;
-      }
-    }
+    this.listenUnsub = this.connectionManager.listenUnsub;
 
-    if (!this.relays.length || !this.pool || !this.pkHex) {
-      return;
-    }
-    // Setup main event subscriptions
-    try {
-      const safePk = String(this.pkHex || '').trim();
-      const filters = [
-        { kinds: [1], '#p': [safePk] },
-        { kinds: [4], '#p': [safePk] },
-        { kinds: [7], '#p': [safePk] },
-        { kinds: [14], '#p': [safePk] },
-        { kinds: [9735], '#p': [safePk] },
-      ];
-
-      // Manually build requests for subscribeMap to avoid subscribeMany bug
-      const requests = [];
-      for (const relay of this.relays) {
-        for (const filter of filters) {
-          requests.push({ url: relay, filter });
-        }
-      }
-
-      const sub = this.pool.subscribeMap(
-        requests,
-        {
-          onevent: (evt) => {
-            try {
-              this.lastEventReceived = Date.now();
-              if (evt.created_at && evt.created_at < this.messageCutoff) return;
-
-              let logContent = String(evt.content || '');
-              try {
-                // Humanize NIP-19 entities for better readability
-                if (logContent.includes('nostr:nprofile1')) {
-                  const match = logContent.match(/nostr:(nprofile1\w+)/);
-                  if (match && nip19) {
-                    const { data } = nip19.decode(match[1]);
-                    logContent = logContent.replace(match[0], `[Profile: ${data.pubkey?.slice(0, 8)}...]`);
-                  }
-                }
-                if (logContent.includes('nostr:nevent1')) {
-                  const match = logContent.match(/nostr:(nevent1\w+)/);
-                  if (match && nip19) {
-                    const { data } = nip19.decode(match[1]);
-                    logContent = logContent.replace(match[0], `[Event: ${data.id?.slice(0, 8)}...]`);
-                  }
-                }
-              } catch { }
-
-              const kindNames = {
-                1: 'Text Note',
-                3: 'Contacts',
-                4: 'Direct Message',
-                6: 'Repost',
-                7: 'Reaction',
-                14: 'Sealed DM',
-                1311: 'Live Chat',
-                10000: 'Mute List',
-                10002: 'Relay List',
-                30023: 'Long-form Content',
-                31922: 'Calendar Event',
-                9735: 'Zap'
-              };
-              const kindName = kindNames[evt.kind] || `Kind ${evt.kind}`;
-              let authorDisplay = evt.pubkey.slice(0, 8);
-              try {
-                if (nip19) authorDisplay = nip19.npubEncode(evt.pubkey);
-              } catch { }
-
-              logger.info(`[NOSTR] ${kindName} from ${authorDisplay}: ${logContent.slice(0, 140)}`);
-              if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
-
-              if (this.handledEventIds.has(evt.id)) return;
-              this.handledEventIds.add(evt.id);
-
-              const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
-              if (botPatterns.some(pattern => pattern.test(evt.content))) return;
-
-              if (evt.kind === 7) return;
-
-              if (evt.kind === 4) { this.handleDM(evt).catch(() => { }); return; }
-              if (evt.kind === 14) { this.handleSealedDM(evt).catch(() => { }); return; }
-              if (evt.kind === 9735) { this.handleZap(evt).catch(() => { }); return; }
-              if (evt.kind === 1) { this.handleMention(evt).catch(() => { }); return; }
-            } catch (outerErr) {
-              logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
-            }
-          },
-          oneose: () => {
-            logger.debug('[NOSTR] Mention subscription OSE');
-            this.lastEventReceived = Date.now();
-          },
-          onclose: (reason) => {
-            logger.warn(`[NOSTR] Subscription closed: ${reason}`);
-          }
-        }
-      );
-
-      this.listenUnsub = () => { try { sub.close(); } catch { } };
-
-      logger.info(`[NOSTR] Subscriptions established on ${this.relays.length} relays`);
-    } catch (err) {
-      logger.warn(`[NOSTR] Subscribe failed: ${err?.message || err}`);
-      throw err;
-    }
-
-    // Restart home feed if it was active
     if (this.homeFeedEnabled && this.sk) {
       try {
         await this.startHomeFeed();
       } catch (err) {
-        logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
+        this.logger.debug('[NOSTR] Failed to restart home feed after reconnection:', err?.message || err);
       }
     }
   }

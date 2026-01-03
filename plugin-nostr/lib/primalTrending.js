@@ -296,7 +296,9 @@ class PrimalTrendingFeed {
             'we', 'they', 'them', 'me', 'my', 'your', 'our', 'their', 'its', 'what', 'which',
             'who', 'will', 'would', 'could', 'should', 'can', 'may', 'might', 'must', 'have',
             'has', 'had', 'do', 'does', 'did', 'just', 'like', 'about', 'so', 'not', 'no',
-            'yes', 'all', 'any', 'some', 'rt', 'http', 'https', 'nostr', 'npub'
+            'yes', 'all', 'any', 'some', 'rt', 'http', 'https', 'nostr', 'npub', 'very',
+            'more', 'than', 'then', 'there', 'their', 'here', 'when', 'where', 'how', 'why',
+            'going', 'want', 'think', 'know', 'take', 'make', 'come', 'time', 'people'
         ]);
 
         const wordCounts = new Map();

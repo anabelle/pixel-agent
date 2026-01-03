@@ -771,7 +771,8 @@ class NostrService {
       }
     }
 
-    const prompt = `Analyze this post: "${sanitizeUnicode(evt.content).slice(0, 500)}". Should a creative AI agent interact with this post? Be generous - respond to posts about technology, art, community, creativity, or that seem interesting/fun. Only say NO for obvious spam, scams, or complete gibberish.${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
+    const authorName = evt.authorMeta?.name ? ` by @${evt.authorMeta.name}` : '';
+    const prompt = `Analyze this post${authorName}: "${sanitizeUnicode(evt.content).slice(0, 500)}". Should a creative AI agent interact with this post? Be generous - respond to posts about technology, art, community, creativity, or that seem interesting/fun. Only say NO for obvious spam, scams, or complete gibberish.${contextInfo} Respond with 'YES' or 'NO' and a brief reason.`;
 
     const type = this._getSmallModelType();
 
@@ -7260,7 +7261,8 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
       });
 
       if (candidate) {
-        logger.info(`[NOSTR] Found trending engagement candidate (${candidate.reason}): ${candidate.note.id.slice(0, 8)} by ${candidate.note.pubkey.slice(0, 8)}`);
+        const authorStr = candidate.note.authorMeta?.name ? `@${candidate.note.authorMeta.name} (${candidate.note.pubkey.slice(0, 8)})` : candidate.note.pubkey.slice(0, 8);
+        logger.info(`[NOSTR] Found trending engagement candidate (${candidate.reason}): ${candidate.note.id.slice(0, 8)} by ${authorStr}`);
         logger.debug(`[NOSTR] Trending candidate stats: zaps=${candidate.note.stats?.zaps}, score24h=${candidate.note.stats?.score24h}`);
 
         // AUTO-ENGAGEMENT LOGIC (Conservative)
@@ -7292,8 +7294,8 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
                 break;
               case 'quote':
                 // For quotes, we need to generate text
-                const text = await this.generateReplyTextLLM(evt, this.createUniqueUuid(this.runtime, evt.id));
-                if (text) await this.postQuoteRepost(evt);
+                const text = await this.generateQuoteTextLLM(evt);
+                if (text) await this.postQuoteRepost(evt, text);
                 break;
             }
             this.homeFeedProcessedEvents.add(evt.id);

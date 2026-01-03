@@ -46,6 +46,11 @@ COPY . .
 RUN perl -i -0pe 's/(this\.runtime\.useModel\(\s*ModelType\.IMAGE_DESCRIPTION,\s*)imageUrl(\s*\))/$1\{ imageUrl \}$2/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
+# Do not await long-running message processing; log errors via promise .catch.
+RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # Build TypeScript and generate character.json
 RUN bun run build && bun run build:character
 

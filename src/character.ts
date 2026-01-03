@@ -13,11 +13,11 @@ import { characterManifest } from "./character/manifest";
 
 // Re-export the manifest as a Character with plugin names
 // (plugins will be resolved by the CLI at runtime)
-export const character: Character = {
+export const character: any = {
   ...characterManifest,
   plugins: [
     '@elizaos/plugin-bootstrap',
-    '@elizaos/adapter-postgres', 
+    '@elizaos/adapter-postgres',
     '@elizaos/plugin-sql',
     '@elizaos/plugin-openai',
     '@elizaos/plugin-openrouter',

@@ -625,13 +625,13 @@ class NostrService {
       if (!this._systemContextEnsured) {
         if (!this._systemContextPromise) {
           this._systemContextPromise = (async () => {
-             try {
+            try {
               const worldId = entityId; // Use entityId as worldId for consistency
               const db = this.runtime.databaseAdapter;
 
               // 1. World
               let worldExists = false;
-              if (db?.getWorld) { try { worldExists = !!(await db.getWorld(worldId)); } catch {} }
+              if (db?.getWorld) { try { worldExists = !!(await db.getWorld(worldId)); } catch { } }
               if (!worldExists) {
                 await this.runtime.ensureWorldExists({
                   id: worldId,
@@ -644,7 +644,7 @@ class NostrService {
 
               // 2. Room
               let roomExists = false;
-              if (db?.getRoom) { try { roomExists = !!(await db.getRoom(roomId)); } catch {} }
+              if (db?.getRoom) { try { roomExists = !!(await db.getRoom(roomId)); } catch { } }
               if (!roomExists) {
                 await this.runtime.ensureRoomExists({
                   id: roomId,
@@ -659,7 +659,7 @@ class NostrService {
 
               // 3. Connection
               let connExists = false;
-              if (db?.getParticipant) { try { connExists = !!(await db.getParticipant(roomId, entityId)); } catch {} }
+              if (db?.getParticipant) { try { connExists = !!(await db.getParticipant(roomId, entityId)); } catch { } }
               if (!connExists) {
                 await this.runtime.ensureConnection({
                   entityId,
@@ -990,8 +990,8 @@ Response (YES/NO):`;
         onevent: (evt) => {
           if (evt.created_at && evt.created_at < svc.messageCutoff) return;
           if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) return;
-          if (svc.handledEventIds.has(evt.id)) return;
-          svc.handledEventIds.add(evt.id);
+          // if (svc.handledEventIds.has(evt.id)) return;
+          // svc.handledEventIds.add(evt.id);
 
           const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
           if (botPatterns.some(pattern => pattern.test(evt.content))) return;
@@ -1002,7 +1002,9 @@ Response (YES/NO):`;
               : evt.kind === 14 ? svc.handleSealedDM
                 : evt.kind === 9735 ? svc.handleZap
                   : null;
-          if (handleMethod) handleMethod(evt).catch(() => { });
+          if (handleMethod) handleMethod.call(svc, evt).catch((err) => {
+            logger.error(`[NOSTR] Error in ${evt.kind === 1 ? 'handleMention' : 'handler'}:`, err?.message || err);
+          });
         },
         oneose: () => {
           svc.lastEventReceived = Date.now();
@@ -4307,18 +4309,12 @@ Response (YES/NO):`;
       return false;
     }
 
-    // If we're the only p-tag or the first p-tag, likely a direct mention/reply to us
-    if (pTags.length === 1 && pTags[0][1] === this.pkHex) {
-      return true;
-    }
-
-    if (pTags.length > 1 && pTags[0][1] === this.pkHex) {
-      return true;
-    }
-
-    // If this is a thread reply and we're mentioned in the middle/end of p-tags,
-    // it's probably just thread protocol inclusion, not a direct mention
     const ourPTagIndex = pTags.findIndex(t => t[1] === this.pkHex);
+    if (ourPTagIndex >= 0 && ourPTagIndex < 3) {
+      return true;
+    }
+
+
     if (ourPTagIndex > 8) {
       // We're way down the recipient list, probably just thread inclusion
       try {

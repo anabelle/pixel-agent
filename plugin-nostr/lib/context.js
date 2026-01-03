@@ -215,7 +215,7 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
       const causeMsg = cause?.message || '';
       const causeCode = cause?.code || err?.code;
       const msg = String(err?.message || causeMsg || err || '').toLowerCase();
-      
+
       // Catch duplicate key errors (23505) and other constraint violations
       if (causeCode === '23505' || msg.includes('duplicate') || msg.includes('constraint') || msg.includes('exists') || msg.includes('violates unique')) {
         logger?.debug?.('[NOSTR] Memory already exists, skipping');
@@ -247,7 +247,7 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
           const userName = memory?.content?.userName || memory.entityId || 'system';
 
           logger?.info?.(`[NOSTR] FK recovery: ensuring world/room/entity for room=${memory.roomId} world=${worldId}`);
-          
+
           // Always ensure world exists first (rooms depend on it)
           if (runtime?.ensureWorldExists) {
             await runtime.ensureWorldExists({
@@ -258,7 +258,7 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
               metadata: { source }
             }).catch((e) => logger?.debug?.('[NOSTR] ensureWorldExists failed:', e?.message));
           }
-          
+
           // Always ensure room exists (memories depend on it)
           if (runtime?.ensureRoomExists) {
             await runtime.ensureRoomExists({
@@ -271,7 +271,7 @@ async function createMemorySafe(runtime, memory, tableName = 'messages', maxRetr
               worldId
             }).catch((e) => logger?.debug?.('[NOSTR] ensureRoomExists failed:', e?.message));
           }
-          
+
           // If entity FK, also ensure connection
           if (isEntityFk && runtime?.ensureConnection && memory?.entityId) {
             await runtime.ensureConnection({
@@ -338,7 +338,7 @@ async function saveInteractionMemory(runtime, createUniqueUuid, getConversationI
   }
 
   // Persist a top-level inReplyTo for replies so _restoreHandledEventIds can recover handled IDs across restarts
-  const isReplyKind = typeof kind === 'string' && kind.toLowerCase().includes('reply');
+  const isReplyKind = typeof kind === 'string' && (kind.toLowerCase().includes('reply') || kind.toLowerCase().includes('thanks'));
   const content = {
     type: 'social_interaction',
     source: 'nostr',

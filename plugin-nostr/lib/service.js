@@ -4413,6 +4413,7 @@ Response (YES/NO):`;
         const firstError = results.find(r => r.status === 'rejected')?.reason;
         return { success: false, successCount, failCount, error: firstError?.message || String(firstError) };
       }
+      logger.info(`[NOSTR] Published event ${signed.id.slice(0, 8)} to ${successCount} relays (kind: ${signed.kind})`);
       return { success: true, successCount, failCount };
     } catch (err) {
       return { success: false, successCount: 0, failCount: this.relays.length, error: err?.message || String(err) };
@@ -4737,7 +4738,7 @@ Response (YES/NO):`;
         return false;
       }
       const logId = typeof parentEvtOrId === 'object' && parentEvtOrId && parentEvtOrId.id ? parentEvtOrId.id : parentId || '';
-      this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)}: "${evtTemplate.content}"`);
+      this.logger.info(`[NOSTR] Replied to ${String(logId).slice(0, 8)} (reply event: ${signed.id.slice(0, 8)}): "${evtTemplate.content}"`);
 
       // Increment interaction count if not a mention
       if (parentAuthorPk && !isMention) {

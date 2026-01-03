@@ -32,7 +32,7 @@ const PLUGIN_NAMES = [
   // '@elizaos/plugin-sql',
   // AI providers - OpenRouter first for free models!
   '@elizaos/plugin-openrouter',
-  // '@elizaos/plugin-openai', // Fallback for embeddings if needed
+  '@elizaos/plugin-openai',
   // Platform integrations
   '@elizaos/plugin-telegram',
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured

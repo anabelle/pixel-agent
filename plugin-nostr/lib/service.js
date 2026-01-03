@@ -35,6 +35,7 @@ const { ContextAccumulator } = require('./contextAccumulator');
 const { NarrativeContextProvider } = require('./narrativeContextProvider');
 const { SelfReflectionEngine } = require('./selfReflection');
 const { PrimalTrendingFeed } = require('./primalTrending');
+const { recordPost: bridgeRecordPost, recordMention: bridgeRecordMention } = require('./bridge');
 
 async function ensureDeps() {
   if (!SimplePool) {
@@ -4286,6 +4287,12 @@ Response (YES/NO):`;
             this.logger.warn(`[NOSTR] Post failed on all ${failCount} relays: ${error}`);
             throw new Error(error);
           }
+          // Record to bridge for Syntropy feed export
+          try {
+            bridgeRecordPost({ id: signed.id, content: signed.content, created_at: signed.created_at, kind: signed.kind });
+          } catch (bridgeErr) {
+            this.logger.debug('[NOSTR] Bridge record failed:', bridgeErr?.message);
+          }
           this.logger.info(`[POST] Published note (${text.length} chars, type: ${postType})`);
           return true;
         } catch (err) {
@@ -4482,8 +4489,12 @@ Response (YES/NO):`;
         return;
       }
 
-
-
+      // Record all valid mentions to bridge for Syntropy to read
+      try {
+        bridgeRecordMention({ id: evt.id, pubkey: evt.pubkey, content: evt.content, created_at: evt.created_at });
+      } catch (bridgeErr) {
+        try { logger?.debug?.('[NOSTR] Bridge record mention failed:', bridgeErr?.message); } catch { }
+      }
 
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);

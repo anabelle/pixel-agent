@@ -1,23 +1,35 @@
 // Optimized Topic Extractor with Batching & Caching
 const { FORBIDDEN_TOPIC_WORDS, TIMELINE_LORE_IGNORED_TERMS, EXTRACTED_TOPICS_LIMIT } = require('./nostr');
 
+/**
+ * Sanitize text by removing orphan Unicode surrogates that break PostgreSQL JSON parsing.
+ * This handles cases like truncated flag emoji (🇺🇸 = \uD83C\uDDFA\uD83C\uDDF8)
+ * where only part of the surrogate pair exists.
+ */
+function sanitizeUnicode(text) {
+  if (!text || typeof text !== 'string') return text || '';
+  // Remove orphan high surrogates (not followed by low surrogate)
+  // and orphan low surrogates (not preceded by high surrogate)
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+}
+
 class TopicExtractor {
   constructor(runtime, logger, options = {}) {
     this.runtime = runtime;
     this.logger = logger || console;
-    
+
     // Batching config
     this.batchSize = parseInt(process.env.TOPIC_BATCH_SIZE, 10) || 8; // Wait for 8 events
     this.batchWaitMs = parseInt(process.env.TOPIC_BATCH_WAIT_MS, 10) || Infinity; // No timeout by default
     this.pendingBatch = [];
     this.batchTimer = null;
     this._isProcessing = false; // Guard against concurrent batch processing
-    
+
     // Cache config (5 minute TTL)
     this.cache = new Map();
     this.cacheTTL = parseInt(process.env.TOPIC_CACHE_TTL_MS, 10) || 5 * 60 * 1000;
     this.maxCacheSize = parseInt(process.env.TOPIC_CACHE_MAX_SIZE, 10) || 1000;
-    
+
     // Stats
     this.stats = {
       llmCalls: 0,
@@ -26,25 +38,25 @@ class TopicExtractor {
       processed: 0,
       batchedSavings: 0
     };
-    
+
     // Cleanup interval
     this.cleanupInterval = setInterval(() => this._cleanupCache(), 60000);
   }
 
   async extractTopics(event) {
     this.stats.processed++;
-    
+
     if (!event || !event.content) return [];
-    
+
     const content = event.content.trim();
-    
+
     // Skip very short or empty messages
     if (content.length < 10 || !this._hasFullSentence(content)) {
       this.stats.skipped++;
       this.logger?.debug?.(`[TOPIC] Skipping short message: ${event.id?.slice(0, 8)}`);
       return this._extractFastTopics(event);
     }
-    
+
     // Check cache first
     const cacheKey = this._getCacheKey(content);
     const cached = this.cache.get(cacheKey);
@@ -53,11 +65,11 @@ class TopicExtractor {
       this.logger?.debug?.(`[TOPIC] Cache hit for ${event.id?.slice(0, 8)}`);
       return cached.topics;
     }
-    
+
     // Add to batch and wait for 8 events
     return new Promise((resolve) => {
       this.pendingBatch.push({ event, resolve });
-      
+
       // Process batch ONLY when full (8 events accumulated)
       if (this.pendingBatch.length >= this.batchSize) {
         // Batch is full - process immediately
@@ -78,15 +90,15 @@ class TopicExtractor {
   async _processBatch() {
     // Guard against concurrent batch processing
     if (this._isProcessing || this.pendingBatch.length === 0) return;
-    
+
     this._isProcessing = true;
     this.batchTimer = null;
-    
+
     try {
       const batch = this.pendingBatch.splice(0, this.batchSize);
-      
+
       this.logger?.debug?.(`[TOPIC] Processing batch of ${batch.length} events`);
-      
+
       try {
         if (batch.length === 1) {
           // Single event - use original extraction
@@ -98,7 +110,7 @@ class TopicExtractor {
           batch.forEach((item, i) => {
             item.resolve(results[i] || []);
           });
-          
+
           this.stats.batchedSavings += (batch.length - 1); // Saved LLM calls
         }
       } catch (error) {
@@ -110,7 +122,7 @@ class TopicExtractor {
       }
     } finally {
       this._isProcessing = false;
-      
+
       // If more events arrived while processing, schedule another batch
       if (this.pendingBatch.length > 0) {
         setTimeout(() => this._processBatch(), 0);
@@ -122,15 +134,16 @@ class TopicExtractor {
     if (!this.runtime?.useModel) {
       return events.map(e => this._extractFastTopics(e));
     }
-    
+
     // Build batch prompt with Unicode-aware hashtag extraction
+    // Sanitize content to remove orphan surrogates that break PostgreSQL JSON
     const eventSummaries = events.map((evt, idx) => {
-      const content = evt.content.slice(0, 300);
-      const hashtags = (evt.content.match(/#[\p{L}\p{N}_]+/gu) || []).join(' ');
+      const content = sanitizeUnicode(evt.content.slice(0, 300));
+      const hashtags = sanitizeUnicode((evt.content.match(/#[\p{L}\p{N}_]+/gu) || []).join(' '));
       return `${idx + 1}. ${content}${hashtags ? ` [Tags: ${hashtags}]` : ''}`;
     }).join('\n\n');
-    
-  const prompt = `You are TopicExtractor, a deterministic module that converts posts into comma-separated topic lists.
+
+    const prompt = `You are TopicExtractor, a deterministic module that converts posts into comma-separated topic lists.
 
 Input: ${events.length} posts.
 
@@ -159,19 +172,19 @@ ${eventSummaries}`;
       this.stats.llmCalls++;
 
       const responseText = typeof response === 'string' ? response : (response?.text ?? '');
-      
+
       // Parse batch response - one line per post
       const lines = responseText.trim().split('\n').filter(l => l.trim());
       const results = [];
-      
+
       for (let i = 0; i < events.length; i++) {
         const line = lines[i];
         let topics = [];
-        
+
         if (line) {
           // Clean any stray numbering the model might add
           const cleaned = line.replace(/^\d+[\.\:\)\-]\s*/, '').trim();
-          
+
           if (cleaned && cleaned.toLowerCase() !== 'none') {
             topics = cleaned
               .split(',')
@@ -181,24 +194,24 @@ ${eventSummaries}`;
               .slice(0, EXTRACTED_TOPICS_LIMIT);
           }
         }
-        
+
         // Add hashtags from original event
         const hashtagTopics = this._extractHashtags(events[i]);
         const merged = [...hashtagTopics, ...topics];
         const unique = Array.from(new Set(merged)).slice(0, EXTRACTED_TOPICS_LIMIT);
-        
+
         // Fallback if empty
         const finalTopics = unique.length > 0 ? unique : this._extractFastTopics(events[i]);
-        
+
         // Cache result
         const cacheKey = this._getCacheKey(events[i].content);
         this._setCache(cacheKey, finalTopics);
-        
+
         results.push(finalTopics);
       }
-      
+
       this.logger?.debug?.(`[TOPIC] Batch extracted topics for ${events.length} events with 1 LLM call (saved ${events.length - 1} calls)`);
-      
+
       return results;
     } catch (error) {
       this.logger?.warn?.(`[TOPIC] Batch LLM failed: ${error.message}`);
@@ -210,12 +223,12 @@ ${eventSummaries}`;
     if (!this.runtime?.useModel) {
       return this._extractFastTopics(event);
     }
-    
+
     try {
       const hashtags = this._extractHashtags(event);
-      const truncatedContent = event.content.slice(0, 800);
-      
-  const prompt = `You are TopicExtractor, a deterministic module that converts a post into a comma-separated topic list.
+      const truncatedContent = sanitizeUnicode(event.content.slice(0, 800));
+
+      const prompt = `You are TopicExtractor, a deterministic module that converts a post into a comma-separated topic list.
 
 Output exactly one line with up to ${EXTRACTED_TOPICS_LIMIT} topics separated by commas. No intro. No commentary. If no valid topics exist, output "none".
 
@@ -249,11 +262,11 @@ Topic rules:
       const merged = [...hashtags, ...rawTopics];
       const unique = Array.from(new Set(merged)).slice(0, EXTRACTED_TOPICS_LIMIT);
       const finalTopics = unique.length > 0 ? unique : this._extractFastTopics(event);
-      
+
       // Cache result
       const cacheKey = this._getCacheKey(event.content);
       this._setCache(cacheKey, finalTopics);
-      
+
       return finalTopics;
     } catch (error) {
       this.logger?.warn?.(`[TOPIC] Single extraction failed: ${error.message}`);
@@ -265,18 +278,18 @@ Topic rules:
     // Fast non-LLM extraction for fallback
     const content = event.content.toLowerCase();
     const topics = [];
-    
+
     // Extract hashtags
     topics.push(...this._extractHashtags(event));
-    
+
     // Extract @mentions (specific people)
     const mentions = content.match(/@\w+/g) || [];
     topics.push(...mentions.map(m => m.slice(1)).slice(0, 3));
-    
+
     // Extract common nostr entities
     const entities = content.match(/\b(relay|zap|lightning|wallet|sats|satoshi|node)\b/gi) || [];
     topics.push(...entities.map(e => e.toLowerCase()));
-    
+
     // Extract URLs (just domain)
     const urls = content.match(/https?:\/\/([^\/\s]+)/gi) || [];
     topics.push(...urls.map(u => {
@@ -287,28 +300,28 @@ Topic rules:
         return null;
       }
     }).filter(Boolean));
-    
+
     // Fallback: extract bigrams (two-word phrases)
     if (topics.length === 0) {
       const words = content
         .replace(/[^\w\s]/g, ' ')
         .split(/\s+/)
         .filter(w => w.length > 3 && !FORBIDDEN_TOPIC_WORDS.has(w));
-      
+
       for (let i = 0; i < words.length - 1 && topics.length < 5; i++) {
         const bigram = `${words[i]} ${words[i + 1]}`;
         if (bigram.length < 30) topics.push(bigram);
       }
-      
+
       // Single words as last resort
       topics.push(...words.slice(0, 5));
     }
-    
+
     // Dedupe and limit
     const unique = Array.from(new Set(topics))
       .filter(t => !FORBIDDEN_TOPIC_WORDS.has(t) && !TIMELINE_LORE_IGNORED_TERMS.has(t))
       .slice(0, EXTRACTED_TOPICS_LIMIT);
-    
+
     return unique;
   }
 
@@ -331,31 +344,31 @@ Topic rules:
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
-    
+
     if (!s || s.length < 2 || s.length > 100) return '';
     if (/^\d+$/.test(s)) return '';
     if (s === 'general' || s === 'various' || s === 'discussion' || s === 'none') return '';
-    
+
     return s;
   }
 
   _hasFullSentence(content) {
     // Check if content has at least one complete thought
     const text = content.trim();
-    
+
     // Too short
     if (text.length < 15) return false;
-    
+
     // Has multiple words and ends with punctuation
     const wordCount = text.split(/\s+/).length;
     if (wordCount >= 5) return true;
-    
+
     // Has sentence-ending punctuation
     if (/[.!?]/.test(text)) return true;
-    
+
     // Has multiple clauses (commas, semicolons)
     if (wordCount >= 3 && /[,;:]/.test(text)) return true;
-    
+
     return false;
   }
 
@@ -377,7 +390,7 @@ Topic rules:
       const firstKey = this.cache.keys().next().value;
       this.cache.delete(firstKey);
     }
-    
+
     this.cache.set(key, {
       topics,
       timestamp: Date.now()
@@ -387,14 +400,14 @@ Topic rules:
   _cleanupCache() {
     const now = Date.now();
     let cleaned = 0;
-    
+
     for (const [key, value] of this.cache.entries()) {
       if (now - value.timestamp > this.cacheTTL) {
         this.cache.delete(key);
         cleaned++;
       }
     }
-    
+
     if (cleaned > 0) {
       this.logger?.debug?.(`[TOPIC] Cleaned ${cleaned} expired cache entries`);
     }
@@ -402,13 +415,13 @@ Topic rules:
 
   getStats() {
     const totalProcessed = this.stats.processed;
-    const cacheHitRate = totalProcessed > 0 
-      ? ((this.stats.cacheHits / totalProcessed) * 100).toFixed(1) 
+    const cacheHitRate = totalProcessed > 0
+      ? ((this.stats.cacheHits / totalProcessed) * 100).toFixed(1)
       : 0;
     const skipRate = totalProcessed > 0
       ? ((this.stats.skipped / totalProcessed) * 100).toFixed(1)
       : 0;
-    
+
     return {
       ...this.stats,
       cacheHitRate: `${cacheHitRate}%`,

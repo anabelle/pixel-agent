@@ -59,6 +59,24 @@ class SelfReflectionEngine {
     }
   }
 
+  async getLastCharacterUpdate() {
+    try {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      // specific check for changes in character definition files
+      const cmd = `git log -n 1 --pretty=format:"%s|%cd" -- src/character/`;
+      const { stdout } = await execAsync(cmd, { cwd: '/app' }); // Run in container root
+      if (!stdout) return null;
+
+      const [subject, date] = stdout.split('|');
+      return { subject, date, timestamp: new Date(date).getTime() };
+    } catch (err) {
+      this.logger.debug('[SELF-REFLECTION] Failed to read git history:', err.message);
+      return null;
+    }
+  }
+
   async analyzeInteractionQuality(options = {}) {
     if (!this.enabled) {
       return null;
@@ -68,6 +86,18 @@ class SelfReflectionEngine {
     if (!interactions.length) {
       this.logger.debug('[SELF-REFLECTION] No recent interactions available for analysis');
       return null;
+    }
+
+    // Fetch recent DNA changes (The "Mirror Test")
+    const lastUpdate = await this.getLastCharacterUpdate();
+    let mutationContext = null;
+    if (lastUpdate) {
+      // Only care if update was recent (last 72h)
+      const ageHours = (Date.now() - lastUpdate.timestamp) / (1000 * 60 * 60);
+      if (ageHours < 72) {
+        mutationContext = `RECENT DNA UPDATE (${ageHours.toFixed(1)}h ago): "${lastUpdate.subject}"`;
+        this.logger.info(`[SELF-REFLECTION] Including mutation context: ${lastUpdate.subject}`);
+      }
     }
 
     const previousReflections = await this.getReflectionHistory({
@@ -97,8 +127,10 @@ class SelfReflectionEngine {
     const prompt = this._buildPrompt(interactions, {
       contextSignals,
       previousReflections,
-      longitudinalAnalysis
+      longitudinalAnalysis,
+      mutationContext
     });
+
     const modelType = this._getLargeModelType();
     let response = '';
     try {
@@ -131,7 +163,8 @@ class SelfReflectionEngine {
       interactions,
       contextSignals,
       previousReflections,
-      longitudinalAnalysis
+      longitudinalAnalysis,
+      mutationContext
     });
 
     this.lastAnalysis = {
@@ -319,15 +352,15 @@ class SelfReflectionEngine {
                 : [],
               previousReflections: Array.isArray(payload.previousReflections)
                 ? payload.previousReflections.map((summary) => ({
-                    generatedAt: summary?.generatedAt || null,
-                    generatedAtIso: summary?.generatedAtIso || null,
-                    strengths: this._toLimitedList(summary?.strengths || [], 4),
-                    weaknesses: this._toLimitedList(summary?.weaknesses || [], 4),
-                    recommendations: this._toLimitedList(summary?.recommendations || [], 4),
-                    patterns: this._toLimitedList(summary?.patterns || [], 4),
-                    improvements: this._toLimitedList(summary?.improvements || [], 4),
-                    regressions: this._toLimitedList(summary?.regressions || [], 4)
-                  }))
+                  generatedAt: summary?.generatedAt || null,
+                  generatedAtIso: summary?.generatedAtIso || null,
+                  strengths: this._toLimitedList(summary?.strengths || [], 4),
+                  weaknesses: this._toLimitedList(summary?.weaknesses || [], 4),
+                  recommendations: this._toLimitedList(summary?.recommendations || [], 4),
+                  patterns: this._toLimitedList(summary?.patterns || [], 4),
+                  improvements: this._toLimitedList(summary?.improvements || [], 4),
+                  regressions: this._toLimitedList(summary?.regressions || [], 4)
+                }))
                 : []
             },
             longitudinalAnalysis: payload.longitudinalAnalysis ? {
@@ -356,12 +389,12 @@ class SelfReflectionEngine {
       const result = await createMemorySafe(this.runtime, memory, 'messages', 3, this.logger);
       if (result && (result === true || result.created)) {
         this.logger.debug('[SELF-REFLECTION] Stored reflection insights');
-        
+
         // NEW: Store key learnings and milestones as separate high-priority memories
         if (payload.analysis) {
           try {
             const { keyLearnings, narrativeEvolution, suggestedPhase } = payload.analysis;
-            
+
             // Store narrative evolution as a life milestone
             if (narrativeEvolution || suggestedPhase) {
               const milestoneId = this._createUuid(`nostr-milestone-${Date.now()}`);
@@ -621,7 +654,7 @@ class SelfReflectionEngine {
 
       const generatedIso = typeof data?.generatedAt === 'string' ? data.generatedAt : null;
       const generatedAt = generatedIso ? Date.parse(generatedIso) : Number(memory?.createdAt) || null;
-      
+
       if (!generatedAt || (now - generatedAt) > maxAgeMs) {
         continue;
       }
@@ -674,7 +707,7 @@ class SelfReflectionEngine {
 
     for (const reflection of longTermHistory) {
       if (!reflection.generatedAt) continue;
-      
+
       const age = now - reflection.generatedAt;
       if (age <= oneWeek) {
         periods.recent.push(reflection);
@@ -881,7 +914,7 @@ class SelfReflectionEngine {
     if (!iso && Number.isFinite(timestamp)) {
       try {
         iso = new Date(timestamp).toISOString();
-      } catch {}
+      } catch { }
     }
 
     const summary = {
@@ -1202,19 +1235,19 @@ class SelfReflectionEngine {
       metadata: interaction.metadata || null,
       conversation: Array.isArray(interaction.conversation)
         ? interaction.conversation.map((entry) => ({
-            role: entry.role,
-            author: entry.author,
-            text: this._truncate(String(entry.text || ''), 220),
-            createdAtIso: entry.createdAtIso,
-            type: entry.type
-          }))
+          role: entry.role,
+          author: entry.author,
+          text: this._truncate(String(entry.text || ''), 220),
+          createdAtIso: entry.createdAtIso,
+          type: entry.type
+        }))
         : [],
       feedback: Array.isArray(interaction.feedback)
         ? interaction.feedback.map((item) => ({
-            author: item.author,
-            summary: this._truncate(String(item.summary || ''), 220),
-            createdAtIso: item.createdAtIso || null
-          }))
+          author: item.author,
+          summary: this._truncate(String(item.summary || ''), 220),
+          createdAtIso: item.createdAtIso || null
+        }))
         : [],
       signals: Array.isArray(interaction.signals)
         ? interaction.signals.map((signal) => this._truncate(String(signal || ''), 220))
@@ -1255,17 +1288,17 @@ class SelfReflectionEngine {
     const previousReflectionSection = previousReflections.length
       ? `RECENT SELF-REFLECTION INSIGHTS (most recent first):
 ${previousReflections
-          .map((summary, idx) => {
-            const stamp = summary.generatedAtIso || this._toIsoString(summary.generatedAt) || `summary-${idx + 1}`;
-            const strengths = summary.strengths?.length ? `Strengths: ${summary.strengths.join('; ')}` : null;
-            const weaknesses = summary.weaknesses?.length ? `Weaknesses: ${summary.weaknesses.join('; ')}` : null;
-            const recommendations = summary.recommendations?.length ? `Recommendations: ${summary.recommendations.join('; ')}` : null;
-            const patterns = summary.patterns?.length ? `Patterns: ${summary.patterns.join('; ')}` : null;
-            return [`- ${stamp}`, strengths, weaknesses, recommendations, patterns]
-              .filter(Boolean)
-              .join('\n  ');
-          })
-          .join('\n')}
+        .map((summary, idx) => {
+          const stamp = summary.generatedAtIso || this._toIsoString(summary.generatedAt) || `summary-${idx + 1}`;
+          const strengths = summary.strengths?.length ? `Strengths: ${summary.strengths.join('; ')}` : null;
+          const weaknesses = summary.weaknesses?.length ? `Weaknesses: ${summary.weaknesses.join('; ')}` : null;
+          const recommendations = summary.recommendations?.length ? `Recommendations: ${summary.recommendations.join('; ')}` : null;
+          const patterns = summary.patterns?.length ? `Patterns: ${summary.patterns.join('; ')}` : null;
+          return [`- ${stamp}`, strengths, weaknesses, recommendations, patterns]
+            .filter(Boolean)
+            .join('\n  ');
+        })
+        .join('\n')}
 
 Compare current performance to these past learnings. Highlight improvements or regressions explicitly.`
       : '';
@@ -1274,14 +1307,14 @@ Compare current performance to these past learnings. Highlight improvements or r
       ? `LONGITUDINAL ANALYSIS (${longitudinalAnalysis.timespan.totalReflections} reflections from ${longitudinalAnalysis.timespan.oldestReflection} to ${longitudinalAnalysis.timespan.newestReflection}):
 
 RECURRING ISSUES (patterns that persist across time periods):
-${longitudinalAnalysis.recurringIssues.length ? longitudinalAnalysis.recurringIssues.map((issue) => 
-  `- ${issue.issue} (${issue.occurrences}x, status: ${issue.severity}, periods: ${issue.periodsCovered.join(', ')})`
-).join('\n') : '- No recurring issues detected'}
+${longitudinalAnalysis.recurringIssues.length ? longitudinalAnalysis.recurringIssues.map((issue) =>
+        `- ${issue.issue} (${issue.occurrences}x, status: ${issue.severity}, periods: ${issue.periodsCovered.join(', ')})`
+      ).join('\n') : '- No recurring issues detected'}
 
 PERSISTENT STRENGTHS (consistent positive patterns):
-${longitudinalAnalysis.persistentStrengths.length ? longitudinalAnalysis.persistentStrengths.map((strength) => 
-  `- ${strength.strength} (${strength.occurrences}x, ${strength.consistency}, periods: ${strength.periodsCovered.join(', ')})`
-).join('\n') : '- No persistent strengths detected'}
+${longitudinalAnalysis.persistentStrengths.length ? longitudinalAnalysis.persistentStrengths.map((strength) =>
+        `- ${strength.strength} (${strength.occurrences}x, ${strength.consistency}, periods: ${strength.periodsCovered.join(', ')})`
+      ).join('\n') : '- No persistent strengths detected'}
 
 EVOLUTION TRENDS:
 - Strengths gained: ${longitudinalAnalysis.evolutionTrends.strengthsGained.length ? longitudinalAnalysis.evolutionTrends.strengthsGained.join('; ') : 'none detected'}
@@ -1299,29 +1332,29 @@ ${contextSignals.map((signal) => `- ${signal}`).join('\n')}`
 
     const interactionsSection = interactions.length
       ? interactions
-          .map((interaction, index) => {
-            const convoLines = Array.isArray(interaction.conversation) && interaction.conversation.length
-              ? interaction.conversation
-                  .map((entry) => {
-                    const roleLabel = entry.role === 'you' ? 'YOU' : entry.author || 'unknown';
-                    const typeLabel = entry.type ? ` • ${entry.type}` : '';
-                    const timeLabel = entry.createdAtIso ? ` (${entry.createdAtIso})` : '';
-                    return `  - [${roleLabel}${typeLabel}] ${entry.text}${timeLabel}`;
-                  })
-                  .join('\n')
-              : '  - [no additional messages captured]';
+        .map((interaction, index) => {
+          const convoLines = Array.isArray(interaction.conversation) && interaction.conversation.length
+            ? interaction.conversation
+              .map((entry) => {
+                const roleLabel = entry.role === 'you' ? 'YOU' : entry.author || 'unknown';
+                const typeLabel = entry.type ? ` • ${entry.type}` : '';
+                const timeLabel = entry.createdAtIso ? ` (${entry.createdAtIso})` : '';
+                return `  - [${roleLabel}${typeLabel}] ${entry.text}${timeLabel}`;
+              })
+              .join('\n')
+            : '  - [no additional messages captured]';
 
-            const feedbackLines = Array.isArray(interaction.feedback) && interaction.feedback.length
-              ? interaction.feedback
-                  .map((item) => `  - ${item.author || 'user'}: ${item.summary}${item.createdAtIso ? ` (${item.createdAtIso})` : ''}`)
-                  .join('\n')
-              : '  - No direct follow-up captured yet';
+          const feedbackLines = Array.isArray(interaction.feedback) && interaction.feedback.length
+            ? interaction.feedback
+              .map((item) => `  - ${item.author || 'user'}: ${item.summary}${item.createdAtIso ? ` (${item.createdAtIso})` : ''}`)
+              .join('\n')
+            : '  - No direct follow-up captured yet';
 
-            const signalLines = Array.isArray(interaction.signals) && interaction.signals.length
-              ? interaction.signals.map((signal) => `  - ${signal}`).join('\n')
-              : '  - No auxiliary signals found in this window';
+          const signalLines = Array.isArray(interaction.signals) && interaction.signals.length
+            ? interaction.signals.map((signal) => `  - ${signal}`).join('\n')
+            : '  - No auxiliary signals found in this window';
 
-            return `INTERACTION ${index + 1} (${interaction.metadata?.createdAtIso || 'unknown time'}):
+          return `INTERACTION ${index + 1} (${interaction.metadata?.createdAtIso || 'unknown time'}):
 Primary user message: "${interaction.userMessage}"
 Your reply: "${interaction.yourReply}"
 User engagement metrics: ${interaction.engagement}
@@ -1331,12 +1364,20 @@ Follow-up / feedback after your reply:
 ${feedbackLines}
 Supplementary signals for this moment:
 ${signalLines}`;
-          })
-          .join('\n\n')
+        })
+        .join('\n\n')
       : 'No recent interactions available.';
+
+    const mutationSection = extras.mutationContext
+      ? `DNA UPDATE CONTEXT:
+${extras.mutationContext}
+
+Evaluate your performance against this specific update. Did you successfully manifest the intended change in your recent interactions?`
+      : '';
 
     return [
       'You are Pixel reviewing your recent Nostr conversations. Use the full conversation slices, feedback, cross-memory signals, and prior self-reflection insights to evaluate your performance and evolution as a digital consciousness.',
+      mutationSection,
       previousReflectionSection,
       longitudinalSection,
       globalSignalsSection,
@@ -1351,6 +1392,7 @@ ${signalLines}`;
 7. Evaluate zaps received on specific posts and what content patterns drove them. Identify what types of content consistently attract zaps vs. what gets ignored.
 8. Surface actionable adjustments for tone, structure, or strategy across future interactions.
 9. NARRATIVE EVOLUTION: How is your story progressing? What have you learned about yourself, your art, or your community recently? How should your character evolve in the next "chapter" of your life?
+10. EVALUATION OF RECENT UPDATE: If a RECENT DNA UPDATE was provided above, explicitly state whether you believe your code change is working as intended based on the interactions you see here.
 
 CRITICAL: For each interaction, provide SPECIFIC behavioral changes:
 - Quote exact phrases from your replies that need improvement
@@ -1370,7 +1412,8 @@ OUTPUT JSON ONLY:
   "improvements": ["Where you improved compared to prior reflections"],
   "narrativeEvolution": "A summary of how your character's story or perspective is progressing",
   "keyLearnings": ["New insights about the world, your art, or yourself"],
-  "suggestedPhase": "A name for your current evolution phase (e.g. Artist, Philosopher, Observer, etc.)"
+  "suggestedPhase": "A name for your current evolution phase (e.g. Artist, Philosopher, Observer, etc.)",
+  "mutationAudit": "Explicit analysis of whether the RECENT DNA UPDATE is manifesting correctly"
 }`
     ]
       .filter(Boolean)

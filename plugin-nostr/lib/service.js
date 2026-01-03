@@ -6228,7 +6228,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
     if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
     if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
 
-    const normalized = this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim();
+    const normalized = sanitizeUnicode(this._sanitizeWhitelist(String(evt.content || '')).replace(/[\s\u00A0]+/g, ' ').trim());
     if (!normalized) {
       this.logger?.debug?.(`[NOSTR] Timeline lore skip ${evt.id.slice(0, 8)} (empty after sanitize)`);
       return;
@@ -6275,7 +6275,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       id: evt.id,
       pubkey: evt.pubkey,
       created_at: evt.created_at || Math.floor(Date.now() / 1000),
-      content: analysisContent.slice(0, 480),
+      content: sanitizeUnicode(analysisContent.slice(0, 480)),
       summary: this._coerceLoreString(verdict?.summary || heuristics.summary || null) || null,
       rationale: this._coerceLoreString(verdict?.rationale || heuristics.reason || null) || null,
       tags: Array.from(mergedTags).slice(0, 8),

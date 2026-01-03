@@ -16,18 +16,13 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
-    "types": [
-      "bun-types"
-    ]
+    "sourceMap": true
   },
   "include": [
     "src/**/*"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "src/**/__tests__/**/*",
-    "src/**/*.test.ts"
+    "dist"
   ]
 }

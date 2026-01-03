@@ -33,7 +33,7 @@ import type { Character } from "@elizaos/core";
 
 // Create a character with plugin names (strings) for CLI resolution
 // The ElizaOS CLI will resolve these at runtime
-const character: any = {
+const character: Character = {
     ...characterManifest,
     plugins: [
         '@elizaos/plugin-bootstrap',

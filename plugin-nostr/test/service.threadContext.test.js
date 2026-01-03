@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { NostrService } from '../lib/service.js';
+import { ThreadContextResolver } from '../lib/threadContext.js';
 
 const makeEvent = (id, created, tags = [], content = '') => ({
   id,
@@ -72,7 +73,16 @@ describe('NostrService thread context harvesting', () => {
       threadContextFetchRounds: 4,
       threadContextFetchBatch: 3,
       _list: listMock,
-      _assessThreadContextQuality: NostrService.prototype._assessThreadContextQuality
+      _assessThreadContextQuality: NostrService.prototype._assessThreadContextQuality,
+      threadResolver: new ThreadContextResolver({
+        pool: {},
+        relays: ['wss://test.relay'],
+        maxEvents: 12,
+        maxRounds: 4,
+        batchSize: 3,
+        list: listMock,
+        logger: console
+      })
     };
 
     const context = await NostrService.prototype._getThreadContext.call(service, target);

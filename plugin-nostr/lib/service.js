@@ -5889,11 +5889,24 @@ Response (YES/NO):`;
 
   _chooseInteractionType() {
     const rand = Math.random();
-    if (rand < this.homeFeedReactionChance) return 'reaction';
-    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) return 'repost';
-    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) return 'quote';
-    if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) return 'reply';
-    return null;
+    let type = null;
+
+    if (rand < this.homeFeedReactionChance) {
+      type = 'reaction';
+    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance) {
+      type = 'repost';
+    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance) {
+      type = 'quote';
+    } else if (rand < this.homeFeedReactionChance + this.homeFeedRepostChance + this.homeFeedQuoteChance + this.homeFeedReplyChance) {
+      type = 'reply';
+    }
+
+    // User request: on "like scenarios" (reaction), throw a coin between reply or like for better visibility
+    if (type === 'reaction' && Math.random() > 0.5) {
+      return 'reply';
+    }
+
+    return type;
   }
 
   async postRepost(parentEvt) {
@@ -7295,8 +7308,15 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
           // Analyze relevance first
           const analysis = await this._analyzePostForInteraction(evt);
           if (analysis) {
-            const interactionType = candidate.suggestedAction === 'react' ?
-              (Math.random() > 0.5 ? 'reaction' : 'repost') : 'quote';
+            // Decide interaction type based on suggested action and coin toss for visibility
+            let interactionType;
+            if (candidate.suggestedAction === 'react') {
+              // High engagement note: coin toss between like (reaction) and reply for better visibility
+              interactionType = Math.random() > 0.5 ? 'reaction' : 'reply';
+            } else {
+              // Default to a coin toss between quote and reply for other cases
+              interactionType = Math.random() > 0.5 ? 'quote' : 'reply';
+            }
 
             switch (interactionType) {
               case 'reaction':
@@ -7305,10 +7325,17 @@ YOUR RESPONSE MUST START WITH { AND END WITH } - NO MARKDOWN FORMATTING`;
               case 'repost':
                 await this.postRepost(evt);
                 break;
+              case 'reply':
+                {
+                  const text = await this.generateQuoteTextLLM(evt);
+                  if (text) await this.postReply(evt, text);
+                }
+                break;
               case 'quote':
-                // For quotes, we need to generate text
-                const text = await this.generateQuoteTextLLM(evt);
-                if (text) await this.postQuoteRepost(evt, text);
+                {
+                  const text = await this.generateQuoteTextLLM(evt);
+                  if (text) await this.postQuoteRepost(evt, text);
+                }
                 break;
             }
             this.homeFeedProcessedEvents.add(evt.id);

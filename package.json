@@ -15,7 +15,8 @@
     "test:diary": "bun test src/diary/__tests__/diary-service.test.ts",
     "test:twitter": "bun test src/__tests__/twitter-plugin.test.ts",
     "diary": "bun src/diary/cli.ts",
-    "clean-db": "./clean-db.sh"
+    "clean-db": "./clean-db.sh",
+    "prepare": "husky"
   },
   "trustedDependencies": [
     "sharp",
@@ -57,6 +58,8 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/pg": "^8.11.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "typescript": "^5.0.0"
   },
   "keywords": [

@@ -5713,8 +5713,21 @@ Response (YES/NO):`;
       // Prevent memory leak: clear processed events if set gets too large
       // We only care about deduplicating recent interactions, not all history
       if (this.homeFeedProcessedEvents.size > 2000) {
-        logger.debug('[NOSTR] Clearing homeFeedProcessedEvents cache (size limit reached)');
-        this.homeFeedProcessedEvents.clear();
+        // Trim specifically the oldest entries (first in Set order)
+        // Keep 1800, remove oldest ~200
+        const excess = this.homeFeedProcessedEvents.size - 1800;
+        if (excess > 0) {
+          const it = this.homeFeedProcessedEvents.values();
+          for (let i = 0; i < excess; i++) {
+            const next = it.next();
+            if (!next.done) {
+              this.homeFeedProcessedEvents.delete(next.value);
+            } else {
+              break;
+            }
+          }
+          logger.debug(`[NOSTR] Trimmed ${excess} oldest events from homeFeedProcessedEvents cache`);
+        }
       }
 
       // Load current contacts

@@ -51,6 +51,11 @@ RUN perl -i -0pe 's/(this\.runtime\.useModel\(\s*ModelType\.IMAGE_DESCRIPTION,\s
 RUN perl -i -0pe 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# Prevent Telegram preprocessing middleware from blocking Telegraf longer than handlerTimeout.
+# If chat/entity sync hangs (e.g. DB/network stall), continue to the message handler anyway.
+RUN perl -i -0pe 's~async chatAndEntityMiddleware\(ctx, next\) \{\n    if \(!ctx\.chat\) return next\(\);\n    const chatId = ctx\.chat\.id\.toString\(\);\n    if \(!this\.knownChats\.has\(chatId\)\) \{\n      await this\.handleNewChat\(ctx\);\n      return next\(\);\n    \}\n    await this\.processExistingChat\(ctx\);\n    await next\(\);\n  \}~async chatAndEntityMiddleware(ctx, next) {\n    if (!ctx.chat) return next();\n    const __tgPreprocessMaxMs = Number(process.env.TELEGRAM_PREPROCESS_MAX_MS || 5000);\n    const __tgDoPreprocess = async () => {\n      const chatId = ctx.chat.id.toString();\n      if (!this.knownChats.has(chatId)) {\n        await this.handleNewChat(ctx);\n        return;\n      }\n      await this.processExistingChat(ctx);\n    };\n    try {\n      await Promise.race([\n        __tgDoPreprocess(),\n        new Promise((_, reject) => setTimeout(() => reject(new Error(`Telegram preprocess timeout after \${__tgPreprocessMaxMs}ms`)), __tgPreprocessMaxMs))\n      ]);\n    } catch (error) {\n      logger3.error({ error, chatId: ctx.chat.id }, "Telegram preprocess failed or timed out");\n    }\n    return next();\n  }~g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
 # Do not await long-running message processing; log errors via promise .catch.
 RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \

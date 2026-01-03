@@ -16,14 +16,16 @@ async function ensureDeps() {
  */
 
 class ConnectionManager {
-  constructor({ poolFactory, relays, pkHex, runtime, handlers, config, logger }) {
+  constructor({ poolFactory, relays, pkHex, runtime, handlers, config, logger, onHealthCheck, onReconnect }) {
     this.poolFactory = poolFactory;
     this.relays = relays;
     this.pkHex = pkHex;
     this.runtime = runtime;
-    this.handlerProvider = handlers; // Function that returns handlers { onevent, oneose, onclose }
-    this.config = config; // { checkIntervalMs, maxTimeSinceLastEventMs, maxReconnectAttempts, reconnectDelayMs }
+    this.handlerProvider = handlers;
+    this.config = config;
     this.logger = logger || console;
+    this.onHealthCheck = onHealthCheck;
+    this.onReconnect = onReconnect;
 
     this.pool = null;
     this.listenUnsub = null;
@@ -174,10 +176,72 @@ class ConnectionManager {
     return this.pool;
   }
 
-  // Placeholder - T020
-  startMonitoring() { throw new Error('Not implemented - see T020'); }
-  checkHealth() { throw new Error('Not implemented - see T020'); }
-  async attemptReconnection() { throw new Error('Not implemented - see T020'); }
+  startMonitoring() {
+    if (!this.monitorTimer) {
+      this.monitorTimer = setTimeout(() => {
+        this.checkHealth();
+      }, this.config.checkIntervalMs);
+    }
+  }
+
+  checkHealth() {
+    if (this.onHealthCheck) {
+      this.onHealthCheck();
+    }
+
+    const now = Date.now();
+    const timeSinceLastEvent = now - this.lastEventReceived;
+
+    if (timeSinceLastEvent > this.config.maxTimeSinceLastEventMs) {
+      this.logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
+      this.attemptReconnection();
+    } else {
+      this.logger.debug(`[NOSTR] Connection healthy, last event received ${Math.round(timeSinceLastEvent / 1000)}s ago`);
+      this.startMonitoring();
+    }
+  }
+
+  async attemptReconnection() {
+    if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
+      this.logger.error(`[NOSTR] Max reconnection attempts (${this.config.maxReconnectAttempts}) reached, giving up`);
+      return;
+    }
+
+    this.reconnectAttempts++;
+    this.logger.info(`[NOSTR] Attempting reconnection ${this.reconnectAttempts}/${this.config.maxReconnectAttempts}`);
+
+    try {
+      if (this.listenUnsub) {
+        try { this.listenUnsub(); } catch { }
+        this.listenUnsub = null;
+      }
+      if (this.homeFeedUnsub) {
+        try { this.homeFeedUnsub(); } catch { }
+        this.homeFeedUnsub = null;
+      }
+      if (this.pool) {
+        try { this.pool.close([]); } catch { }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, this.config.reconnectDelayMs));
+
+      if (this.onReconnect) {
+        await this.onReconnect();
+      }
+
+      this.logger.info(`[NOSTR] Reconnection ${this.reconnectAttempts} successful`);
+      this.reconnectAttempts = 0;
+      this.lastEventReceived = Date.now();
+      this.startMonitoring();
+
+    } catch (error) {
+      this.logger.error(`[NOSTR] Reconnection ${this.reconnectAttempts} failed:`, error?.message || error);
+
+      setTimeout(() => {
+        this.attemptReconnection();
+      }, this.config.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1));
+    }
+  }
 
   stop() {
     if (this.monitorTimer) clearTimeout(this.monitorTimer);

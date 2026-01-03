@@ -1022,7 +1022,9 @@ Response (YES/NO):`;
         maxReconnectAttempts: svc.maxReconnectAttempts,
         reconnectDelayMs: svc.reconnectDelayMs
       },
-      logger: svc.logger
+      logger: svc.logger,
+      onHealthCheck: () => svc._cleanupImageContexts(),
+      onReconnect: () => svc._setupConnection()
     });
 
     if (listenEnabled && svc.pkHex) {
@@ -5511,79 +5513,17 @@ Response (YES/NO):`;
   }
 
   _startConnectionMonitoring() {
-    if (!this.connectionMonitorEnabled) {
-      return;
+    if (this.connectionMonitorEnabled) {
+      this.connectionManager.startMonitoring();
     }
-
-    if (this.connectionMonitorTimer) {
-      clearTimeout(this.connectionMonitorTimer);
-    }
-
-    this.connectionMonitorTimer = setTimeout(() => {
-      this._checkConnectionHealth();
-    }, this.connectionCheckIntervalMs);
   }
 
   _checkConnectionHealth() {
-    // Periodic cleanup of expired image contexts
-    this._cleanupImageContexts();
-
-    const now = Date.now();
-    const timeSinceLastEvent = now - this.lastEventReceived;
-
-    if (timeSinceLastEvent > this.maxTimeSinceLastEventMs) {
-      logger.warn(`[NOSTR] No events received in ${Math.round(timeSinceLastEvent / 1000)}s, checking connection health`);
-      this._attemptReconnection();
-    } else {
-      logger.debug(`[NOSTR] Connection healthy, last event received ${Math.round(timeSinceLastEvent / 1000)}s ago`);
-      this._startConnectionMonitoring(); // Schedule next check
-    }
+    return this.connectionManager.checkHealth();
   }
 
-  async _attemptReconnection() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error(`[NOSTR] Max reconnection attempts (${this.maxReconnectAttempts}) reached, giving up`);
-      return;
-    }
-
-    this.reconnectAttempts++;
-    logger.info(`[NOSTR] Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-
-    try {
-      // Close existing subscriptions and pool
-      if (this.listenUnsub) {
-        try { this.listenUnsub(); } catch { }
-        this.listenUnsub = null;
-      }
-      if (this.homeFeedUnsub) {
-        try { this.homeFeedUnsub(); } catch { }
-        this.homeFeedUnsub = null;
-      }
-      if (this.pool) {
-        try { this.pool.close([]); } catch { }
-      }
-
-      // Wait a bit before reconnecting
-      await new Promise(resolve => setTimeout(resolve, this.reconnectDelayMs));
-
-      // Recreate pool and subscriptions
-      await this._setupConnection();
-
-      logger.info(`[NOSTR] Reconnection ${this.reconnectAttempts} successful`);
-      this.reconnectAttempts = 0; // Reset on successful reconnection
-      this.lastEventReceived = Date.now(); // Reset timer
-      if (this.connectionMonitorEnabled) {
-        this._startConnectionMonitoring(); // Resume monitoring
-      }
-
-    } catch (error) {
-      logger.error(`[NOSTR] Reconnection ${this.reconnectAttempts} failed:`, error?.message || error);
-
-      // Schedule another reconnection attempt
-      setTimeout(() => {
-        this._attemptReconnection();
-      }, this.reconnectDelayMs * Math.pow(2, this.reconnectAttempts - 1)); // Exponential backoff
-    }
+  _attemptReconnection() {
+    return this.connectionManager.attemptReconnection();
   }
 
   async _setupConnection() {
@@ -5650,14 +5590,14 @@ Response (YES/NO):`;
         requests,
         {
           onevent: (evt) => {
-            this.lastEventReceived = Date.now();
+            this.connectionManager.lastEventReceived = Date.now();
             if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
             if (this.mutedUsers && this.mutedUsers.has(evt.pubkey)) return;
             this.handleHomeFeedEvent(evt).catch((err) => logger.debug('[NOSTR] Home feed event error:', err?.message || err));
           },
           oneose: () => {
             logger.debug('[NOSTR] Home feed subscription OSE');
-            this.lastEventReceived = Date.now();
+            this.connectionManager.lastEventReceived = Date.now();
           },
           onclose: (reasons) => {
             logger.warn(`[NOSTR] Home feed subscription closed: ${JSON.stringify(reasons)}`);

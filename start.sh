@@ -15,9 +15,4 @@ if [ -n "$POSTGRES_URL" ]; then
     done
 fi
 
-# Regenerate character.json at runtime so env-provided secrets/settings (e.g. TELEGRAM_BOT_TOKEN)
-# are reflected in the character file. This avoids baking empty settings during docker build.
-echo "[startup] Building character.json from runtime env..."
-bun run build:character
-
 exec bun --preload ./suppress-ai-warnings.js ./node_modules/@elizaos/cli/dist/index.js start --character ./character.json --port 3003

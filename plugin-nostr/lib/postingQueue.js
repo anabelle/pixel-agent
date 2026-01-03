@@ -10,12 +10,12 @@ class PostingQueue {
     this.lastPostTime = 0;
     this.activeIds = new Set();
     this.processingScheduled = false;
-    
+
     // Configurable delays (in milliseconds)
     this.minDelayBetweenPosts = config.minDelayBetweenPosts || 15000; // 15 seconds minimum
     this.maxDelayBetweenPosts = config.maxDelayBetweenPosts || 120000; // 2 minutes maximum
     this.mentionPriorityBoost = config.mentionPriorityBoost || 5000; // Mentions wait less
-    
+
     // Priority levels
     this.priorities = {
       CRITICAL: 0,   // Pixel purchases, direct mentions
@@ -23,7 +23,7 @@ class PostingQueue {
       MEDIUM: 2,     // Discovery replies, home feed interactions
       LOW: 3,        // Scheduled posts
     };
-    
+
     this.stats = {
       processed: 0,
       queued: 0,
@@ -58,7 +58,7 @@ class PostingQueue {
     // Queue size limit to prevent memory issues
     if (this.queue.length >= 50) {
       logger.warn('[QUEUE] Queue at capacity (50), dropping lowest priority task');
-      const lowestPriorityIndex = this.queue.reduce((minIdx, task, idx, arr) => 
+      const lowestPriorityIndex = this.queue.reduce((minIdx, task, idx, arr) =>
         task.priority > arr[minIdx].priority ? idx : minIdx, 0);
       const [removed] = this.queue.splice(lowestPriorityIndex, 1);
       if (removed?.id) {
@@ -91,7 +91,7 @@ class PostingQueue {
       return a.queuedAt - b.queuedAt;
     });
 
-    logger.debug(`[QUEUE] Enqueued ${type} post (id: ${id.slice(0, 8)}, priority: ${priority}, queue: ${this.queue.length})`);
+    logger.info(`[QUEUE] Enqueued ${type} post (id: ${id.slice(0, 8)}, priority: ${priority}, queue: ${this.queue.length})`);
 
     // Start processing if not already running
     this._ensureProcessingScheduled();
@@ -124,10 +124,10 @@ class PostingQueue {
         // Calculate delay since last post
         const now = Date.now();
         const timeSinceLastPost = now - this.lastPostTime;
-        
+
         // Determine required delay based on priority
         let requiredDelay = this.minDelayBetweenPosts;
-        
+
         if (task.priority === this.priorities.CRITICAL || task.priority === this.priorities.HIGH) {
           // High priority posts get shorter delays
           requiredDelay = Math.max(this.minDelayBetweenPosts - this.mentionPriorityBoost, 3000); // Min 3s
@@ -139,20 +139,20 @@ class PostingQueue {
         // Wait if needed
         if (timeSinceLastPost < requiredDelay) {
           const waitTime = requiredDelay - timeSinceLastPost;
-          logger.debug(`[QUEUE] Waiting ${Math.round(waitTime / 1000)}s before posting (natural spacing)`);
+          logger.info(`[QUEUE] Waiting ${Math.round(waitTime / 1000)}s before posting (natural spacing)`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         }
 
         // Execute the post action
         const idLabel = task.id ? task.id.slice(0, 8) : 'unknown';
-        logger.debug(`[QUEUE] Processing ${task.type} post (id: ${idLabel}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
-        
+        logger.info(`[QUEUE] Processing ${task.type} post (id: ${idLabel}, waited: ${Math.round((Date.now() - task.queuedAt) / 1000)}s)`);
+
         const result = await task.action();
-        
+
         if (result) {
           this.lastPostTime = Date.now();
           this.stats.processed++;
-          logger.debug(`[QUEUE] Successfully posted ${task.type} (id: ${idLabel}, total processed: ${this.stats.processed})`);
+          logger.info(`[QUEUE] Successfully posted ${task.type} (id: ${idLabel}, total processed: ${this.stats.processed})`);
         } else {
           logger.warn(`[QUEUE] Post action failed for ${task.type} (id: ${idLabel})`);
         }

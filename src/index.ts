@@ -38,7 +38,7 @@ const character: any = {
     plugins: [
         '@elizaos/plugin-bootstrap',
         '@elizaos/adapter-postgres',
-        '@elizaos/plugin-openai',
+        // '@elizaos/plugin-openai',
         '@elizaos/plugin-openrouter',
         '@elizaos/plugin-telegram',
         '@elizaos/plugin-discord',

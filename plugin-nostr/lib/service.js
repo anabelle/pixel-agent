@@ -990,8 +990,11 @@ Response (YES/NO):`;
         onevent: (evt) => {
           if (evt.created_at && evt.created_at < svc.messageCutoff) return;
           if (svc.pkHex && isSelfAuthor(evt, svc.pkHex)) return;
-          // if (svc.handledEventIds.has(evt.id)) return;
-          // svc.handledEventIds.add(evt.id);
+          if (svc.handledEventIds.has(evt.id)) {
+            logger.info(`[NOSTR] Skipping already handled event ${evt.id.slice(0, 8)}`);
+            return;
+          }
+          svc.handledEventIds.add(evt.id);
 
           const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
           if (botPatterns.some(pattern => pattern.test(evt.content))) return;
@@ -3616,20 +3619,25 @@ Response (YES/NO):`;
   }
 
   async generateReplyTextLLM(evt, roomId, threadContext = null, imageContext = null) {
+    logger.info(`[NOSTR] generateReplyTextLLM: starting context gathering for ${evt.id.slice(0, 8)}`);
     let recent = [];
     try {
       if (this.runtime?.getMemories && roomId) {
+        logger.info(`[NOSTR] generateReplyTextLLM: fetching recent messages for ${evt.id.slice(0, 8)} in room ${roomId}`);
         const rows = await this.runtime.getMemories({ tableName: 'messages', roomId, count: 12 });
+        logger.info(`[NOSTR] generateReplyTextLLM: fetched ${rows?.length || 0} messages`);
         const ordered = Array.isArray(rows) ? rows.slice().reverse() : [];
         recent = ordered.map((m) => ({ role: m.agentId && this.runtime && m.agentId === this.runtime.agentId ? 'agent' : 'user', text: String(m.content?.text || '').slice(0, 220) })).filter((x) => x.text);
       }
-    } catch { }
+    } catch (err) { logger.error(`[NOSTR] generateReplyTextLLM: recent messages error: ${err.message}`); }
 
     // NEW: Get user profile for personalization
     let userProfile = null;
     if (this.userProfileManager && evt && evt.pubkey) {
       try {
+        logger.info(`[NOSTR] generateReplyTextLLM: loading user profile for ${evt.pubkey.slice(0, 8)}`);
         const profile = await this.userProfileManager.getProfile(evt.pubkey);
+        logger.info(`[NOSTR] generateReplyTextLLM: user profile loaded, interactions=${profile?.totalInteractions || 0}`);
         if (profile && profile.totalInteractions > 0) {
           // Extract relevant info for context
           const topInterests = Object.entries(profile.topicInterests || {})
@@ -3659,6 +3667,7 @@ Response (YES/NO):`;
 
     if (this.narrativeContextProvider && this.contextAccumulator && this.contextAccumulator.enabled && evt && evt.content) {
       try {
+        logger.info(`[NOSTR] generateReplyTextLLM: fetching narrative context for ${evt.id.slice(0, 8)}`);
         // Get intelligent narrative context relevant to this message
         const relevantContext = await this.narrativeContextProvider.getRelevantContext(evt.content, {
           includeEmergingStories: true,
@@ -3667,6 +3676,7 @@ Response (YES/NO):`;
           includeTopicEvolution: true,
           maxContext: 300
         });
+        logger.info(`[NOSTR] generateReplyTextLLM: narrative context fetched: ${relevantContext?.hasContext}`);
 
         if (relevantContext.hasContext) {
           narrativeContext = relevantContext;
@@ -3688,6 +3698,7 @@ Response (YES/NO):`;
     let selfReflectionContext = null;
     if (this.selfReflectionEngine && this.selfReflectionEngine.enabled) {
       try {
+        logger.info(`[NOSTR] generateReplyTextLLM: fetching self-reflection insights for ${evt.id.slice(0, 8)}`);
         selfReflectionContext = await this.selfReflectionEngine.getLatestInsights({ maxAgeHours: 168, cacheMs: 60 * 1000 });
       } catch (err) {
         logger.debug('[NOSTR] Failed to load self-reflection insights for reply prompt:', err?.message || err);
@@ -4128,6 +4139,7 @@ Response (YES/NO):`;
     const maxRetries = 5;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        logger.info(`[NOSTR] Starting LLM generation attempt ${attempt}/${maxRetries} (type: ${type})`);
         const text = await generateWithModelOrFallback(
           this.runtime,
           type,
@@ -4409,14 +4421,12 @@ Response (YES/NO):`;
     try {
       if (!evt || !evt.id) return;
       if (this.pkHex && isSelfAuthor(evt, this.pkHex)) { try { logger?.info?.('[NOSTR] Ignoring self-mention'); } catch { } return; }
-      if (this.handledEventIds.has(evt.id)) { try { logger?.info?.(`[NOSTR] Skipping mention ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { } return; }
 
       // Check if mention is too old (ignore mentions older than configured days)
       const eventAgeMs = Date.now() - (evt.created_at * 1000);
       const maxAgeMs = this.maxEventAgeDays * 24 * 60 * 60 * 1000; // Configurable days in milliseconds
       if (eventAgeMs > maxAgeMs) {
         try { logger?.info?.(`[NOSTR] Skipping old mention ${evt.id.slice(0, 8)} (age: ${Math.floor(eventAgeMs / (24 * 60 * 60 * 1000))} days)`); } catch { }
-        this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
         return;
       }
 
@@ -4428,7 +4438,6 @@ Response (YES/NO):`;
           const tagsSummary = evt.tags ? JSON.stringify(evt.tags.slice(0, 5)) : 'no tags';
           logger?.info?.(`[NOSTR] Skipping ${evt.id.slice(0, 8)} - appears to be thread reply, not direct mention. Tags: ${tagsSummary}`);
         } catch { }
-        this.handledEventIds.add(evt.id); // Still mark as handled to prevent reprocessing
         return;
       }
       try { logger?.info?.(`[NOSTR] Received Mention from ${evt.pubkey.slice(0, 8)} (${evt.id.slice(0, 8)}): "${evt.content}"`); } catch { }
@@ -4438,13 +4447,12 @@ Response (YES/NO):`;
       try { logger?.info?.(`[NOSTR] _isRelevantMention check for ${evt.id.slice(0, 8)}: ${isRelevant}`); } catch { }
       if (!isRelevant) {
         try { logger?.info?.(`[NOSTR] Skipping irrelevant mention ${evt.id.slice(0, 8)}. Full content: ${evt.content}`); } catch { }
-        this.handledEventIds.add(evt.id); // Mark as handled to prevent reprocessing
         return;
       }
 
 
 
-      this.handledEventIds.add(evt.id);
+
       const runtime = this.runtime;
       const eventMemoryId = createUniqueUuid(runtime, evt.id);
       const conversationId = this._getConversationIdFromEvent(evt);
@@ -4569,7 +4577,9 @@ Response (YES/NO):`;
       }
 
       logger.info(`[NOSTR] Image context being passed to reply generation: ${imageContext.imageDescriptions.length} descriptions`);
+      logger.info(`[NOSTR] Calling generateReplyTextLLM for ${evt.id.slice(0, 8)}`);
       const replyText = await this.generateReplyTextLLM(evt, roomId, threadContext, imageContext);
+      logger.info(`[NOSTR] generateReplyTextLLM returned for ${evt.id.slice(0, 8)} len=${replyText?.length || 0}`);
 
       // Check if LLM generation failed (returned null)
       if (!replyText || !replyText.trim()) {
@@ -4985,12 +4995,7 @@ Response (YES/NO):`;
         }
       } catch { }
 
-      // Check for duplicate handling
-      if (this.handledEventIds.has(evt.id)) {
-        try { logger?.info?.(`[NOSTR] Skipping DM ${evt.id.slice(0, 8)} (in-memory dedup)`); } catch { }
-        return;
-      }
-      this.handledEventIds.add(evt.id);
+      // Deduplicated by onevent
 
       // Save DM as memory (persistent dedup for message itself)
       const runtime = this.runtime;

@@ -19,7 +19,7 @@ export const character: any = {
     '@elizaos/plugin-bootstrap',
     '@elizaos/adapter-postgres',
     '@elizaos/plugin-sql',
-    '@elizaos/plugin-openai',
+    // '@elizaos/plugin-openai',
     '@elizaos/plugin-openrouter',
     '@elizaos/plugin-telegram',
     '@elizaos/plugin-discord',

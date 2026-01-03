@@ -180,12 +180,12 @@ class NostrService {
           return 'mock-uuid';
         }
       } catch { }
-      // Generate a valid UUID v4 from seed + random data
-      // This ensures the fallback produces valid UUIDs that PGLite can accept
+      // Generate a deterministic UUID v5-like from seed (if seed is stable, output is stable)
+      // This ensures entities like 'nostr-system' get the same UUID across restarts/calls
       const crypto = require('crypto');
-      const hash = crypto.createHash('sha256').update(`${seed}:${Date.now()}:${Math.random()}`).digest('hex');
-      // Format as UUID v4: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-      return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${['8', '9', 'a', 'b'][Math.floor(Math.random() * 4)]}${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+      const hash = crypto.createHash('sha256').update(String(seed)).digest('hex');
+      // Format as UUID v4-ish: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+      return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
     };
     const extractCoreUuid = (mod) => {
       if (!mod) return null;
@@ -226,6 +226,10 @@ class NostrService {
     this.lastReplyByUser = new Map();
     this.pendingReplyTimers = new Map();
     this.zapCooldownByUser = new Map();
+
+    // Cache to prevent repetitive DB ensuring logs
+    this._systemContextEnsured = false;
+    this._systemContextPromise = null;
 
     // Connection monitoring and reconnection
     this.connectionMonitorTimer = null;
@@ -617,6 +621,66 @@ class NostrService {
         return;
       }
 
+      // Proactively ensure context exists (only once per session to avoid log spam)
+      if (!this._systemContextEnsured) {
+        if (!this._systemContextPromise) {
+          this._systemContextPromise = (async () => {
+             try {
+              const worldId = entityId; // Use entityId as worldId for consistency
+              const db = this.runtime.databaseAdapter;
+
+              // 1. World
+              let worldExists = false;
+              if (db?.getWorld) { try { worldExists = !!(await db.getWorld(worldId)); } catch {} }
+              if (!worldExists) {
+                await this.runtime.ensureWorldExists({
+                  id: worldId,
+                  name: 'Nostr System',
+                  agentId: this.runtime.agentId,
+                  serverId: 'nostr-system',
+                  metadata: { system: true }
+                }).catch(() => { });
+              }
+
+              // 2. Room
+              let roomExists = false;
+              if (db?.getRoom) { try { roomExists = !!(await db.getRoom(roomId)); } catch {} }
+              if (!roomExists) {
+                await this.runtime.ensureRoomExists({
+                  id: roomId,
+                  name: 'Nostr Interaction Counts',
+                  source: 'nostr',
+                  type: 'FEED',
+                  channelId: 'nostr-counts',
+                  serverId: 'nostr-system',
+                  worldId
+                }).catch(() => { });
+              }
+
+              // 3. Connection
+              let connExists = false;
+              if (db?.getParticipant) { try { connExists = !!(await db.getParticipant(roomId, entityId)); } catch {} }
+              if (!connExists) {
+                await this.runtime.ensureConnection({
+                  entityId,
+                  roomId,
+                  userName: 'nostr-system',
+                  name: 'Nostr System',
+                  source: 'nostr',
+                  type: 'FEED',
+                  worldId
+                }).catch(() => { });
+              }
+            } catch (e) {
+              // Ignore ensure errors
+            } finally {
+              this._systemContextEnsured = true;
+            }
+          })();
+        }
+        await this._systemContextPromise;
+      }
+
       await this._createMemorySafe({
         id,
         entityId,
@@ -932,12 +996,12 @@ Response (YES/NO):`;
           const botPatterns = [/^Unknown command\. Try: /i, /^\/help/i, /^Command not found/i, /^Please use \/help/i];
           if (botPatterns.some(pattern => pattern.test(evt.content))) return;
 
-          if (evt.kind === 7) return;
+          if (evt.kind === 7) { svc.handleReaction(evt).catch(() => { }); return; }
           const handleMethod = evt.kind === 1 ? svc.handleMention
             : evt.kind === 4 ? svc.handleDM
-            : evt.kind === 14 ? svc.handleSealedDM
-            : evt.kind === 9735 ? svc.handleZap
-            : null;
+              : evt.kind === 14 ? svc.handleSealedDM
+                : evt.kind === 9735 ? svc.handleZap
+                  : null;
           if (handleMethod) handleMethod(evt).catch(() => { });
         },
         oneose: () => {
@@ -4807,6 +4871,43 @@ Response (YES/NO):`;
     };
 
     return saveInteractionMemory(this.runtime, safeCreateUniqueUuid, (evt2) => this._getConversationIdFromEvent(evt2), evt, kind, extra, logger);
+  }
+
+  async handleReaction(evt) {
+    try {
+      if (!evt || evt.kind !== 7) return;
+      if (this.pkHex && isSelfAuthor(evt, this.pkHex)) return;
+
+      // Extract target event ID (usually the last 'e' tag in NIP-25)
+      const eTags = Array.isArray(evt.tags) ? evt.tags.filter(t => t[0] === 'e') : [];
+      const targetEventId = eTags.length > 0 ? eTags[eTags.length - 1][1] : null;
+
+      const sender = evt.pubkey;
+      const content = evt.content || '+';
+
+      // Try to find target text in home feed cache
+      let targetText = '';
+      if (targetEventId && this.homeFeedRecent) {
+        const found = this.homeFeedRecent.find(e => e.id === targetEventId);
+        if (found) {
+          const cleanText = (found.content || '').replace(/\s+/g, ' ').slice(0, 60);
+          targetText = ` ("${cleanText}...")`;
+        }
+      }
+
+      this.logger.info(`[NOSTR] REACTION: User ${sender.slice(0, 8)}... reacted '${content}' to event ${targetEventId ? targetEventId.slice(0, 8) : 'unknown'}${targetText}`);
+
+      // Update interaction counts (boost sender reputation)
+      const current = this.userInteractionCount.get(sender) || 0;
+      this.userInteractionCount.set(sender, current + 1);
+
+      // Save updated counts to DB (with error suppression)
+      await this._saveInteractionCounts().catch(() => { });
+
+      // (Optional) Future: Store reaction memory or adjust narrative context
+    } catch (err) {
+      this.logger.debug('[NOSTR] handleReaction failed:', err?.message || err);
+    }
   }
 
   async handleZap(evt) {

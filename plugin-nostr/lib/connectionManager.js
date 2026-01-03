@@ -129,7 +129,13 @@ class ConnectionManager {
               if (nip19) authorDisplay = nip19.npubEncode(evt.pubkey);
             } catch { }
 
-            this.logger.info(`[NOSTR] ${kindName} from ${authorDisplay}: ${logContent.slice(0, 140)}`);
+            let extraInfo = '';
+            if (evt.kind === 7) {
+              const eTag = evt.tags.find(t => t[0] === 'e');
+              if (eTag) extraInfo = ` to ${eTag[1].slice(0, 8)}...`;
+            }
+
+            this.logger.info(`[NOSTR] ${kindName} from ${authorDisplay}${extraInfo}: ${logContent.slice(0, 140)}`);
           } catch (outerErr) {
             this.logger.error(`[NOSTR] Critical error in onevent handler: ${outerErr.message}`);
           }
@@ -175,9 +181,9 @@ class ConnectionManager {
 
   stop() {
     if (this.monitorTimer) clearTimeout(this.monitorTimer);
-    if (this.listenUnsub) try { this.listenUnsub(); } catch {}
-    if (this.homeFeedUnsub) try { this.homeFeedUnsub(); } catch {}
-    if (this.pool) try { this.pool.close([]); } catch {}
+    if (this.listenUnsub) try { this.listenUnsub(); } catch { }
+    if (this.homeFeedUnsub) try { this.homeFeedUnsub(); } catch { }
+    if (this.pool) try { this.pool.close([]); } catch { }
   }
 }
 

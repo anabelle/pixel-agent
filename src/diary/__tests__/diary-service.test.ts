@@ -1,5 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, mock } from 'bun:test';
 import pg from 'pg';
+
+// Mock the sync-to-markdown module to prevent file writes during tests
+mock.module('../sync-to-markdown', () => ({
+  syncEntryToMarkdown: () => Promise.resolve({ success: true }),
+}));
+
 import { PostgresDiaryService } from '../diary-service';
 import type { DiaryEntry } from '../types';
 

@@ -4245,71 +4245,7 @@ Response (YES/NO):`;
   }
 
   _shouldEngageWithThread(evt, threadContext) {
-    if (!threadContext || !evt) return false;
-
-    const { thread, isRoot, contextQuality } = threadContext;
-
-    // Always engage with high-quality root posts
-    if (isRoot && contextQuality > 0.6) {
-      return true;
-    }
-
-    // For thread replies, be more selective
-    if (!isRoot) {
-      // Don't engage if we can't understand the context
-      if (contextQuality < 0.3) {
-        logger?.debug?.(`[NOSTR] Low context quality (${contextQuality.toFixed(2)}) for thread reply ${evt.id.slice(0, 8)}`);
-        return false;
-      }
-
-      // Check if the thread is about relevant topics
-      const threadContent = thread.map(e => e.content || '').join(' ').toLowerCase();
-      const relevantKeywords = [
-        'art', 'pixel', 'creative', 'canvas', 'design', 'nostr', 'bitcoin',
-        'lightning', 'zap', 'sats', 'ai', 'agent', 'collaborative', 'community',
-        'technology', 'innovation', 'crypto', 'blockchain', 'gaming', 'music',
-        'photography', 'writing', 'coding', 'programming', 'science', 'space',
-        'environment', 'politics', 'economy', 'finance', 'health', 'fitness',
-        'travel', 'food', 'sports', 'entertainment', 'news', 'education'
-      ];
-
-      const hasRelevantContent = relevantKeywords.some(keyword =>
-        threadContent.includes(keyword)
-      );
-
-      if (!hasRelevantContent) {
-        logger?.debug?.(`[NOSTR] Thread ${evt.id.slice(0, 8)} lacks relevant content for engagement`);
-        return false;
-      }
-
-      // Check if this is a good entry point (not too deep in thread)
-      if (thread.length > 5) {
-        logger?.debug?.(`[NOSTR] Thread too long (${thread.length} events) for natural entry ${evt.id.slice(0, 8)}`);
-        return false;
-      }
-    }
-
-    // Additional quality checks
-    const content = evt.content || '';
-
-    // Skip very short or very long content
-    if (content.length < 10 || content.length > 800) {
-      return false;
-    }
-
-    // Skip obvious bot patterns
-    const botPatterns = [
-      /^(gm|good morning|good night|gn)\s*$/i,
-      /^(repost|rt)\s*$/i,
-      /^\d+$/, // Just numbers
-      /^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+$/ // Just symbols
-    ];
-
-    if (botPatterns.some(pattern => pattern.test(content.trim()))) {
-      return false;
-    }
-
-    return true;
+    return this.threadResolver.shouldEngageWithThread(evt, threadContext);
   }
 
   async _ensureNostrContext(userPubkey, usernameLike, conversationId) {
@@ -6319,7 +6255,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
 
     let verdict = heuristics;
     if (!heuristics.skipLLM && typeof this.runtime?.generateText === 'function') {
-      verdict = await this._screenTimelineLoreWithLLM(analysisContent, heuristics);
+      verdict = await this._screenTimelineLoreWithLLM(sanitizeUnicode(analysisContent), heuristics);
       if (!verdict || verdict.accept === false) {
         this.logger?.debug?.(`[NOSTR] Timeline lore LLM rejected ${evt.id.slice(0, 8)} (score=${heuristics.score})`);
         return;

@@ -94,13 +94,13 @@ export const topics = [
   "indie web",
   "small web",
   "decentralization",
-  
+
   // Nostr tags and social terms
   "#artstr",
   "#bitcoin",
   "#lightning",
   "#LN",
-  "#btc", 
+  "#btc",
   "sats",
   "#nostr",
   "#mempool",
@@ -158,7 +158,25 @@ export const topics = [
   "internet culture",
   "creative expression",
   "artistic freedom",
-    
+
+  // Unix philosophy and digital ethics
+  "unix philosophy",
+  "modularity",
+  "composition over inheritance",
+  "small tools",
+  "pipes and filters",
+  "do one thing well",
+  "transparency in systems",
+  "robustness",
+  "fail gracefully",
+  "asimov's laws",
+  "robot ethics",
+  "AI ethics",
+  "digital rights",
+  "algorithmic accountability",
+  "beneficial AI",
+  "AI safety",
+
   // Tech and development
   "programming",
   "coding",
@@ -177,7 +195,7 @@ export const topics = [
   "api development",
   "web3",
   "decentralized apps",
-    
+
   // Economics and freedom tech
   "freedom tech",
   "cypherpunk",

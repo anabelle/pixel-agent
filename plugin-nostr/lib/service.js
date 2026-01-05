@@ -5006,12 +5006,6 @@ Response (YES/NO):`;
       if (!this.pkHex) return;
       if (isSelfAuthor(evt, this.pkHex)) return;
 
-      // Event-level deduplication: prevent double-thanking the same zap after restart/reconnection
-      if (this.handledEventIds.has(evt.id)) {
-        logger.debug(`[NOSTR] Skipping zap ${evt.id.slice(0, 8)} (already handled)`);
-        return;
-      }
-      this.handledEventIds.add(evt.id);
 
       const amountMsats = getZapAmountMsats(evt);
       const targetEventId = getZapTargetEventId(evt);
@@ -5373,9 +5367,6 @@ Response (YES/NO):`;
         }
       } catch { }
 
-      // Dedup check
-      if (this.handledEventIds.has(evt.id)) { logger.info(`[NOSTR] Skipping sealed DM ${evt.id.slice(0, 8)} (in-memory dedup)`); return; }
-      this.handledEventIds.add(evt.id);
 
       // Save memory and prepare reply context
       const runtime = this.runtime;

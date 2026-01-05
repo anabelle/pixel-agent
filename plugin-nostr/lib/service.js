@@ -5005,6 +5005,14 @@ Response (YES/NO):`;
       if (!evt || evt.kind !== 9735) return;
       if (!this.pkHex) return;
       if (isSelfAuthor(evt, this.pkHex)) return;
+
+      // Event-level deduplication: prevent double-thanking the same zap after restart/reconnection
+      if (this.handledEventIds.has(evt.id)) {
+        logger.debug(`[NOSTR] Skipping zap ${evt.id.slice(0, 8)} (already handled)`);
+        return;
+      }
+      this.handledEventIds.add(evt.id);
+
       const amountMsats = getZapAmountMsats(evt);
       const targetEventId = getZapTargetEventId(evt);
       const sender = getZapSenderPubkey(evt) || evt.pubkey;

@@ -7,8 +7,8 @@ LnPixels is a **collaborative pixel art canvas** where creativity meets Bitcoin 
 ### The Canvas Basics
 - **Infinite grid** with pan/zoom interface
 - **Three pixel types:**
-  - **Basic pixels**: 1 sat (colorless)
-  - **Color pixels**: 10 sats (choose any hex color)
+  - **Basic pixels**: 21 sats (colorless)
+  - **Color pixels**: 42 sats (choose any hex color)
   - **Letter pixels**: 100 sats (color + character/emoji)
 - **Collaborative**: Everyone contributes to the same shared canvas
 - **Real-time**: See updates instantly as others create
@@ -23,7 +23,7 @@ LnPixels is a **collaborative pixel art canvas** where creativity meets Bitcoin 
 5. **Create**: Your pixel appears immediately after payment
 
 ### Pricing Logic
-- **New pixels**: Base prices (1/10/100 sats)
+- **New pixels**: Base prices (21/42/100 sats)
 - **Existing pixels**: Cost 2x the last amount paid (minimum base price)
 - **Bulk operations**: One color for all selected pixels, optional text overlay
 
@@ -40,8 +40,8 @@ LnPixels is a **collaborative pixel art canvas** where creativity meets Bitcoin 
 🎨 Turn sats into art on the infinite Lightning canvas!
 
 Each pixel costs:
-• Basic: 1 sat
-• Color: 10 sats  
+• Basic: 21 sats
+• Color: 42 sats  
 • Letter: 100 sats
 
 No accounts, no KYC, just pure creativity ⚡
@@ -68,7 +68,7 @@ Join the pixel revolution! 🎨
 
 We're creating the largest collaborative Lightning-powered artwork in existence. Your sats become eternal pixels in our shared masterpiece.
 
-Start with 1 sat, dream in full color ⚡
+Start with 21 sats, dream in full color ⚡
 ```
 
 ## 💡 User Onboarding Flow
@@ -76,8 +76,8 @@ Start with 1 sat, dream in full color ⚡
 ### First-Time Visitors
 1. **Hook**: "Turn your sats into eternal art"
 2. **Demo**: Show them the existing canvas art
-3. **Easy start**: "Try a 1-sat basic pixel first"
-4. **Progression**: "Upgrade to color (10 sats) when you're ready"
+3. **Easy start**: "Try a 21-sat basic pixel first"
+4. **Progression**: "Upgrade to color (42 sats) when you're ready"
 5. **Community**: "You're now part of the canvas collective"
 
 ### Common Questions & Answers
@@ -100,7 +100,7 @@ A: Completely trustless Lightning payments. No accounts, no custody of funds.
 ```
 🎨 Ready to make your mark?
 
-Start with 1 sat → https://ln.pixel.xx.kg
+Start with 21 sats → https://ln.pixel.xx.kg
 
 Your first pixel awaits ⚡
 ```

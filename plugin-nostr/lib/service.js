@@ -4764,6 +4764,29 @@ Response (YES/NO):`;
         }
       }
 
+      // Also restore zap_thanks event IDs via direct database query (fallback for memories not in 'messages' table)
+      try {
+        const db = this.runtime?.databaseAdapter;
+        if (db && typeof db.query === 'function') {
+          const zapThanksResult = await db.query(
+            `SELECT content->'data'->>'eventId' as event_id FROM memories 
+             WHERE content->>'source' = 'nostr' 
+             AND content->'data'->>'kind' = 'zap_thanks' 
+             AND content->'data'->>'eventId' IS NOT NULL`
+          );
+          const rows = zapThanksResult?.rows || zapThanksResult || [];
+          for (const row of rows) {
+            const eventId = row.event_id || row.eventId;
+            if (eventId && !this.handledEventIds.has(eventId)) {
+              this.handledEventIds.add(eventId);
+              restored++;
+            }
+          }
+        }
+      } catch (dbErr) {
+        logger.debug(`[NOSTR] Direct DB query for zap_thanks failed: ${dbErr?.message || dbErr}`);
+      }
+
       if (restored > 0) {
         logger.info(`[NOSTR] Restored ${restored} handled event IDs from memory`);
       }
@@ -5006,6 +5029,11 @@ Response (YES/NO):`;
       if (!this.pkHex) return;
       if (isSelfAuthor(evt, this.pkHex)) return;
 
+      // Check if this zap event was already thanked (prevents duplicate thanks on restart)
+      if (this.handledEventIds.has(evt.id)) {
+        logger.debug(`[ZAP] Skipping already-thanked zap ${evt.id.slice(0, 8)}`);
+        return;
+      }
 
       const amountMsats = getZapAmountMsats(evt);
       const targetEventId = getZapTargetEventId(evt);
@@ -5029,6 +5057,8 @@ Response (YES/NO):`;
       const zapMessage = getZapMessage(evt);
       logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}${zapMessage ? ` with message: "${zapMessage}"` : ''}. Generating thanks reply.`);
       await this.postReply(prepared.parent, prepared.text, prepared.options);
+      // Mark as handled to prevent duplicate thanks on restart
+      this.handledEventIds.add(evt.id);
       await this.saveInteractionMemory('zap_thanks', evt, { amountMsats: amountMsats ?? undefined, targetEventId: targetEventId ?? undefined, thanked: true, }).catch(() => { });
       // Record a zap interaction for the sender (improves history)
       try {

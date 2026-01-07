@@ -16,6 +16,6 @@ if [ -n "$POSTGRES_URL" ]; then
 fi
 
 # Generate character.json from manifest (respects current .env)
-bun run build:character
+bun scripts/build-character.ts
 
 exec bun --preload ./suppress-ai-warnings.js ./node_modules/@elizaos/cli/dist/index.js start --character ./character.json --port 3003

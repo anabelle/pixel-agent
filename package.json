@@ -5,7 +5,7 @@
   "description": "Pixel - A witty, survival-driven AI agent for LNPixels, championing collaborative pixel art with humor and heart",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "./node_modules/.bin/tsc",
     "build:character": "bun scripts/build-character.ts",
     "dev": "bun ./node_modules/@elizaos/cli/dist/index.js dev",
     "start": "bun run build:character && bun ./node_modules/@elizaos/cli/dist/index.js start --character ./character.json --port 3003",

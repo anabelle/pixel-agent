@@ -50,6 +50,12 @@ RUN perl -i -0pe 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\)
 RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
+# instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
+# This patch checks the return value's didRespond/responseContent and calls the callback.
+RUN perl -i -0pe 's/await this\.runtime\.messageService\.handleMessage\(this\.runtime, memory, callback\);/const __tgResult = await this.runtime.messageService.handleMessage(this.runtime, memory, callback);\n      if (__tgResult \&\& __tgResult.didRespond \&\& __tgResult.responseContent) {\n        logger2.info({ responseLen: __tgResult.responseContent?.text?.length }, "Telegram: calling callback with response");\n        await callback(__tgResult.responseContent, []);\n      } else {\n        logger2.warn({ didRespond: __tgResult?.didRespond }, "Telegram: no response generated");\n      }/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # Build TypeScript and generate character.json
 RUN bun run build && bun run build:character
 

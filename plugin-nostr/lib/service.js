@@ -1139,9 +1139,12 @@ Response (YES/NO):`;
     // WORKAROUND: ElizaOS CLI v1.7 doesn't start plugin services automatically.
     // Start TelegramService here since we have a working runtime.
     try {
-      const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN');
+      logger.info('[NOSTR] Checking for TELEGRAM_BOT_TOKEN to start TelegramService...');
+      const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN') || process.env.TELEGRAM_BOT_TOKEN;
+      logger.info(`[NOSTR] TELEGRAM_BOT_TOKEN present: ${!!telegramToken}, already started: ${!!runtime._telegramServiceStarted}`);
       if (telegramToken && telegramToken.trim() !== '' && !runtime._telegramServiceStarted) {
         const { TelegramService } = require('@elizaos/plugin-telegram');
+        logger.info(`[NOSTR] TelegramService loaded: ${!!TelegramService}`);
         if (TelegramService && typeof TelegramService.start === 'function') {
           logger.info('[NOSTR] Starting TelegramService (workaround for CLI v1.7)...');
           TelegramService.start(runtime).then(() => {
@@ -1151,10 +1154,13 @@ Response (YES/NO):`;
             logger.warn('[NOSTR] TelegramService start failed:', err?.message || err);
           });
         }
+      } else if (!telegramToken) {
+        logger.info('[NOSTR] No TELEGRAM_BOT_TOKEN found, skipping Telegram');
       }
     } catch (err) {
-      logger.debug('[NOSTR] TelegramService start error (continuing):', err?.message || err);
+      logger.warn('[NOSTR] TelegramService start error:', err?.message || err);
     }
+
 
 
     // Start periodic topic extractor stats logging (every 60 seconds)

@@ -256,93 +256,10 @@ async function startTelegramService(runtime) {
   }
 }
 
-/**
- * Patch the ElizaOS server to start Telegram when agents are started
- * Uses polling since preload happens before runtime is available
- */
-function patchAgentStartup() {
-  let attempts = 0;
-  const maxAttempts = 30; // Try for ~60 seconds
-
-  const tryStartTelegram = () => {
-    attempts++;
-
-    try {
-      // Try to find the server module and get runtime
-      const serverPaths = [
-        '@elizaos/server',
-        '/app/node_modules/@elizaos/server',
-      ];
-
-      for (const serverPath of serverPaths) {
-        try {
-          const server = require(serverPath);
-
-          // Look for ElizaOS singleton
-          if (server.ElizaOS && typeof server.ElizaOS.getInstance === 'function') {
-            const elizaOS = server.ElizaOS.getInstance();
-            if (elizaOS) {
-              // Try to get agents/runtimes
-              const agents = elizaOS.agents || elizaOS._agents;
-              if (agents && agents.size > 0) {
-                for (const [agentId, agent] of agents) {
-                  const runtime = agent.runtime || agent;
-                  if (runtime && !runtime._telegramServiceStarted) {
-                    console.log(`[telegram-patch] Found runtime for agent ${agentId}, starting Telegram...`);
-                    startTelegramService(runtime);
-                    return; // Success, stop polling
-                  }
-                }
-              }
-
-              // Try runtimes map
-              if (elizaOS.runtimes && elizaOS.runtimes.size > 0) {
-                for (const [id, runtime] of elizaOS.runtimes) {
-                  if (runtime && !runtime._telegramServiceStarted) {
-                    console.log(`[telegram-patch] Found runtime ${id}, starting Telegram...`);
-                    startTelegramService(runtime);
-                    return;
-                  }
-                }
-              }
-            }
-          }
-
-          // Alternative: check for global runtime
-          if (global.__elizaRuntime && !global.__elizaRuntime._telegramServiceStarted) {
-            console.log('[telegram-patch] Found global runtime, starting Telegram...');
-            startTelegramService(global.__elizaRuntime);
-            return;
-          }
-
-        } catch (e) {
-          // Continue trying
-        }
-      }
-
-      // Keep polling if we haven't exceeded max attempts
-      if (attempts < maxAttempts) {
-        setTimeout(tryStartTelegram, 2000);
-      } else {
-        console.log('[telegram-patch] Max attempts reached, Telegram will need manual start');
-      }
-
-    } catch (err) {
-      console.log(`[telegram-patch] Polling error: ${err.message}`);
-      if (attempts < maxAttempts) {
-        setTimeout(tryStartTelegram, 2000);
-      }
-    }
-  };
-
-  // Start polling after a delay to let the server initialize
-  setTimeout(tryStartTelegram, 10000);
-  console.log('[telegram-patch] Will attempt to start TelegramService in 10 seconds...');
-}
-
 // Apply patches at module load time
 applyPatch();
 patchUseModel();
-patchAgentStartup();
+// Note: Telegram service is started by ElizaOS CLI v1.7 through its own mechanism
+// The Dockerfile patches handle the messageService.handleMessage compatibility
 
 module.exports = { patchRuntime, createUniqueUuid, applyPatch, patchUseModel, startTelegramService };

@@ -42,8 +42,12 @@ COPY . .
 
 # Patch Telegram token lookup to fall back to runtime env.
 # build:character strips secrets, so TELEGRAM_BOT_TOKEN may be empty in character.json.
-# NOTE: Other patches removed - upgrading to v1.7.0 should fix compatibility issues natively.
 RUN perl -i -0pe 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
+# Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
+# Do not await long-running message processing; log errors via promise .catch.
+RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
 # Build TypeScript and generate character.json

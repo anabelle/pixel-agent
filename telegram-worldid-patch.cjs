@@ -270,38 +270,35 @@ function patchAgentRuntimeForTelegram() {
       try {
         const core = require(corePath);
 
-        if (core.AgentRuntime && !core.AgentRuntime._telegramPatchApplied) {
+        if (core.AgentRuntime && !core._telegramPatchApplied) {
           const OriginalRuntime = core.AgentRuntime;
 
-          // Wrap the constructor to start Telegram after initialization
-          core.AgentRuntime = class extends OriginalRuntime {
-            constructor(...args) {
-              super(...args);
+          // Use Proxy to intercept constructor
+          core.AgentRuntime = new Proxy(OriginalRuntime, {
+            construct(target, args, newTarget) {
+              const instance = Reflect.construct(target, args, newTarget);
 
-              // Schedule Telegram startup after the runtime is fully initialized
+              // Schedule Telegram startup after runtime is initialized
               setTimeout(() => {
-                if (this.getSetting && this.getSetting('TELEGRAM_BOT_TOKEN')) {
-                  console.log('[telegram-patch] Runtime detected with TELEGRAM_BOT_TOKEN, starting service...');
-                  startTelegramService(this).catch(err => {
-                    console.log('[telegram-patch] Failed to start Telegram:', err.message);
-                  });
+                try {
+                  const token = instance.getSetting ? instance.getSetting('TELEGRAM_BOT_TOKEN') : null;
+                  if (token && token.trim() !== '') {
+                    console.log('[telegram-patch] Runtime has TELEGRAM_BOT_TOKEN, starting service...');
+                    startTelegramService(instance).catch(err => {
+                      console.log('[telegram-patch] Failed to start Telegram:', err.message);
+                    });
+                  }
+                } catch (e) {
+                  console.log('[telegram-patch] Error checking token:', e.message);
                 }
-              }, 5000); // Wait 5 seconds for plugins to fully initialize
-            }
-          };
+              }, 8000);
 
-          // Copy static properties
-          Object.setPrototypeOf(core.AgentRuntime, OriginalRuntime);
-          Object.getOwnPropertyNames(OriginalRuntime).forEach(prop => {
-            if (prop !== 'prototype' && prop !== 'name' && prop !== 'length') {
-              try {
-                core.AgentRuntime[prop] = OriginalRuntime[prop];
-              } catch (e) { }
+              return instance;
             }
           });
 
-          core.AgentRuntime._telegramPatchApplied = true;
-          console.log('[telegram-patch] Patched AgentRuntime constructor for Telegram auto-start');
+          core._telegramPatchApplied = true;
+          console.log('[telegram-patch] Patched AgentRuntime via Proxy for Telegram auto-start');
           return;
         }
       } catch (e) {

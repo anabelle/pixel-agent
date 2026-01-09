@@ -1143,7 +1143,7 @@ Response (YES/NO):`;
       const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN') || process.env.TELEGRAM_BOT_TOKEN;
       logger.info(`[NOSTR] TELEGRAM_BOT_TOKEN present: ${!!telegramToken}, already started: ${!!runtime._telegramServiceStarted}`);
       if (telegramToken && telegramToken.trim() !== '' && !runtime._telegramServiceStarted) {
-        const { TelegramService } = require('@elizaos/plugin-telegram');
+        const { TelegramService } = require('/app/node_modules/@elizaos/plugin-telegram');
         logger.info(`[NOSTR] TelegramService loaded: ${!!TelegramService}`);
         if (TelegramService && typeof TelegramService.start === 'function') {
           logger.info('[NOSTR] Starting TelegramService (workaround for CLI v1.7)...');

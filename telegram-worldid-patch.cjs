@@ -256,10 +256,69 @@ async function startTelegramService(runtime) {
   }
 }
 
+/**
+ * Hook into AgentRuntime to start Telegram service automatically
+ */
+function patchAgentRuntimeForTelegram() {
+  try {
+    const possibleCorePaths = [
+      '@elizaos/core',
+      '/app/node_modules/@elizaos/core',
+    ];
+
+    for (const corePath of possibleCorePaths) {
+      try {
+        const core = require(corePath);
+
+        if (core.AgentRuntime && !core.AgentRuntime._telegramPatchApplied) {
+          const OriginalRuntime = core.AgentRuntime;
+
+          // Wrap the constructor to start Telegram after initialization
+          core.AgentRuntime = class extends OriginalRuntime {
+            constructor(...args) {
+              super(...args);
+
+              // Schedule Telegram startup after the runtime is fully initialized
+              setTimeout(() => {
+                if (this.getSetting && this.getSetting('TELEGRAM_BOT_TOKEN')) {
+                  console.log('[telegram-patch] Runtime detected with TELEGRAM_BOT_TOKEN, starting service...');
+                  startTelegramService(this).catch(err => {
+                    console.log('[telegram-patch] Failed to start Telegram:', err.message);
+                  });
+                }
+              }, 5000); // Wait 5 seconds for plugins to fully initialize
+            }
+          };
+
+          // Copy static properties
+          Object.setPrototypeOf(core.AgentRuntime, OriginalRuntime);
+          Object.getOwnPropertyNames(OriginalRuntime).forEach(prop => {
+            if (prop !== 'prototype' && prop !== 'name' && prop !== 'length') {
+              try {
+                core.AgentRuntime[prop] = OriginalRuntime[prop];
+              } catch (e) { }
+            }
+          });
+
+          core.AgentRuntime._telegramPatchApplied = true;
+          console.log('[telegram-patch] Patched AgentRuntime constructor for Telegram auto-start');
+          return;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    console.log('[telegram-patch] Could not patch AgentRuntime for Telegram');
+  } catch (err) {
+    console.log('[telegram-patch] Error patching AgentRuntime:', err.message);
+  }
+}
+
 // Apply patches at module load time
 applyPatch();
 patchUseModel();
-// Note: Telegram service is started by ElizaOS CLI v1.7 through its own mechanism
-// The Dockerfile patches handle the messageService.handleMessage compatibility
+patchAgentRuntimeForTelegram();
 
 module.exports = { patchRuntime, createUniqueUuid, applyPatch, patchUseModel, startTelegramService };
+

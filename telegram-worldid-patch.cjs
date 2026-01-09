@@ -258,51 +258,86 @@ async function startTelegramService(runtime) {
 
 /**
  * Patch the ElizaOS server to start Telegram when agents are started
+ * Uses polling since preload happens before runtime is available
  */
 function patchAgentStartup() {
-  try {
-    const serverPaths = [
-      '@elizaos/server',
-      '/app/node_modules/@elizaos/server',
-      '/app/node_modules/@elizaos/server/dist/index.js'
-    ];
+  let attempts = 0;
+  const maxAttempts = 30; // Try for ~60 seconds
 
-    for (const serverPath of serverPaths) {
-      try {
-        const server = require(serverPath);
+  const tryStartTelegram = () => {
+    attempts++;
 
-        // Hook into AgentServer or ElizaOS singleton
-        if (server.ElizaOS && server.ElizaOS.getInstance) {
-          const originalStartAgent = server.ElizaOS.prototype?.startAgent;
-          if (originalStartAgent) {
-            server.ElizaOS.prototype.startAgent = async function (...args) {
-              const result = await originalStartAgent.apply(this, args);
-              if (result && result.runtime) {
-                setTimeout(() => startTelegramService(result.runtime), 2000);
+    try {
+      // Try to find the server module and get runtime
+      const serverPaths = [
+        '@elizaos/server',
+        '/app/node_modules/@elizaos/server',
+      ];
+
+      for (const serverPath of serverPaths) {
+        try {
+          const server = require(serverPath);
+
+          // Look for ElizaOS singleton
+          if (server.ElizaOS && typeof server.ElizaOS.getInstance === 'function') {
+            const elizaOS = server.ElizaOS.getInstance();
+            if (elizaOS) {
+              // Try to get agents/runtimes
+              const agents = elizaOS.agents || elizaOS._agents;
+              if (agents && agents.size > 0) {
+                for (const [agentId, agent] of agents) {
+                  const runtime = agent.runtime || agent;
+                  if (runtime && !runtime._telegramServiceStarted) {
+                    console.log(`[telegram-patch] Found runtime for agent ${agentId}, starting Telegram...`);
+                    startTelegramService(runtime);
+                    return; // Success, stop polling
+                  }
+                }
               }
-              return result;
-            };
-            console.log('[telegram-patch] Patched ElizaOS.startAgent for Telegram');
+
+              // Try runtimes map
+              if (elizaOS.runtimes && elizaOS.runtimes.size > 0) {
+                for (const [id, runtime] of elizaOS.runtimes) {
+                  if (runtime && !runtime._telegramServiceStarted) {
+                    console.log(`[telegram-patch] Found runtime ${id}, starting Telegram...`);
+                    startTelegramService(runtime);
+                    return;
+                  }
+                }
+              }
+            }
+          }
+
+          // Alternative: check for global runtime
+          if (global.__elizaRuntime && !global.__elizaRuntime._telegramServiceStarted) {
+            console.log('[telegram-patch] Found global runtime, starting Telegram...');
+            startTelegramService(global.__elizaRuntime);
             return;
           }
-        }
 
-        // Alternative: patch global event
-        if (typeof process !== 'undefined') {
-          process.on('elizaos:agent:ready', (runtime) => {
-            startTelegramService(runtime);
-          });
-          console.log('[telegram-patch] Registered elizaos:agent:ready listener');
+        } catch (e) {
+          // Continue trying
         }
-      } catch (e) {
-        continue;
+      }
+
+      // Keep polling if we haven't exceeded max attempts
+      if (attempts < maxAttempts) {
+        setTimeout(tryStartTelegram, 2000);
+      } else {
+        console.log('[telegram-patch] Max attempts reached, Telegram will need manual start');
+      }
+
+    } catch (err) {
+      console.log(`[telegram-patch] Polling error: ${err.message}`);
+      if (attempts < maxAttempts) {
+        setTimeout(tryStartTelegram, 2000);
       }
     }
+  };
 
-    console.log('[telegram-patch] Could not patch server module, will rely on delayed start');
-  } catch (err) {
-    console.log(`[telegram-patch] Server patching failed: ${err.message}`);
-  }
+  // Start polling after a delay to let the server initialize
+  setTimeout(tryStartTelegram, 10000);
+  console.log('[telegram-patch] Will attempt to start TelegramService in 10 seconds...');
 }
 
 // Apply patches at module load time

@@ -56,6 +56,13 @@ RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.
 RUN perl -i -0pe 's/await this\.runtime\.messageService\.handleMessage\(this\.runtime, memory, callback\);/const __tgResult = await this.runtime.messageService.handleMessage(this.runtime, memory, callback);\n      if (__tgResult \&\& __tgResult.didRespond \&\& __tgResult.responseContent) {\n        logger2.info({ responseLen: __tgResult.responseContent?.text?.length }, "Telegram: calling callback with response");\n        await callback(__tgResult.responseContent, []);\n      } else {\n        logger2.warn({ didRespond: __tgResult?.didRespond }, "Telegram: no response generated");\n      }/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# FIX: ElizaOS CLI expects plugin.services but ESM exports put them under default.
+# Add top-level services export for CLI compatibility
+RUN echo 'module.exports = require("./index.js").default; Object.assign(module.exports, require("./index.js"));' > /app/node_modules/@elizaos/plugin-telegram/dist/cjs-wrapper.js
+RUN cd /app/node_modules/@elizaos/plugin-telegram/dist && \
+    mv index.js index.esm.js && \
+    echo 'const esm = require("./index.esm.js"); module.exports = esm.default || esm; module.exports.services = (esm.default || esm).services; module.exports.TelegramService = esm.TelegramService; module.exports.MessageManager = esm.MessageManager;' > index.js
+
 # Build TypeScript and generate character.json
 RUN bun run build && bun run build:character
 

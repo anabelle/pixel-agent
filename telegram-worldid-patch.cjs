@@ -47,17 +47,17 @@ function patchUseModel() {
     for (const corePath of possibleCorePaths) {
       try {
         const core = require(corePath);
-        
+
         // Patch AgentRuntime.prototype.useModel if available
         if (core.AgentRuntime && core.AgentRuntime.prototype && core.AgentRuntime.prototype.useModel) {
           const originalUseModel = core.AgentRuntime.prototype.useModel;
-          
-          core.AgentRuntime.prototype.useModel = async function(modelType, params, provider) {
+
+          core.AgentRuntime.prototype.useModel = async function (modelType, params, provider) {
             // If params is a string (like imageUrl), wrap it in an object
             // This fixes Telegram plugin's processImage that passes: useModel(ModelType.IMAGE_DESCRIPTION, imageUrl)
             if (typeof params === 'string') {
               const modelKey = typeof modelType === 'string' ? modelType : (core.ModelType ? core.ModelType[modelType] : modelType);
-              
+
               // For IMAGE_DESCRIPTION, wrap the URL in the expected format
               if (modelKey === 'IMAGE_DESCRIPTION' || modelKey === 'imageDescription') {
                 console.log(`[usemodel-patch] Wrapping string imageUrl for IMAGE_DESCRIPTION model`);
@@ -67,10 +67,10 @@ function patchUseModel() {
                 params = { prompt: params };
               }
             }
-            
+
             return originalUseModel.call(this, modelType, params, provider);
           };
-          
+
           useModelPatchApplied = true;
           console.log('[usemodel-patch] Successfully patched AgentRuntime.prototype.useModel');
           return;
@@ -80,7 +80,7 @@ function patchUseModel() {
         continue;
       }
     }
-    
+
     console.log('[usemodel-patch] AgentRuntime not found, will patch at runtime level');
   } catch (err) {
     console.log(`[usemodel-patch] Could not patch useModel: ${err.message}`);
@@ -92,7 +92,7 @@ function patchUseModel() {
  */
 function applyPatch() {
   if (patchApplied) return;
-  
+
   try {
     // Try multiple paths to find the plugin-sql module
     const possiblePaths = [
@@ -100,10 +100,10 @@ function applyPatch() {
       '@elizaos/plugin-sql/dist/node/index.node.js',
       '/app/node_modules/@elizaos/plugin-sql/dist/node/index.node.js'
     ];
-    
+
     let pluginSql = null;
     let pluginSqlPath = null;
-    
+
     for (const path of possiblePaths) {
       try {
         pluginSqlPath = path.startsWith('/') ? path : require.resolve(path);
@@ -113,19 +113,19 @@ function applyPatch() {
         continue;
       }
     }
-    
+
     if (!pluginSql) {
       console.log('[worldid-patch] plugin-sql module not found, will use runtime patching');
       return;
     }
-    
+
     // The DrizzleAdapter class should be exported
     const DrizzleAdapter = pluginSql.DrizzleAdapter || pluginSql.default?.DrizzleAdapter;
-    
+
     if (DrizzleAdapter && DrizzleAdapter.prototype && DrizzleAdapter.prototype.createMemory) {
       const originalCreateMemory = DrizzleAdapter.prototype.createMemory;
-      
-      DrizzleAdapter.prototype.createMemory = async function(memory, tableName) {
+
+      DrizzleAdapter.prototype.createMemory = async function (memory, tableName) {
         // Ensure worldId is always present
         if (!memory.worldId) {
           if (memory.roomId) {
@@ -133,20 +133,20 @@ function applyPatch() {
           } else if (memory.agentId) {
             memory.worldId = createUniqueUuid(this.agentId, memory.agentId);
           }
-          
+
           if (memory.worldId) {
             console.log(`[worldid-patch] Injected worldId ${memory.worldId} for memory in room ${memory.roomId || 'unknown'}`);
           }
         }
-        
+
         // Also ensure unique is boolean, not integer
         if (memory.unique !== undefined && typeof memory.unique !== 'boolean') {
           memory.unique = Boolean(memory.unique);
         }
-        
+
         return originalCreateMemory.call(this, memory, tableName);
       };
-      
+
       patchApplied = true;
       console.log('[worldid-patch] Successfully patched DrizzleAdapter.createMemory');
     } else {
@@ -173,12 +173,12 @@ function patchRuntime(runtime) {
 
   const originalCreateMemory = runtime.createMemory.bind(runtime);
 
-  runtime.createMemory = async function(memory, tableName, unique) {
+  runtime.createMemory = async function (memory, tableName, unique) {
     // If worldId is missing but we have roomId, generate worldId from roomId
     if (!memory.worldId && memory.roomId) {
       memory.worldId = createUniqueUuid(runtime.agentId, memory.roomId);
     }
-    
+
     // Ensure unique is boolean
     if (memory.unique !== undefined && typeof memory.unique !== 'boolean') {
       memory.unique = Boolean(memory.unique);
@@ -193,12 +193,12 @@ function patchRuntime(runtime) {
   // Also patch runtime.useModel for IMAGE_DESCRIPTION string params
   if (runtime.useModel && !runtime._useModelPatchApplied) {
     const originalUseModel = runtime.useModel.bind(runtime);
-    
-    runtime.useModel = async function(modelType, params, provider) {
+
+    runtime.useModel = async function (modelType, params, provider) {
       // If params is a string (like imageUrl), wrap it in an object
       if (typeof params === 'string') {
         const modelKey = typeof modelType === 'string' ? modelType : String(modelType);
-        
+
         // For IMAGE_DESCRIPTION, wrap the URL in the expected format
         if (modelKey === 'IMAGE_DESCRIPTION' || modelKey === 'imageDescription' || modelKey.includes('IMAGE')) {
           console.log(`[usemodel-patch] Wrapping string imageUrl for ${modelKey} model`);
@@ -208,17 +208,106 @@ function patchRuntime(runtime) {
           params = { prompt: params };
         }
       }
-      
+
       return originalUseModel(modelType, params, provider);
     };
-    
+
     runtime._useModelPatchApplied = true;
     console.log('[usemodel-patch] Successfully patched runtime.useModel');
+  }
+}
+
+/**
+ * Manually start TelegramService for a runtime
+ * ElizaOS v1.7 CLI doesn't call Service.start() for plugin services
+ */
+async function startTelegramService(runtime) {
+  if (!runtime || runtime._telegramServiceStarted) return;
+
+  try {
+    const { TelegramService } = require('@elizaos/plugin-telegram');
+
+    if (!TelegramService) {
+      console.log('[telegram-patch] TelegramService not found in plugin exports');
+      return;
+    }
+
+    // Check if token is available
+    const token = runtime.getSetting ? runtime.getSetting('TELEGRAM_BOT_TOKEN') : process.env.TELEGRAM_BOT_TOKEN;
+    if (!token || token.trim() === '') {
+      console.log('[telegram-patch] No TELEGRAM_BOT_TOKEN, skipping Telegram service start');
+      return;
+    }
+
+    console.log('[telegram-patch] Manually starting TelegramService...');
+
+    // Call the static start method
+    const service = await TelegramService.start(runtime);
+
+    if (service && service.bot) {
+      runtime._telegramServiceStarted = true;
+      console.log('[telegram-patch] ✅ TelegramService started successfully');
+    } else {
+      console.log('[telegram-patch] TelegramService started but bot not initialized');
+    }
+  } catch (err) {
+    console.log(`[telegram-patch] Error starting TelegramService: ${err.message}`);
+    console.log(err.stack);
+  }
+}
+
+/**
+ * Patch the ElizaOS server to start Telegram when agents are started
+ */
+function patchAgentStartup() {
+  try {
+    const serverPaths = [
+      '@elizaos/server',
+      '/app/node_modules/@elizaos/server',
+      '/app/node_modules/@elizaos/server/dist/index.js'
+    ];
+
+    for (const serverPath of serverPaths) {
+      try {
+        const server = require(serverPath);
+
+        // Hook into AgentServer or ElizaOS singleton
+        if (server.ElizaOS && server.ElizaOS.getInstance) {
+          const originalStartAgent = server.ElizaOS.prototype?.startAgent;
+          if (originalStartAgent) {
+            server.ElizaOS.prototype.startAgent = async function (...args) {
+              const result = await originalStartAgent.apply(this, args);
+              if (result && result.runtime) {
+                setTimeout(() => startTelegramService(result.runtime), 2000);
+              }
+              return result;
+            };
+            console.log('[telegram-patch] Patched ElizaOS.startAgent for Telegram');
+            return;
+          }
+        }
+
+        // Alternative: patch global event
+        if (typeof process !== 'undefined') {
+          process.on('elizaos:agent:ready', (runtime) => {
+            startTelegramService(runtime);
+          });
+          console.log('[telegram-patch] Registered elizaos:agent:ready listener');
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+
+    console.log('[telegram-patch] Could not patch server module, will rely on delayed start');
+  } catch (err) {
+    console.log(`[telegram-patch] Server patching failed: ${err.message}`);
   }
 }
 
 // Apply patches at module load time
 applyPatch();
 patchUseModel();
+patchAgentStartup();
 
-module.exports = { patchRuntime, createUniqueUuid, applyPatch, patchUseModel };
+module.exports = { patchRuntime, createUniqueUuid, applyPatch, patchUseModel, startTelegramService };

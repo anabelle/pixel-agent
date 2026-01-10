@@ -57,6 +57,14 @@ RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.
 RUN perl -i -0pe 's/this\.bot\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# Log webhook state for debugging 409: if url is non-empty, webhook is active.
+RUN perl -i -0pe 's/try \{ await this\.bot\.telegram\.deleteWebhook/try { const __wh = await this.bot.telegram.getWebhookInfo(); logger3.info({ url: __wh?.url, pendingUpdateCount: __wh?.pending_update_count, lastErrorMessage: __wh?.last_error_message }, "Telegram webhook info"); } catch (e) { logger3.warn("Failed to get Telegram webhook info: " + (e?.message || e)); }\n    try { await this.bot.telegram.deleteWebhook/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
+# Prevent self-inflicted 409 loops: if launch fails and we retry, ensure any prior polling is stopped.
+RUN perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
 # instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
 # This patch checks the return value's didRespond/responseContent and calls the callback.

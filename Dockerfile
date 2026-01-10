@@ -37,46 +37,38 @@ COPY package.json bun.lock* ./
 # --trust: allows postinstall scripts for sharp/onnxruntime
 RUN bun install --trust
 
+# Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing
+# for GROUP contexts (Telegram). @elizaos/plugin-bootstrap's ROLES provider throws in that case,
+# which breaks group message handling. Fall back to room.channelId and return empty roles.
+RUN set -e; \
+        for f in \
+            /app/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
+            /app/node_modules/@elizaos/server/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
+        ; do \
+            if [ -f "$f" ]; then \
+                perl -pi -e 's/const serverId = room\\.serverId;/const serverId = room.serverId || room.channelId;/' "$f"; \
+                perl -pi -e 's/throw new Error\("No server ID found"\);/return { data: { roles: [] }, values: { roles: "No role information available for this server." }, text: "No role information available for this server." };/g' "$f"; \
+            fi; \
+        done
+
+# Stability patch: @elizaos/core useModel() assumes params is an object and uses the `in` operator.
+# Some callers (notably in media-processing paths) can pass a non-object, which crashes the whole agent.
+# This guards those checks so non-object params don't throw.
+RUN set -e; \
+        for f in \
+            /app/node_modules/@elizaos/core/dist/node/index.node.js \
+            /app/node_modules/@elizaos/server/node_modules/@elizaos/core/dist/node/index.node.js \
+            /app/node_modules/@elizaos/cli/node_modules/@elizaos/core/dist/node/index.node.js \
+        ; do \
+            if [ -f "$f" ]; then \
+                perl -pi -e 's/paramsObj && "prompt" in paramsObj/paramsObj && typeof paramsObj === "object" && "prompt" in paramsObj/g' "$f"; \
+                perl -pi -e 's/paramsObj && "input" in paramsObj/paramsObj && typeof paramsObj === "object" && "input" in paramsObj/g' "$f"; \
+                perl -pi -e 's/paramsObj && "messages" in paramsObj/paramsObj && typeof paramsObj === "object" && "messages" in paramsObj/g' "$f"; \
+            fi; \
+        done
+
 # Copy source files
 COPY . .
-
-# Patch Telegram token lookup to fall back to runtime env.
-# build:character strips secrets, so TELEGRAM_BOT_TOKEN may be empty in character.json.
-RUN perl -i -0pe 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
-# Do not await long-running message processing; log errors via promise .catch.
-RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# Fix "silent" Telegram failures:
-# - If a webhook is set, polling (getUpdates) will fail (often as a 409 conflict)
-# - The upstream code does not await bot.launch(), so launch errors are not caught by the retry loop
-# This patch deletes any active webhook and awaits launch so failures are retried.
-RUN perl -i -0pe 's/this\.bot\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# Log webhook state for debugging 409: if url is non-empty, webhook is active.
-RUN perl -i -0pe 's/try \{ await this\.bot\.telegram\.deleteWebhook/try { const __wh = await this.bot.telegram.getWebhookInfo(); logger3.info({ url: __wh?.url, pendingUpdateCount: __wh?.pending_update_count, lastErrorMessage: __wh?.last_error_message }, "Telegram webhook info"); } catch (e) { logger3.warn("Failed to get Telegram webhook info: " + (e?.message || e)); }\n    try { await this.bot.telegram.deleteWebhook/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# Prevent self-inflicted 409 loops: if launch fails and we retry, ensure any prior polling is stopped.
-RUN perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
-# instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
-# This patch checks the return value's didRespond/responseContent and calls the callback.
-RUN perl -i -0pe 's/await this\.runtime\.messageService\.handleMessage\(this\.runtime, memory, callback\);/const __tgResult = await this.runtime.messageService.handleMessage(this.runtime, memory, callback);\n      if (__tgResult \&\& __tgResult.didRespond \&\& __tgResult.responseContent) {\n        logger2.info({ responseLen: __tgResult.responseContent?.text?.length }, "Telegram: calling callback with response");\n        await callback(__tgResult.responseContent, []);\n      } else {\n        logger2.warn({ didRespond: __tgResult?.didRespond }, "Telegram: no response generated");\n      }/g' \
-    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
-
-# FIX: ElizaOS CLI expects plugin.services but ESM exports put them under default.
-# Add top-level services export for CLI compatibility
-RUN echo 'module.exports = require("./index.js").default; Object.assign(module.exports, require("./index.js"));' > /app/node_modules/@elizaos/plugin-telegram/dist/cjs-wrapper.js
-RUN cd /app/node_modules/@elizaos/plugin-telegram/dist && \
-    mv index.js index.esm.js && \
-    echo 'const esm = require("./index.esm.js"); module.exports = esm.default || esm; module.exports.services = (esm.default || esm).services; module.exports.TelegramService = esm.TelegramService; module.exports.MessageManager = esm.MessageManager;' > index.js
 
 # Build TypeScript and generate character.json
 RUN bun run build && bun run build:character

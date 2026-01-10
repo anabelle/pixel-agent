@@ -4,14 +4,7 @@
 // 1. Suppress AI SDK warnings about unsupported model settings
 globalThis.AI_SDK_LOG_WARNINGS = false;
 
-// 2. Load the worldId + useModel patches to fix Telegram plugin issues
-try {
-  require('./telegram-worldid-patch.cjs');
-} catch (e) {
-  console.log('[preload] WorldId/useModel patch not available:', e.message);
-}
-
-// 3. Filter Twitter rate limit spam from console output
+// 2. Filter Twitter rate limit spam from console output
 // The twitter-api-v2 library logs full HTTP headers on rate limit errors
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
 const originalStderrWrite = process.stderr.write.bind(process.stderr);

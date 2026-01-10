@@ -1136,63 +1136,6 @@ Response (YES/NO):`;
 
     logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled} homeFeed=${svc.homeFeedEnabled}`);
 
-    // WORKAROUND: ElizaOS CLI v1.7 previously didn't start plugin services automatically.
-    // Start TelegramService here only if it has NOT already been loaded/started by the CLI.
-    try {
-      const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN') || process.env.TELEGRAM_BOT_TOKEN;
-      if (telegramToken && telegramToken.trim() !== '') {
-        // If the CLI/plugin loader has already loaded plugin-telegram, starting again will create
-        // overlapping pollers and trigger Telegram 409 conflicts.
-        let telegramModuleAlreadyLoaded = false;
-        try {
-          const cache = require.cache || {};
-          telegramModuleAlreadyLoaded = Object.keys(cache).some((p) => p.includes('@elizaos/plugin-telegram'));
-        } catch { }
-
-        if (telegramModuleAlreadyLoaded || runtime._telegramServiceStarted) {
-          logger.info('[NOSTR] Telegram plugin already loaded; skipping CLI v1.7 workaround');
-          return;
-        }
-
-        const g = globalThis;
-        const startKey = '__pixelTelegramServiceStartPromise';
-
-        if (!g[startKey]) {
-          g[startKey] = (async () => {
-            let TelegramService;
-            try {
-              ({ TelegramService } = require('@elizaos/plugin-telegram'));
-            } catch {
-              try {
-                ({ TelegramService } = require('/app/node_modules/@elizaos/plugin-telegram'));
-              } catch {
-                TelegramService = undefined;
-              }
-            }
-
-            if (!TelegramService || typeof TelegramService.start !== 'function') {
-              logger.warn('[NOSTR] TelegramService not found in plugin exports (workaround skipped)');
-              return;
-            }
-
-            logger.info('[NOSTR] Starting TelegramService (workaround for CLI v1.7)...');
-            await TelegramService.start(runtime);
-          })();
-        }
-
-        Promise.resolve(g[startKey]).then(() => {
-          runtime._telegramServiceStarted = true;
-          logger.info('[NOSTR] ✅ TelegramService started successfully');
-        }).catch(err => {
-          // If startup failed, allow a future attempt (e.g., after config fix) instead of permanently wedging the process.
-          if (g[startKey]) delete g[startKey];
-          logger.warn('[NOSTR] TelegramService start failed:', err?.message || err);
-        });
-      }
-    } catch (err) {
-      logger.warn('[NOSTR] TelegramService start error:', err?.message || err);
-    }
-
     // Start periodic topic extractor stats logging (every 60 seconds)
     svc.topicStatsInterval = setInterval(() => {
       try {

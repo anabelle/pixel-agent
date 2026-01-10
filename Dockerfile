@@ -46,9 +46,19 @@ RUN if [ -e /app/node_modules/.bin/bun ]; then rm -f /app/node_modules/.bin/bun;
 # Telegram token wiring: @elizaos/core strips unknown settings keys during character validation,
 # so runtime.getSetting("TELEGRAM_BOT_TOKEN") can be empty even when the env var is set.
 # Allow plugin-telegram to fall back to process.env.TELEGRAM_BOT_TOKEN.
-RUN if [ -f /app/node_modules/@elizaos/plugin-telegram/dist/index.js ]; then \
-      perl -pi -e 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/' \
-        /app/node_modules/@elizaos/plugin-telegram/dist/index.js; \
+# Also add explicit logging to diagnose token issues.
+RUN set -ex; \
+    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
+    if [ -f "$TGFILE" ]; then \
+      echo "[patch] Patching plugin-telegram for env fallback..."; \
+      # Add env fallback for token
+      perl -pi -e 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/' "$TGFILE"; \
+      # Add explicit logging to show token source
+      perl -pi -e 's/(const botToken = .*?;)/\1\n    logger3.log("[TG-DEBUG] getSetting:", runtime.getSetting("TELEGRAM_BOT_TOKEN") ? "present" : "missing", "env:", process.env.TELEGRAM_BOT_TOKEN ? "present" : "missing", "final:", botToken ? "OK" : "EMPTY");/' "$TGFILE"; \
+      # Verify patch applied
+      grep -q "process.env.TELEGRAM_BOT_TOKEN" "$TGFILE" && echo "[patch] ✅ Telegram env fallback applied" || echo "[patch] ❌ Patch FAILED"; \
+    else \
+      echo "[patch] ⚠️ plugin-telegram not found at $TGFILE"; \
     fi
 
 # Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing

@@ -50,6 +50,13 @@ RUN perl -i -0pe 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\)
 RUN perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g; s/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' \
     /app/node_modules/@elizaos/plugin-telegram/dist/index.js
 
+# Fix "silent" Telegram failures:
+# - If a webhook is set, polling (getUpdates) will fail (often as a 409 conflict)
+# - The upstream code does not await bot.launch(), so launch errors are not caught by the retry loop
+# This patch deletes any active webhook and awaits launch so failures are retried.
+RUN perl -i -0pe 's/this\.bot\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' \
+    /app/node_modules/@elizaos/plugin-telegram/dist/index.js
+
 # CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
 # instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
 # This patch checks the return value's didRespond/responseContent and calls the callback.

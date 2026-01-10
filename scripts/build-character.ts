@@ -44,10 +44,15 @@ const PLUGIN_NAMES = [
   'pixel-plugin-nostr',
 ];
 
+// Clients to start (ElizaOS CLI uses this to activate platform integrations)
+// NOTE: token is injected at runtime in Docker, so do not gate this on env at build time.
+const CLIENTS: string[] = ['telegram'];
+
 // Build the complete character object
 const character = {
   ...characterManifest,
   plugins: PLUGIN_NAMES,
+  clients: CLIENTS,
 };
 
 // Output path

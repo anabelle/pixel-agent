@@ -1140,17 +1140,41 @@ Response (YES/NO):`;
     // Start TelegramService here since we have a working runtime.
     try {
       const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN') || process.env.TELEGRAM_BOT_TOKEN;
-      if (telegramToken && telegramToken.trim() !== '' && !runtime._telegramServiceStarted) {
-        const { TelegramService } = require('/app/node_modules/@elizaos/plugin-telegram');
-        if (TelegramService && typeof TelegramService.start === 'function') {
-          logger.info('[NOSTR] Starting TelegramService (workaround for CLI v1.7)...');
-          TelegramService.start(runtime).then(() => {
-            runtime._telegramServiceStarted = true;
-            logger.info('[NOSTR] ✅ TelegramService started successfully');
-          }).catch(err => {
-            logger.warn('[NOSTR] TelegramService start failed:', err?.message || err);
-          });
+      if (telegramToken && telegramToken.trim() !== '') {
+        const g = globalThis;
+        const startKey = '__pixelTelegramServiceStartPromise';
+
+        if (!g[startKey]) {
+          g[startKey] = (async () => {
+            let TelegramService;
+            try {
+              ({ TelegramService } = require('@elizaos/plugin-telegram'));
+            } catch {
+              try {
+                ({ TelegramService } = require('/app/node_modules/@elizaos/plugin-telegram'));
+              } catch {
+                TelegramService = undefined;
+              }
+            }
+
+            if (!TelegramService || typeof TelegramService.start !== 'function') {
+              logger.warn('[NOSTR] TelegramService not found in plugin exports (workaround skipped)');
+              return;
+            }
+
+            logger.info('[NOSTR] Starting TelegramService (workaround for CLI v1.7)...');
+            await TelegramService.start(runtime);
+          })();
         }
+
+        Promise.resolve(g[startKey]).then(() => {
+          runtime._telegramServiceStarted = true;
+          logger.info('[NOSTR] ✅ TelegramService started successfully');
+        }).catch(err => {
+          // If startup failed, allow a future attempt (e.g., after config fix) instead of permanently wedging the process.
+          if (g[startKey]) delete g[startKey];
+          logger.warn('[NOSTR] TelegramService start failed:', err?.message || err);
+        });
       }
     } catch (err) {
       logger.warn('[NOSTR] TelegramService start error:', err?.message || err);

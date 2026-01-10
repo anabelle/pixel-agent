@@ -222,7 +222,21 @@ function patchRuntime(runtime) {
  * ElizaOS v1.7 CLI doesn't call Service.start() for plugin services
  */
 async function startTelegramService(runtime) {
-  if (!runtime || runtime._telegramServiceStarted) return;
+  if (!runtime) return;
+
+  // Process-wide guard: ElizaOS CLI v1.7 may create multiple runtimes/services.
+  // Telegram polling must only start once per process to avoid 409 conflicts.
+  const g = globalThis;
+  const startKey = '__pixelTelegramServiceStartPromise';
+  if (g[startKey]) {
+    try {
+      await g[startKey];
+      runtime._telegramServiceStarted = true;
+    } catch {
+      // Let the caller attempt again after a failure.
+    }
+    return;
+  }
 
   try {
     const { TelegramService } = require('@elizaos/plugin-telegram');
@@ -241,8 +255,9 @@ async function startTelegramService(runtime) {
 
     console.log('[telegram-patch] Manually starting TelegramService...');
 
-    // Call the static start method
-    const service = await TelegramService.start(runtime);
+    // Call the static start method (guarded process-wide)
+    g[startKey] = TelegramService.start(runtime);
+    const service = await g[startKey];
 
     if (service && service.bot) {
       runtime._telegramServiceStarted = true;
@@ -251,6 +266,7 @@ async function startTelegramService(runtime) {
       console.log('[telegram-patch] TelegramService started but bot not initialized');
     }
   } catch (err) {
+    if (g[startKey]) delete g[startKey];
     console.log(`[telegram-patch] Error starting TelegramService: ${err.message}`);
     console.log(err.stack);
   }

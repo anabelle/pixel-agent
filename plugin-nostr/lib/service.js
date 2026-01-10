@@ -1136,11 +1136,24 @@ Response (YES/NO):`;
 
     logger.info(`[NOSTR] Service started. relays=${relays.length} listen=${listenEnabled} post=${postEnabled} discovery=${svc.discoveryEnabled} homeFeed=${svc.homeFeedEnabled}`);
 
-    // WORKAROUND: ElizaOS CLI v1.7 doesn't start plugin services automatically.
-    // Start TelegramService here since we have a working runtime.
+    // WORKAROUND: ElizaOS CLI v1.7 previously didn't start plugin services automatically.
+    // Start TelegramService here only if it has NOT already been loaded/started by the CLI.
     try {
       const telegramToken = runtime.getSetting('TELEGRAM_BOT_TOKEN') || process.env.TELEGRAM_BOT_TOKEN;
       if (telegramToken && telegramToken.trim() !== '') {
+        // If the CLI/plugin loader has already loaded plugin-telegram, starting again will create
+        // overlapping pollers and trigger Telegram 409 conflicts.
+        let telegramModuleAlreadyLoaded = false;
+        try {
+          const cache = require.cache || {};
+          telegramModuleAlreadyLoaded = Object.keys(cache).some((p) => p.includes('@elizaos/plugin-telegram'));
+        } catch { }
+
+        if (telegramModuleAlreadyLoaded || runtime._telegramServiceStarted) {
+          logger.info('[NOSTR] Telegram plugin already loaded; skipping CLI v1.7 workaround');
+          return;
+        }
+
         const g = globalThis;
         const startKey = '__pixelTelegramServiceStartPromise';
 

@@ -43,6 +43,14 @@ RUN bun install --trust
 RUN if [ -e /app/node_modules/.bin/bun ]; then rm -f /app/node_modules/.bin/bun; fi && \
     ln -sf /usr/local/bin/bun /app/node_modules/.bin/bun
 
+# Telegram token wiring: @elizaos/core strips unknown settings keys during character validation,
+# so runtime.getSetting("TELEGRAM_BOT_TOKEN") can be empty even when the env var is set.
+# Allow plugin-telegram to fall back to process.env.TELEGRAM_BOT_TOKEN.
+RUN if [ -f /app/node_modules/@elizaos/plugin-telegram/dist/index.js ]; then \
+      perl -pi -e 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/' \
+        /app/node_modules/@elizaos/plugin-telegram/dist/index.js; \
+    fi
+
 # Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing
 # for GROUP contexts (Telegram). @elizaos/plugin-bootstrap's ROLES provider throws in that case,
 # which breaks group message handling. Fall back to room.channelId and return empty roles.

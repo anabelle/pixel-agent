@@ -256,63 +256,9 @@ async function startTelegramService(runtime) {
   }
 }
 
-/**
- * Hook into AgentRuntime to start Telegram service automatically
- */
-function patchAgentRuntimeForTelegram() {
-  // Poll for global ElizaOS instance after startup
-  let attempts = 0;
-  const maxAttempts = 30;
-
-  const tryGetRuntime = () => {
-    attempts++;
-    try {
-      const server = require('@elizaos/server');
-
-      // Try to get global ElizaOS
-      if (server.getGlobalElizaOS) {
-        try {
-          const elizaOS = server.getGlobalElizaOS();
-          if (elizaOS && elizaOS.getAgents) {
-            const agents = elizaOS.getAgents();
-            if (agents && agents.length > 0) {
-              const runtime = agents[0];
-              if (runtime && !runtime._telegramServiceStarted) {
-                const token = runtime.getSetting ? runtime.getSetting('TELEGRAM_BOT_TOKEN') : null;
-                if (token && token.trim() !== '') {
-                  console.log('[telegram-patch] Found runtime via ElizaOS, starting Telegram...');
-                  startTelegramService(runtime);
-                  return; // Stop polling
-                }
-              }
-            }
-          }
-        } catch (e) {
-          // ElizaOS not initialized yet
-        }
-      }
-
-      if (attempts < maxAttempts) {
-        setTimeout(tryGetRuntime, 2000);
-      } else {
-        console.log('[telegram-patch] Could not find runtime after max attempts');
-      }
-    } catch (e) {
-      if (attempts < maxAttempts) {
-        setTimeout(tryGetRuntime, 2000);
-      }
-    }
-  };
-
-  // Start polling after a delay
-  setTimeout(tryGetRuntime, 15000);
-  console.log('[telegram-patch] Will poll for ElizaOS runtime in 15 seconds...');
-}
-
 // Apply patches at module load time
 applyPatch();
 patchUseModel();
-patchAgentRuntimeForTelegram();
+// Note: TelegramService is started by the Nostr plugin via workaround in plugin-nostr/lib/service.js
 
 module.exports = { patchRuntime, createUniqueUuid, applyPatch, patchUseModel, startTelegramService };
-

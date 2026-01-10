@@ -37,6 +37,12 @@ COPY package.json bun.lock* ./
 # --trust: allows postinstall scripts for sharp/onnxruntime
 RUN bun install --trust
 
+# Fix: Bun may create /app/node_modules/.bin/bun -> ../bun/bin/bun.exe (Windows binary)
+# which causes ENOEXEC when the ElizaOS CLI tries to spawn `bun` as a subprocess.
+# Force the local `bun` shim to point at the actual Bun binary in the image.
+RUN if [ -e /app/node_modules/.bin/bun ]; then rm -f /app/node_modules/.bin/bun; fi && \
+    ln -sf /usr/local/bin/bun /app/node_modules/.bin/bun
+
 # Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing
 # for GROUP contexts (Telegram). @elizaos/plugin-bootstrap's ROLES provider throws in that case,
 # which breaks group message handling. Fall back to room.channelId and return empty roles.

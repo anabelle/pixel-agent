@@ -5053,7 +5053,6 @@ Response (YES/NO):`;
       const thanks = await this.generateZapThanksTextLLM(amountMsats, { pubkey: sender });
       const { buildZapThanksPost } = require('./zapHandler');
       const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
-      const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
       const zapMessage = getZapMessage(evt);
       logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}${zapMessage ? ` with message: "${zapMessage}"` : ''}. Generating thanks reply.`);
       await this.postReply(prepared.parent, prepared.text, prepared.options);

@@ -223,8 +223,6 @@ class NostrService {
     this.postEnabled = true;
     this.handledEventIds = new Set();
 
-    // Restore handled event IDs from memory on startup
-    this._restoreHandledEventIds();
     this.lastReplyByUser = new Map();
     this.pendingReplyTimers = new Map();
     this.zapCooldownByUser = new Map();
@@ -259,19 +257,18 @@ class NostrService {
     this.discoveryThresholdDecrement = 0.05;
     this.discoveryQualityStrictness = 'normal';
 
-    // Fresh start failsafe: prevent replying to old events (previous to 2026)
+    // Fresh start failsafe: prevent replying to old events (default: last 24 hours)
     const cutoffRaw = runtime?.getSetting?.('NOSTR_MESSAGE_CUTOFF_DATE') ?? process?.env?.NOSTR_MESSAGE_CUTOFF_DATE;
-    const YEAR_2026_TS = 1735689600; // 2026-01-01 00:00:00 UTC
+    const DEFAULT_CUTOFF = Math.floor(Date.now() / 1000) - (24 * 3600);
     if (cutoffRaw) {
       try {
         const parsed = Math.floor(new Date(cutoffRaw).getTime() / 1000);
-        // Use the later of 2026 or the configured cutoff
-        this.messageCutoff = Math.max(YEAR_2026_TS, parsed);
+        this.messageCutoff = Math.max(DEFAULT_CUTOFF, parsed);
       } catch {
-        this.messageCutoff = YEAR_2026_TS;
+        this.messageCutoff = DEFAULT_CUTOFF;
       }
     } else {
-      this.messageCutoff = YEAR_2026_TS;
+      this.messageCutoff = DEFAULT_CUTOFF;
     }
     this.logger.info(`[NOSTR] Message cutoff set to ${this.messageCutoff} (${new Date(this.messageCutoff * 1000).toISOString()})`);
 
@@ -881,6 +878,18 @@ Response (YES/NO):`;
   static async start(runtime) {
     await ensureDeps();
     const svc = new NostrService(runtime);
+
+    // Restore handled event IDs from memory on startup (Blocking)
+    await svc._restoreHandledEventIds();
+
+    // Defensive cutoff: If no history was restored, don't reply to things older than 30 minutes
+    // to prevent catch-up spam from the beginning of the year.
+    if (svc.handledEventIds.size === 0) {
+      const thirtyMinsAgo = Math.floor(Date.now() / 1000) - 1800;
+      svc.messageCutoff = Math.max(svc.messageCutoff, thirtyMinsAgo);
+      logger.info(`[NOSTR] Fresh start (no history restored); updated cutoff to ${new Date(svc.messageCutoff * 1000).toISOString()} to prevent catch-up spam`);
+    }
+
     // Load historical narratives so daily/weekly/monthly context is available early
     try {
       if (svc.narrativeMemory && typeof svc.narrativeMemory.initialize === 'function') {

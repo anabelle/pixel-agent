@@ -5029,20 +5029,25 @@ Response (YES/NO):`;
       if (!this.pkHex) return;
       if (isSelfAuthor(evt, this.pkHex)) return;
 
-      // Check if this zap event was already thanked (prevents duplicate thanks on restart)
-      if (this.handledEventIds.has(evt.id)) {
-        logger.debug(`[ZAP] Skipping already-thanked zap ${evt.id.slice(0, 8)}`);
-        return;
-      }
+      // NOTE: handledEventIds check removed here because the event router already adds
+      // the event ID to handledEventIds BEFORE calling handleZap. The duplicate check
+      // was causing all zaps to be silently skipped. The handledEventIds.add() call 
+      // at line 5061 (after successful thanks) still prevents duplicate thanks on restart.
 
       const amountMsats = getZapAmountMsats(evt);
       const targetEventId = getZapTargetEventId(evt);
       const sender = getZapSenderPubkey(evt) || evt.pubkey;
-      const now = Date.now(); const last = this.zapCooldownByUser.get(sender) || 0; const cooldownMs = 5 * 60 * 1000; if (now - last < cooldownMs) return; this.zapCooldownByUser.set(sender, now);
+      const sats = typeof amountMsats === 'number' ? Math.floor(amountMsats / 1000) : null;
+      const now = Date.now(); const last = this.zapCooldownByUser.get(sender) || 0; const cooldownMs = 5 * 60 * 1000;
+      if (now - last < cooldownMs) {
+        logger.debug(`[ZAP] Skipping zap from ${sender.slice(0, 8)} (${sats || '?'} sats) - cooldown (${Math.ceil((cooldownMs - (now - last)) / 1000)}s remaining)`);
+        return;
+      }
+      this.zapCooldownByUser.set(sender, now);
 
       // Check if sender is muted
       if (await this._isUserMuted(sender)) {
-        // Removed low-value debug log
+        logger.debug(`[ZAP] Skipping zap from ${sender.slice(0, 8)} (${sats || '?'} sats) - sender is muted`);
         return;
       }
 

@@ -10,13 +10,34 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
     }
 
     // Generate consistent IDs using ElizaOS pattern
-  const { createUniqueUuid } = require('@elizaos/core');
-  const { ensureLNPixelsContext, createMemorySafe } = require('./context');
-  // Ensure rooms/world exist
-  const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid, ChannelType: (await import('@elizaos/core')).ChannelType, logger: log });
-  const roomId = ctx.canvasRoomId || createUniqueUuid(runtime, 'lnpixels:canvas');
-  const entityId = ctx.entityId || createUniqueUuid(runtime, 'lnpixels:system');
-  const memoryId = createUniqueUuid(runtime, `lnpixels:post:${activity.event_id || activity.created_at || Date.now()}:${traceId}`);
+    let createUniqueUuid;
+    let ChannelType;
+    try {
+      const core = await import('@elizaos/core');
+      createUniqueUuid = core.createUniqueUuid;
+      ChannelType = core.ChannelType;
+    } catch {
+      try {
+        const core = require('@elizaos/core');
+        createUniqueUuid = core.createUniqueUuid;
+        ChannelType = core.ChannelType;
+      } catch { }
+    }
+
+    // Fallback UUID function if core utility is unavailable
+    const uuidFallback = (rt, seed) => {
+      const crypto = require('crypto');
+      const hash = crypto.createHash('sha256').update(String(seed)).digest('hex');
+      return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+    };
+    const makeId = createUniqueUuid || runtime?.createUniqueUuid || uuidFallback;
+
+    const { ensureLNPixelsContext, createMemorySafe } = require('./context');
+    // Ensure rooms/world exist
+    const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid: makeId, ChannelType, logger: log });
+    const roomId = ctx.canvasRoomId || makeId(runtime, 'lnpixels:canvas');
+    const entityId = ctx.entityId || makeId(runtime, 'lnpixels:system');
+    const memoryId = makeId(runtime, `lnpixels:post:${activity.event_id || activity.created_at || Date.now()}:${traceId}`);
 
     const memory = {
       id: memoryId,
@@ -51,7 +72,7 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
     try {
       if (typeof createMemorySafe === 'function') {
         const retries = Number(opts.retries ?? 3);
-  res = await createMemorySafe(runtime, memory, 'messages', retries, log);
+        res = await createMemorySafe(runtime, memory, 'messages', retries, log);
       } else if (typeof runtime?.createMemory === 'function') {
         await runtime.createMemory(memory, 'messages');
         res = { created: true };
@@ -64,11 +85,11 @@ async function createLNPixelsMemory(runtime, text, activity, traceId, log, opts 
         throw e;
       }
     }
-  if (res && (res.created || res.exists)) {
-    log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
-  } else {
-    log?.warn?.('Failed to create LNPixels memory');
-  }
+    if (res && (res.created || res.exists)) {
+      log?.info?.('Created LNPixels memory:', { traceId, memoryId, roomId });
+    } else {
+      log?.warn?.('Failed to create LNPixels memory');
+    }
     return true;
 
   } catch (error) {
@@ -85,13 +106,35 @@ async function createLNPixelsEventMemory(runtime, activity, traceId, log, opts =
       return false;
     }
 
-  const { createUniqueUuid } = require('@elizaos/core');
-  const { ensureLNPixelsContext, createMemorySafe } = require('./context');
-  const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid, ChannelType: (await import('@elizaos/core')).ChannelType, logger: log });
-  const roomId = ctx.canvasRoomId || createUniqueUuid(runtime, 'lnpixels:canvas');
-  const entityId = ctx.entityId || createUniqueUuid(runtime, 'lnpixels:system');
+    // Generate consistent IDs using ElizaOS pattern
+    let createUniqueUuid;
+    let ChannelType;
+    try {
+      const core = await import('@elizaos/core');
+      createUniqueUuid = core.createUniqueUuid;
+      ChannelType = core.ChannelType;
+    } catch {
+      try {
+        const core = require('@elizaos/core');
+        createUniqueUuid = core.createUniqueUuid;
+        ChannelType = core.ChannelType;
+      } catch { }
+    }
+
+    // Fallback UUID function if core utility is unavailable
+    const uuidFallback = (rt, seed) => {
+      const crypto = require('crypto');
+      const hash = crypto.createHash('sha256').update(String(seed)).digest('hex');
+      return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+    };
+    const makeId = createUniqueUuid || runtime?.createUniqueUuid || uuidFallback;
+
+    const { ensureLNPixelsContext, createMemorySafe } = require('./context');
+    const ctx = await ensureLNPixelsContext(runtime, { createUniqueUuid: makeId, ChannelType, logger: log });
+    const roomId = ctx.canvasRoomId || makeId(runtime, 'lnpixels:canvas');
+    const entityId = ctx.entityId || makeId(runtime, 'lnpixels:system');
     const key = activity?.payment_hash || activity?.event_id || activity?.id || (activity?.x !== undefined && activity?.y !== undefined && activity?.created_at ? `${activity.x},${activity.y},${activity.created_at}` : Date.now());
-  const memoryId = createUniqueUuid(runtime, `lnpixels:event:${key}:${traceId}`);
+    const memoryId = makeId(runtime, `lnpixels:event:${key}:${traceId}`);
 
     const memory = {
       id: memoryId,
@@ -167,24 +210,24 @@ function startLNPixelsListener(runtime) {
   const base = process.env.LNPIXELS_WS_URL || 'http://localhost:3000';
   // LNPixels exposes events on the "/api" namespace
   const socket = io(`${base}/api`, { transports: ['websocket'], path: '/socket.io', reconnection: true });
-  
+
   // TTL-based deduplication (prevents memory leaks)
   const seen = new Map(); // [key, timestamp]
   const seenTTL = 300000; // 5 minutes
-  
+
   // Rate limiter (token bucket: 10 posts, refill 1 per 6 seconds)
   const rateLimiter = {
     tokens: 10,
     maxTokens: 10,
     lastRefill: Date.now(),
     refillRate: 6000, // 1 token per 6 seconds
-    
+
     consume() {
       const now = Date.now();
       const elapsed = now - this.lastRefill;
       this.tokens = Math.min(this.maxTokens, this.tokens + elapsed / this.refillRate);
       this.lastRefill = now;
-      
+
       if (this.tokens >= 1) {
         this.tokens--;
         return true;
@@ -192,7 +235,7 @@ function startLNPixelsListener(runtime) {
       return false;
     }
   };
-  
+
   // Connection health tracking
   const health = {
     connected: false,
@@ -205,7 +248,7 @@ function startLNPixelsListener(runtime) {
 
   function dedupe(key) {
     if (!key) return false;
-    
+
     // Clean expired entries periodically
     const now = Date.now();
     if (seen.size > 1000 || (seen.size > 0 && Math.random() < 0.1)) {
@@ -214,15 +257,15 @@ function startLNPixelsListener(runtime) {
         if (timestamp < cutoff) seen.delete(k);
       }
     }
-    
+
     if (seen.has(key)) return true;
     seen.set(key, now);
     return false;
   }
-  
+
   function validateActivity(a) {
     if (!a || typeof a !== 'object') return false;
-    
+
     // Debug logging to see what events we're getting
     const log = console;
     log.info?.(`[LNPIXELS-LISTENER] Validating activity:`, {
@@ -236,7 +279,7 @@ function startLNPixelsListener(runtime) {
       color: a.color,
       sats: a.sats
     });
-    
+
     // Handle bulk purchases
     // 1) Preferred: metadata.pixelUpdates provided (legacy/server-embedded details)
     if (a.metadata?.pixelUpdates && Array.isArray(a.metadata.pixelUpdates) && a.metadata.pixelUpdates.length > 0) {
@@ -260,12 +303,12 @@ function startLNPixelsListener(runtime) {
       }
       // Accept summary events even without metadata; sanitize pixel fields to avoid implying a single pixel
       if (typeof a.summary === 'string' && a.summary.toLowerCase().includes('pixel')) {
-  // Try to parse a numeric count, fallback to provided pixelCount
+        // Try to parse a numeric count, fallback to provided pixelCount
         if (!a.pixelCount) {
           const m = a.summary.match(/(\d+)/);
           if (m) a.pixelCount = Number(m[1]);
         }
-  // totalSats may be included by server; do not invent it here if missing
+        // totalSats may be included by server; do not invent it here if missing
         delete a.x;
         delete a.y;
         delete a.color;
@@ -275,13 +318,13 @@ function startLNPixelsListener(runtime) {
       log.info?.(`[LNPIXELS-LISTENER] REJECTED: bulk_purchase without summary/metadata`);
       return false;
     }
-    
-  // Skip ALL payment activities 
+
+    // Skip ALL payment activities 
     if (a.type === 'payment') {
       log.info?.(`[LNPIXELS-LISTENER] REJECTED: Payment event`);
       return false;
     }
-    
+
     // Regular single pixel validation
     if (!a.x && !a.y && !a.color) {
       log.info?.(`[LNPIXELS-LISTENER] REJECTED: Missing x, y, or color`);
@@ -291,7 +334,7 @@ function startLNPixelsListener(runtime) {
     if (a.y !== undefined && (typeof a.y !== 'number' || a.y < -1000 || a.y > 1000)) return false;
     if (a.sats !== undefined && (typeof a.sats !== 'number' || a.sats < 0 || a.sats > 1000000)) return false;
     if (a.letter !== undefined && a.letter !== null && (typeof a.letter !== 'string' || a.letter.length > 10)) return false;
-    
+
     log.info?.(`[LNPIXELS-LISTENER] ALLOWED: Single pixel at (${a.x},${a.y}) ${a.color} for ${a.sats} sats`);
     return true;
   }
@@ -301,12 +344,12 @@ function startLNPixelsListener(runtime) {
     health.consecutiveErrors = 0;
     log.info?.('LNPixels WS connected');
   });
-  
+
   socket.on('disconnect', (reason) => {
     health.connected = false;
     log.warn?.(`LNPixels WS disconnected: ${reason}`);
   });
-  
+
   socket.on('connect_error', (error) => {
     health.consecutiveErrors++;
     log.error?.('LNPixels WS connection error:', error.message);
@@ -314,23 +357,23 @@ function startLNPixelsListener(runtime) {
 
   socket.on('activity.append', async (a) => {
     const traceId = require('crypto').randomUUID().slice(0, 8);
-    
+
     try {
       health.totalEvents++;
       health.lastEvent = Date.now();
-      
+
       // Input validation
       if (!validateActivity(a)) {
         log.warn?.('Invalid activity received:', { traceId, activity: a });
         return;
       }
-      
+
       // Rate limiting
       if (!rateLimiter.consume()) {
         log.warn?.('Rate limit exceeded, dropping event:', { traceId, tokens: rateLimiter.tokens });
         return;
       }
-      
+
       // Deduplication
       const key = makeKey(a);
       if (dedupe(key)) {
@@ -355,21 +398,21 @@ function startLNPixelsListener(runtime) {
         if (enableMem) {
           await createLNPixelsMemory(runtime, '[delegated to plugin-nostr]', a, traceId, log);
         }
-      } catch {}
+      } catch { }
 
       // Internal broadcast for other plugins (no generated text here)
       try {
         await runtime?.process?.({ user: 'system', content: { text: '[PIXEL_ACTIVITY] pixel bought' }, context: { activity: a, traceId } });
       } catch (processError) { log.warn?.('Internal process failed:', { traceId, error: processError.message }); }
-      
+
     } catch (error) {
       health.totalErrors++;
       health.consecutiveErrors++;
-      log.error?.('Activity handler failed:', { 
-        traceId, 
-        error: error.message, 
+      log.error?.('Activity handler failed:', {
+        traceId,
+        error: error.message,
         stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-        activity: a 
+        activity: a
       });
     }
   });
@@ -387,7 +430,7 @@ function startLNPixelsListener(runtime) {
       log.error?.('Cleanup error:', e.message);
     }
   };
-  
+
   process.on('SIGTERM', cleanup);
   process.on('SIGINT', cleanup);
 

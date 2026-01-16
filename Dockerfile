@@ -50,15 +50,15 @@ RUN if [ -e /app/node_modules/.bin/bun ]; then rm -f /app/node_modules/.bin/bun;
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
-      echo "[patch] Patching plugin-telegram for env fallback..."; \
-      # Add env fallback for token
-      perl -pi -e 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/' "$TGFILE"; \
-      # Add explicit logging to show token source
-      perl -pi -e 's/(const botToken = .*?;)/\1\n    logger3.log("[TG-DEBUG] getSetting:", runtime.getSetting("TELEGRAM_BOT_TOKEN") ? "present" : "missing", "env:", process.env.TELEGRAM_BOT_TOKEN ? "present" : "missing", "final:", botToken ? "OK" : "EMPTY");/' "$TGFILE"; \
-      # Verify patch applied
-      grep -q "process.env.TELEGRAM_BOT_TOKEN" "$TGFILE" && echo "[patch] ✅ Telegram env fallback applied" || echo "[patch] ❌ Patch FAILED"; \
+    echo "[patch] Patching plugin-telegram for env fallback..."; \
+    # Add env fallback for token
+    perl -pi -e 's/const botToken = runtime\.getSetting\("TELEGRAM_BOT_TOKEN"\);/const botToken = runtime.getSetting("TELEGRAM_BOT_TOKEN") || process.env.TELEGRAM_BOT_TOKEN;/' "$TGFILE"; \
+    # Add explicit logging to show token source
+    perl -pi -e 's/(const botToken = .*?;)/\1\n    logger3.log("[TG-DEBUG] getSetting:", runtime.getSetting("TELEGRAM_BOT_TOKEN") ? "present" : "missing", "env:", process.env.TELEGRAM_BOT_TOKEN ? "present" : "missing", "final:", botToken ? "OK" : "EMPTY");/' "$TGFILE"; \
+    # Verify patch applied
+    grep -q "process.env.TELEGRAM_BOT_TOKEN" "$TGFILE" && echo "[patch] ✅ Telegram env fallback applied" || echo "[patch] ❌ Patch FAILED"; \
     else \
-      echo "[patch] ⚠️ plugin-telegram not found at $TGFILE"; \
+    echo "[patch] ⚠️ plugin-telegram not found at $TGFILE"; \
     fi
 
 # CRITICAL: Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
@@ -67,10 +67,10 @@ RUN set -ex; \
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
-      echo "[patch] Patching plugin-telegram for 90s timeout workaround..."; \
-      perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g' "$TGFILE"; \
-      perl -i -0pe 's/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' "$TGFILE"; \
-      grep -q "void this.messageManager.handleMessage" "$TGFILE" && echo "[patch] ✅ 90s timeout workaround applied" || echo "[patch] ❌ 90s timeout patch FAILED"; \
+    echo "[patch] Patching plugin-telegram for 90s timeout workaround..."; \
+    perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g' "$TGFILE"; \
+    perl -i -0pe 's/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' "$TGFILE"; \
+    grep -q "void this.messageManager.handleMessage" "$TGFILE" && echo "[patch] ✅ 90s timeout workaround applied" || echo "[patch] ❌ 90s timeout patch FAILED"; \
     fi
 
 # Fix "silent" Telegram failures:
@@ -80,60 +80,52 @@ RUN set -ex; \
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
-      echo "[patch] Patching plugin-telegram for webhook cleanup..."; \
-      perl -i -0pe 's/this\.bot\?\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' "$TGFILE"; \
-      echo "[patch] ✅ Webhook cleanup patch applied (best effort)"; \
+    echo "[patch] Patching plugin-telegram for webhook cleanup..."; \
+    perl -i -0pe 's/this\.bot\?\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' "$TGFILE"; \
+    echo "[patch] ✅ Webhook cleanup patch applied (best effort)"; \
     fi
 
 # Prevent self-inflicted 409 loops: if launch fails and we retry, ensure any prior polling is stopped.
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
-      echo "[patch] Patching plugin-telegram for retry cleanup..."; \
-      perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' "$TGFILE"; \
-      echo "[patch] ✅ Retry cleanup patch applied (best effort)"; \
+    echo "[patch] Patching plugin-telegram for retry cleanup..."; \
+    perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' "$TGFILE"; \
+    echo "[patch] ✅ Retry cleanup patch applied (best effort)"; \
     fi
 
-# CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
-# instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
-# This patch checks the return value's didRespond/responseContent and calls the callback.
-RUN set -ex; \
-    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
-    if [ -f "$TGFILE" ]; then \
-      echo "[patch] Patching plugin-telegram for messageService callback..."; \
-      perl -i -0pe 's/await this\.runtime\.messageService\.handleMessage\(this\.runtime, memory, callback\);/const __tgResult = await this.runtime.messageService.handleMessage(this.runtime, memory, callback);\n      if (__tgResult \&\& __tgResult.didRespond \&\& __tgResult.responseContent) {\n        logger2.info({ responseLen: __tgResult.responseContent?.text?.length }, "Telegram: calling callback with response");\n        await callback(__tgResult.responseContent, []);\n      } else {\n        logger2.warn({ didRespond: __tgResult?.didRespond }, "Telegram: no response generated");\n      }/g' "$TGFILE"; \
-      grep -q "__tgResult" "$TGFILE" && echo "[patch] ✅ messageService callback patch applied" || echo "[patch] ❌ messageService callback patch FAILED"; \
-    fi
+# NOTE: The messageService callback patch was removed because ElizaOS CLI v1.7
+# DOES call the callback internally. Adding our own callback call caused double replies.
 
 # Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing
 # for GROUP contexts (Telegram). @elizaos/plugin-bootstrap's ROLES provider throws in that case,
 # which breaks group message handling. Fall back to room.channelId and return empty roles.
 RUN set -e; \
-        for f in \
-            /app/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
-            /app/node_modules/@elizaos/server/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
-        ; do \
-            if [ -f "$f" ]; then \
-                perl -pi -e 's/const serverId = room\\.serverId;/const serverId = room.serverId || room.channelId;/' "$f"; \
-                perl -pi -e 's/throw new Error\("No server ID found"\);/return { data: { roles: [] }, values: { roles: "No role information available for this server." }, text: "No role information available for this server." };/g' "$f"; \
-            fi; \
-        done
+    for f in \
+    /app/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
+    /app/node_modules/@elizaos/server/node_modules/@elizaos/plugin-bootstrap/dist/index.js \
+    ; do \
+    if [ -f "$f" ]; then \
+    perl -pi -e 's/const serverId = room\\.serverId;/const serverId = room.serverId || room.channelId;/' "$f"; \
+    perl -pi -e 's/throw new Error\("No server ID found"\);/return { data: { roles: [] }, values: { roles: "No role information available for this server." }, text: "No role information available for this server." };/g' "$f"; \
+    fi; \
+    done
 
 # Stability patch: @elizaos/core useModel() assumes params is an object and uses the `in` operator.
 # Some callers (notably in media-processing paths) can pass a non-object, which crashes the whole agent.
 # This guards those checks so non-object params don't throw.
 RUN set -e; \
-        for f in \
-            /app/node_modules/@elizaos/core/dist/node/index.node.js \
-            /app/node_modules/@elizaos/server/node_modules/@elizaos/core/dist/node/index.node.js \
-            /app/node_modules/@elizaos/cli/node_modules/@elizaos/core/dist/node/index.node.js \
-        ; do \
-            if [ -f "$f" ]; then \
-                perl -pi -e 's/paramsObj && "prompt" in paramsObj/paramsObj && typeof paramsObj === "object" && "prompt" in paramsObj/g' "$f"; \
-                perl -pi -e 's/paramsObj && "input" in paramsObj/paramsObj && typeof paramsObj === "object" && "input" in paramsObj/g' "$f"; \
-                perl -pi -e 's/paramsObj && "messages" in paramsObj/paramsObj && typeof paramsObj === "object" && "messages" in paramsObj/g' "$f"; \
-            fi; \
-        done
+    for f in \
+    /app/node_modules/@elizaos/core/dist/node/index.node.js \
+    /app/node_modules/@elizaos/server/node_modules/@elizaos/core/dist/node/index.node.js \
+    /app/node_modules/@elizaos/cli/node_modules/@elizaos/core/dist/node/index.node.js \
+    ; do \
+    if [ -f "$f" ]; then \
+    perl -pi -e 's/paramsObj && "prompt" in paramsObj/paramsObj && typeof paramsObj === "object" && "prompt" in paramsObj/g' "$f"; \
+    perl -pi -e 's/paramsObj && "input" in paramsObj/paramsObj && typeof paramsObj === "object" && "input" in paramsObj/g' "$f"; \
+    perl -pi -e 's/paramsObj && "messages" in paramsObj/paramsObj && typeof paramsObj === "object" && "messages" in paramsObj/g' "$f"; \
+    fi; \
+    done
 
 # Copy source files
 COPY . .

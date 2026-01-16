@@ -1228,6 +1228,69 @@ Response (YES/NO):`;
         logger.info(`[NOSTR] Memory stats logging enabled (every ${intervalSec}s)`);
       }
     } catch { }
+
+    // Loop Health Monitor: Periodically check if critical loops are still running
+    // If a loop hasn't run for more than 2x its max interval, restart it
+    try {
+      const loopHealthCheckIntervalMs = 5 * 60 * 1000; // Check every 5 minutes
+      svc.loopHealthMonitor = setInterval(() => {
+        try {
+          const now = Date.now();
+          const checks = [];
+
+          // Check posting loop (if enabled)
+          if (postEnabled && sk && svc._postMaxSec) {
+            const maxPostGapMs = svc._postMaxSec * 2 * 1000;
+            const lastPostActivity = Math.max(svc._lastPostRun || 0, svc._lastPostScheduled || 0);
+            if (lastPostActivity && (now - lastPostActivity) > maxPostGapMs) {
+              logger.warn(`[NOSTR][HEALTH] Post loop appears dead (last activity ${Math.round((now - lastPostActivity) / 60000)}m ago), restarting...`);
+              svc.scheduleNextPost(svc._postMinSec || 3600, svc._postMaxSec || 10800);
+              checks.push('post:restarted');
+            } else {
+              checks.push('post:ok');
+            }
+          }
+
+          // Check discovery loop (if enabled) 
+          if (svc.discoveryEnabled && sk) {
+            const maxDiscoveryGapMs = svc.discoveryMaxSec * 2 * 1000;
+            const lastDiscoveryActivity = Math.max(svc._lastDiscoveryRun || 0, svc._lastDiscoveryScheduled || 0);
+            if (lastDiscoveryActivity && (now - lastDiscoveryActivity) > maxDiscoveryGapMs) {
+              logger.warn(`[NOSTR][HEALTH] Discovery loop appears dead (last activity ${Math.round((now - lastDiscoveryActivity) / 60000)}m ago), restarting...`);
+              svc.scheduleNextDiscovery();
+              checks.push('discovery:restarted');
+            } else {
+              checks.push('discovery:ok');
+            }
+          }
+
+          // Check home feed loop (if enabled)
+          if (svc.homeFeedEnabled && sk) {
+            const maxHomeFeedGapMs = svc.homeFeedMaxSec * 2 * 1000;
+            const lastHomeFeedActivity = Math.max(svc._lastHomeFeedRun || 0, svc._lastHomeFeedScheduled || 0);
+            if (lastHomeFeedActivity && (now - lastHomeFeedActivity) > maxHomeFeedGapMs) {
+              logger.warn(`[NOSTR][HEALTH] Home feed loop appears dead (last activity ${Math.round((now - lastHomeFeedActivity) / 60000)}m ago), restarting...`);
+              svc.scheduleNextHomeFeedCheck();
+              checks.push('homeFeed:restarted');
+            } else {
+              checks.push('homeFeed:ok');
+            }
+          }
+
+          // Only log if something was restarted
+          const restartedLoops = checks.filter(c => c.includes('restarted'));
+          if (restartedLoops.length > 0) {
+            logger.info(`[NOSTR][HEALTH] Loop health check: ${checks.join(', ')}`);
+          } else {
+            logger.debug(`[NOSTR][HEALTH] All loops healthy: ${checks.join(', ')}`);
+          }
+        } catch (e) {
+          logger.debug('[NOSTR][HEALTH] Loop health check failed:', e?.message || e);
+        }
+      }, loopHealthCheckIntervalMs);
+      logger.info('[NOSTR] Loop health monitor started (checks every 5 minutes)');
+    } catch { }
+
     return svc;
   }
 
@@ -1305,14 +1368,36 @@ Response (YES/NO):`;
   scheduleNextPost(minSec, maxSec) {
     const jitter = pickRangeWithJitter(minSec, maxSec);
     if (this.postTimer) clearTimeout(this.postTimer);
-    this.postTimer = setTimeout(() => this.postOnce().finally(() => this.scheduleNextPost(minSec, maxSec)), jitter * 1000);
+    this._lastPostScheduled = Date.now();
+    this._postMinSec = minSec;
+    this._postMaxSec = maxSec;
+    this.postTimer = setTimeout(async () => {
+      try {
+        this._lastPostRun = Date.now();
+        await this.postOnce();
+      } catch (err) {
+        logger.warn('[NOSTR] postOnce failed (loop continues):', err?.message || err);
+      } finally {
+        this.scheduleNextPost(minSec, maxSec);
+      }
+    }, jitter * 1000);
     logger.info(`[NOSTR] Next post in ~${jitter}s`);
   }
 
   scheduleNextDiscovery() {
     const jitter = this.discoveryMinSec + Math.floor(Math.random() * Math.max(1, this.discoveryMaxSec - this.discoveryMinSec));
     if (this.discoveryTimer) clearTimeout(this.discoveryTimer);
-    this.discoveryTimer = setTimeout(() => this.discoverOnce().finally(() => this.scheduleNextDiscovery()), jitter * 1000);
+    this._lastDiscoveryScheduled = Date.now();
+    this.discoveryTimer = setTimeout(async () => {
+      try {
+        this._lastDiscoveryRun = Date.now();
+        await this.discoverOnce();
+      } catch (err) {
+        logger.warn('[NOSTR] discoverOnce failed (loop continues):', err?.message || err);
+      } finally {
+        this.scheduleNextDiscovery();
+      }
+    }, jitter * 1000);
     logger.debug(`[NOSTR] Next discovery in ~${jitter}s`);
   }
 
@@ -5744,7 +5829,17 @@ Response (YES/NO):`;
   scheduleNextHomeFeedCheck() {
     const jitter = this.homeFeedMinSec + Math.floor(Math.random() * Math.max(1, this.homeFeedMaxSec - this.homeFeedMinSec));
     if (this.homeFeedTimer) clearTimeout(this.homeFeedTimer);
-    this.homeFeedTimer = setTimeout(() => this.processHomeFeed().finally(() => this.scheduleNextHomeFeedCheck()), jitter * 1000);
+    this._lastHomeFeedScheduled = Date.now();
+    this.homeFeedTimer = setTimeout(async () => {
+      try {
+        this._lastHomeFeedRun = Date.now();
+        await this.processHomeFeed();
+      } catch (err) {
+        logger.warn('[NOSTR] processHomeFeed failed (loop continues):', err?.message || err);
+      } finally {
+        this.scheduleNextHomeFeedCheck();
+      }
+    }, jitter * 1000);
     logger.info(`[NOSTR] Next home feed check in ~${jitter}s`);
   }
 

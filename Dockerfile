@@ -61,6 +61,50 @@ RUN set -ex; \
       echo "[patch] ⚠️ plugin-telegram not found at $TGFILE"; \
     fi
 
+# CRITICAL: Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
+# Do not await long-running message processing; log errors via promise .catch.
+# Without this, slow LLM responses cause Telegraf to throw TimeoutError which crashes the agent.
+RUN set -ex; \
+    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
+    if [ -f "$TGFILE" ]; then \
+      echo "[patch] Patching plugin-telegram for 90s timeout workaround..."; \
+      perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g' "$TGFILE"; \
+      perl -i -0pe 's/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' "$TGFILE"; \
+      grep -q "void this.messageManager.handleMessage" "$TGFILE" && echo "[patch] ✅ 90s timeout workaround applied" || echo "[patch] ❌ 90s timeout patch FAILED"; \
+    fi
+
+# Fix "silent" Telegram failures:
+# - If a webhook is set, polling (getUpdates) will fail (often as a 409 conflict)
+# - The upstream code does not await bot.launch(), so launch errors are not caught by the retry loop
+# This patch deletes any active webhook and awaits launch so failures are retried.
+RUN set -ex; \
+    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
+    if [ -f "$TGFILE" ]; then \
+      echo "[patch] Patching plugin-telegram for webhook cleanup..."; \
+      perl -i -0pe 's/this\.bot\?\?\.launch\(\{\n\s*dropPendingUpdates: true,/try { await this.bot.telegram.deleteWebhook({ drop_pending_updates: true }); } catch (e) { logger3.warn("Failed to delete Telegram webhook (continuing): " + (e?.message || e)); }\n    await this.bot?.launch({\n      dropPendingUpdates: true,/g' "$TGFILE"; \
+      echo "[patch] ✅ Webhook cleanup patch applied (best effort)"; \
+    fi
+
+# Prevent self-inflicted 409 loops: if launch fails and we retry, ensure any prior polling is stopped.
+RUN set -ex; \
+    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
+    if [ -f "$TGFILE" ]; then \
+      echo "[patch] Patching plugin-telegram for retry cleanup..."; \
+      perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' "$TGFILE"; \
+      echo "[patch] ✅ Retry cleanup patch applied (best effort)"; \
+    fi
+
+# CRITICAL: ElizaOS CLI v1.7 changed messageService.handleMessage to RETURN results
+# instead of calling the callback. Plugin v1.6.2 expects the callback to be called.
+# This patch checks the return value's didRespond/responseContent and calls the callback.
+RUN set -ex; \
+    TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
+    if [ -f "$TGFILE" ]; then \
+      echo "[patch] Patching plugin-telegram for messageService callback..."; \
+      perl -i -0pe 's/await this\.runtime\.messageService\.handleMessage\(this\.runtime, memory, callback\);/const __tgResult = await this.runtime.messageService.handleMessage(this.runtime, memory, callback);\n      if (__tgResult \&\& __tgResult.didRespond \&\& __tgResult.responseContent) {\n        logger2.info({ responseLen: __tgResult.responseContent?.text?.length }, "Telegram: calling callback with response");\n        await callback(__tgResult.responseContent, []);\n      } else {\n        logger2.warn({ didRespond: __tgResult?.didRespond }, "Telegram: no response generated");\n      }/g' "$TGFILE"; \
+      grep -q "__tgResult" "$TGFILE" && echo "[patch] ✅ messageService callback patch applied" || echo "[patch] ❌ messageService callback patch FAILED"; \
+    fi
+
 # Compatibility patch: In our current Postgres schema/runtime wiring, Room.serverId can be missing
 # for GROUP contexts (Telegram). @elizaos/plugin-bootstrap's ROLES provider throws in that case,
 # which breaks group message handling. Fall back to room.channelId and return empty roles.

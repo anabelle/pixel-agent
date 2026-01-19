@@ -4724,7 +4724,7 @@ Response (YES/NO):`;
         try {
           logger.info(`[NOSTR] Processing images in mention content: "${(evt.content || '').slice(0, 200)}..."`);
           const { processImageContent } = require('./image-vision');
-          const fullImageContext = await processImageContent(evt.content || '', runtime);
+          const fullImageContext = await processImageContent(evt.content || '', this.runtime);
           // Limit the number of images to process
           imageContext = {
             imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
@@ -5378,7 +5378,7 @@ Response (YES/NO):`;
         try {
           logger.info(`[NOSTR] Processing images in DM content: "${decryptedContent.slice(0, 200)}..."`);
           const { processImageContent } = require('./image-vision');
-          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          const fullImageContext = await processImageContent(decryptedContent, this.runtime);
           imageContext = {
             imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
             imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)
@@ -5607,7 +5607,7 @@ Response (YES/NO):`;
         try {
           logger.info(`[NOSTR] Processing images in sealed DM content: "${decryptedContent.slice(0, 200)}..."`);
           const { processImageContent } = require('./image-vision');
-          const fullImageContext = await processImageContent(decryptedContent, runtime);
+          const fullImageContext = await processImageContent(decryptedContent, this.runtime);
           imageContext = {
             imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
             imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)

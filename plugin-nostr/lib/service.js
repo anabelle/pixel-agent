@@ -2408,7 +2408,7 @@ Response (YES/NO):`;
           try {
             logger.info(`[NOSTR] Processing images in discovery post: "${evt.content?.slice(0, 200)}..."`);
             const { processImageContent } = require('./image-vision');
-            const fullImageContext = await processImageContent(evt.content || '', runtime);
+            const fullImageContext = await processImageContent(evt.content || '', this.runtime);
             imageContext = {
               imageDescriptions: fullImageContext.imageDescriptions.slice(0, this.maxImagesPerMessage),
               imageUrls: fullImageContext.imageUrls.slice(0, this.maxImagesPerMessage)

@@ -1,5 +1,7 @@
 const fetch = require('node-fetch');
 
+const logger = console;
+
 function extractImageUrls(content) {
   logger.info('[NOSTR] 🔍 Extracting images from mention content (length ' + content.length + ')');
   logger.info('[NOSTR] Raw content preview: "' + content.replace(/\n/g, '\\n').slice(0, 500) + '...');

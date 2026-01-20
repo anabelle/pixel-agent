@@ -6,9 +6,15 @@
  * which resolves plugins by name from character.json.
  */
 
+// Apply PostgreSQL Unicode safety patch early (before any adapter initialization)
+import './patches/postgres-unicode-safety';
+const { applyPostgresUnicodePatch } = require('./patches/postgres-unicode-safety');
+
+applyPostgresUnicodePatch();
+
 // Suppress AI SDK warnings about unsupported model settings (presencePenalty, frequencyPenalty, stopSequences)
 // @ts-ignore - global flag not typed
-globalThis.AI_SDK_LOG_WARNINGS = false;
+ globalThis.AI_SDK_LOG_WARNINGS = false;
 
 
 // Stability: Global error handlers to prevent PM2 restart loops from unhandled rejections

@@ -77,4 +77,4 @@ else
     echo "[startup] ⚠️ Telegram plugin not found (may be intentional)"
 fi
 
-exec bun --preload ./suppress-ai-warnings.js ./patches/postgres-unicode-safety-patch.js ./node_modules/@elizaos/cli/dist/index.js start --character ./character.json --port 3003
+exec bun --preload ./suppress-ai-warnings.js --preload ./patches/postgres-unicode-safety-patch.js ./node_modules/@elizaos/cli/dist/index.js start --character ./character.json --port 3003

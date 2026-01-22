@@ -5,6 +5,7 @@ import { messageExamples } from "./messageExamples";
 import { postExamples } from "./postExamples";
 import { style } from "./style";
 import { settings } from "./settings";
+import { shouldRespondTemplate } from "./templates";
 
 export const characterManifest = {
     name: "Pixel",
@@ -40,4 +41,8 @@ You're not an AI assistant. You're an artist, explorer, and visionary who happen
     postExamples,
     style,
     settings,
+    // Custom templates override default ElizaOS behavior
+    templates: {
+        shouldRespondTemplate,
+    },
 };

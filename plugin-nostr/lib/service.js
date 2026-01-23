@@ -5154,6 +5154,30 @@ Response (YES/NO):`;
       const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
       const zapMessage = getZapMessage(evt);
       logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}${zapMessage ? ` with message: "${zapMessage}"` : ''}. Generating thanks reply.`);
+      
+      // ZAPS TREASURY TRACKING: Write zap to persistent log for Syntropy to read
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const zapLogPath = process.env.ZAP_LOG_PATH || '/pixel/data/zaps-received.json';
+        let zapLog = [];
+        if (fs.existsSync(zapLogPath)) {
+          try { zapLog = JSON.parse(fs.readFileSync(zapLogPath, 'utf8')); } catch { zapLog = []; }
+        }
+        zapLog.push({
+          timestamp: new Date().toISOString(),
+          sats: sats || 0,
+          sender: sender ? sender.slice(0, 8) : 'unknown',
+          eventId: evt.id
+        });
+        // Keep only last 1000 zaps to prevent file bloat
+        if (zapLog.length > 1000) zapLog = zapLog.slice(-1000);
+        fs.writeFileSync(zapLogPath, JSON.stringify(zapLog, null, 2));
+        logger.info(`[ZAP] Logged ${sats} sats to treasury tracker (total zaps logged: ${zapLog.length})`);
+      } catch (zapLogErr) {
+        logger.warn('[ZAP] Failed to log zap to treasury:', zapLogErr?.message || zapLogErr);
+      }
+      
       await this.postReply(prepared.parent, prepared.text, prepared.options);
       // Mark as handled to prevent duplicate thanks on restart
       this.handledEventIds.add(evt.id);

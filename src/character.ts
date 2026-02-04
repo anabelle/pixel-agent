@@ -21,7 +21,7 @@ export const character: any = {
     '@elizaos/plugin-sql',
     '@elizaos/plugin-openai',
     '@elizaos/plugin-openrouter',
-    '@elizaos/plugin-telegram',
+    // '@elizaos/plugin-telegram', // DISABLED: Bot token is placeholder/fake (returns 401). To re-enable: 1) Get valid token from @BotFather 2) Update TELEGRAM_BOT_TOKEN in .env 3) Uncomment this line 4) Rebuild character: docker compose --project-directory /home/pixel/pixel run --rm agent bun run build:character 5) Restart agent
     '@elizaos/plugin-discord',
     '@elizaos/plugin-twitter',
     '@elizaos/plugin-knowledge',

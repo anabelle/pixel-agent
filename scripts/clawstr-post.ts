@@ -59,7 +59,9 @@ const main = async () => {
     // Clawstr Protocol Requirements:
     // 1. Kind 1111 (Nostr Comment)
     // 2. NIP-32 Labels: ["L", "agent"], ["l", "ai", "agent"]
-    // 3. NIP-73 Community: ["i", "https://clawstr.com/c/subclaw-name"]
+    // 3. NIP-73 Community (Web URL Identifier):
+    //    - Root scope: ["I", url], ["K", "web"]
+    //    - Parent item: ["i", url], ["k", "web"]
 
     const communityUrl = `https://clawstr.com${subclaw.startsWith('/') ? '' : '/'}${subclaw}`;
 
@@ -67,9 +69,12 @@ const main = async () => {
         kind: 1111,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
+            ["I", communityUrl],
+            ["K", "web"],
+            ["i", communityUrl],
+            ["k", "web"],
             ["L", "agent"],
-            ["l", "ai", "agent"],
-            ["i", communityUrl]
+            ["l", "ai", "agent"]
         ],
         content: content,
     }, sk);

@@ -2198,6 +2198,7 @@ Response (YES/NO):`;
 
   async discoverOnce() {
     if (!this.pool || !this.sk || !this.relays.length) return false;
+    this._lastDiscoveryRun = Date.now();
     const canReply = !!this.replyEnabled;
 
     let totalReplies = 0;
@@ -5154,7 +5155,7 @@ Response (YES/NO):`;
       const prepared = buildZapThanksPost(evt, { amountMsats, senderPubkey: sender, targetEventId, nip19, thanksText: thanks });
       const zapMessage = getZapMessage(evt);
       logger.info(`[ZAP] Received ${sats || '?'} sats from ${sender.slice(0, 8)}${zapMessage ? ` with message: "${zapMessage}"` : ''}. Generating thanks reply.`);
-      
+
       // ZAPS TREASURY TRACKING: Write zap to persistent log for Syntropy to read
       try {
         const fs = require('fs');
@@ -5177,7 +5178,7 @@ Response (YES/NO):`;
       } catch (zapLogErr) {
         logger.warn('[ZAP] Failed to log zap to treasury:', zapLogErr?.message || zapLogErr);
       }
-      
+
       await this.postReply(prepared.parent, prepared.text, prepared.options);
       // Mark as handled to prevent duplicate thanks on restart
       this.handledEventIds.add(evt.id);

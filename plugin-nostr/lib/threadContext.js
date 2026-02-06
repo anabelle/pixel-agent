@@ -299,7 +299,7 @@ class ThreadContextResolver {
         return false;
       }
 
-      if (thread.length > 5) {
+      if (thread.length > 12) {
         logger?.debug?.(`[NOSTR] Thread too long (${thread.length} events) for natural entry ${evt.id.slice(0, 8)}`);
         return false;
       }

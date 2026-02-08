@@ -12,17 +12,25 @@ async function generateWithModelOrFallback(runtime, modelType, prompt, opts, ext
     if (!runtime?.useModel) throw new Error('useModel missing from runtime');
 
     const res = await runtime.useModel(modelType, { prompt, ...opts });
+
+    // Log the raw response structure for debugging
+    if (!res) {
+      logger.info(`[GENERATION] No response received from model ${modelType}`);
+      return typeof fallbackFn === 'function' ? fallbackFn() : '';
+    }
+
     const raw = typeof extractFn === 'function' ? extractFn(res) : '';
     const text = typeof sanitizeFn === 'function' ? sanitizeFn(raw) : String(raw || '');
 
     if (text && String(text).trim()) {
+      logger.info(`[GENERATION] Success! Generated ${text.length} chars with ${modelType}`);
       return String(text).trim();
     }
 
     // Empty response from model
-    logger.debug(`[GENERATION] Model ${modelType} returned empty response`);
+    logger.info(`[GENERATION] Model ${modelType} returned empty after extraction. Raw type: ${typeof res}, raw length: ${JSON.stringify(res)?.length || 0}`);
   } catch (err) {
-    logger.debug(`[GENERATION] Model ${modelType} failed: ${err?.message || err}`);
+    logger.info(`[GENERATION] Model ${modelType} error: ${err?.message || err}`);
   }
 
   // Run the caller-provided failure function

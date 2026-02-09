@@ -8,7 +8,7 @@ export class DiaryAPI {
 
   constructor(private runtime: IAgentRuntime, private service: DiaryServiceInterface) {
     this.router = express.Router();
-    this.apiKey = runtime.getSetting('DIARY_API_KEY') || '';
+    this.apiKey = (runtime.getSetting('DIARY_API_KEY') as string) || '';
     this.setupRoutes();
   }
 

@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvips-dev \
     ca-certificates \
     wget \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Create node and npm shims for compatibility with packages that expect Node.js
@@ -124,8 +125,12 @@ RUN set -e; \
     perl -pi -e 's/paramsObj && "prompt" in paramsObj/paramsObj && typeof paramsObj === "object" && "prompt" in paramsObj/g' "$f"; \
     perl -pi -e 's/paramsObj && "input" in paramsObj/paramsObj && typeof paramsObj === "object" && "input" in paramsObj/g' "$f"; \
     perl -pi -e 's/paramsObj && "messages" in paramsObj/paramsObj && typeof paramsObj === "object" && "messages" in paramsObj/g' "$f"; \
+    # EXTEND TIMEOUT from 90s to 300s (prevents aborts on slow LLM responses)
+    perl -pi -e 's/config\.timeout_ms \?\? 90000/config.timeout_ms ?? 300000/g' "$f"; \
+    perl -pi -e 's/AbortSignal\.timeout\(90000\)/AbortSignal.timeout(300000)/g' "$f"; \
     fi; \
     done
+
 
 # Copy source files
 COPY . .
@@ -144,5 +149,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Start agent via wrapper script for better debugging
-CMD ["/app/start.sh"]
+# Start agent via wrapper script
+ENTRYPOINT ["/bin/sh", "/app/start.sh"]
+# Start agent via wrapper script for better debugging (empty CMD)
+CMD []

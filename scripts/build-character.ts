@@ -25,16 +25,15 @@ const enableTwitter = settings.ENABLE_TWITTER_PLUGIN === 'true';
 // Order matters: bootstrap first, then adapters, then features
 // NOTE: OpenRouter BEFORE OpenAI so it handles TEXT_SMALL/TEXT_LARGE first (free models)
 const PLUGIN_NAMES = [
+  // Platform integrations (Crucial for connectivity)
+  '@elizaos/plugin-telegram',
   // Core bootstrapping
   '@elizaos/plugin-bootstrap',
-  // Database adapter (PostgreSQL for production)
-  '@elizaos/adapter-postgres',
-  // '@elizaos/plugin-sql',
-  // AI providers - OpenRouter first for free models!
-  '@elizaos/plugin-openrouter',
+  // Database adapter (Modern SQL plugin for production)
+  '@elizaos/plugin-sql',
+  // AI providers - Using OpenAI as primary due to OpenRouter credit issues
   '@elizaos/plugin-openai',
   // Platform integrations
-  '@elizaos/plugin-telegram',
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured
   // Twitter: conditionally included based on ENABLE_TWITTER_PLUGIN setting
   ...(enableTwitter ? ['@elizaos/plugin-twitter'] : []),

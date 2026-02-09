@@ -2564,6 +2564,30 @@ Response (YES/NO):`;
             }
           } catch { }
 
+          // Ecosystem awareness: fetch canvas stats + narrative correlations
+          try {
+            const statsRes = await fetch('http://api:3000/api/stats');
+            if (statsRes.ok) {
+              const stats = await statsRes.json();
+              if (stats && typeof stats.totalPixels === 'number') {
+                contextData.ecosystemStats = stats;
+              }
+            }
+          } catch (err) {
+            logger.debug('[NOSTR] Failed to fetch ecosystem stats:', err?.message || err);
+          }
+          try {
+            const corrRes = await fetch('http://narrative-correlator:3004/correlations/correlations/high-strength?minStrength=0.6&limit=3');
+            if (corrRes.ok) {
+              const corrData = await corrRes.json();
+              if (corrData?.success && Array.isArray(corrData.data) && corrData.data.length) {
+                contextData.narrativeCorrelations = corrData.data;
+              }
+            }
+          } catch (err) {
+            logger.debug('[NOSTR] Failed to fetch narrative correlations:', err?.message || err);
+          }
+
           logger.debug(`[NOSTR] Generating context-aware post. Emerging stories: ${emergingStories.length}, Activity: ${activityEvents} events, Top topics: ${topTopics.length}, Tone trend: ${toneTrend ? toneTrend.shift || 'stable' : 'none'}`);
         }
       } catch (err) {
@@ -2983,6 +3007,26 @@ Response (YES/NO):`;
           // but keep recentDigest as null to avoid shape mismatch with similarity checks.
         } catch { }
         contextData = { emergingStories, currentActivity, topTopics, topTopicsLong, toneTrend, timelineLore, recentDigest };
+
+        // Ecosystem awareness: fetch canvas stats + narrative correlations
+        try {
+          const statsRes = await fetch('http://api:3000/api/stats');
+          if (statsRes.ok) {
+            const stats = await statsRes.json();
+            if (stats && typeof stats.totalPixels === 'number') {
+              contextData.ecosystemStats = stats;
+            }
+          }
+        } catch { }
+        try {
+          const corrRes = await fetch('http://narrative-correlator:3004/correlations/correlations/high-strength?minStrength=0.6&limit=3');
+          if (corrRes.ok) {
+            const corrData = await corrRes.json();
+            if (corrData?.success && Array.isArray(corrData.data) && corrData.data.length) {
+              contextData.narrativeCorrelations = corrData.data;
+            }
+          }
+        } catch { }
       }
       if (this.narrativeMemory?.analyzeLoreContinuity) {
         try { loreContinuity = await this.narrativeMemory.analyzeLoreContinuity(3); } catch { }

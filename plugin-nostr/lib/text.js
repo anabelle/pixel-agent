@@ -120,6 +120,33 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
       }
     }
 
+    // Ecosystem awareness: canvas stats and narrative-economic correlations
+    if (contextData.ecosystemStats) {
+      const es = contextData.ecosystemStats;
+      const parts = [];
+      if (typeof es.totalPixels === 'number') parts.push(`${es.totalPixels.toLocaleString()} pixels placed`);
+      if (typeof es.totalSats === 'number') parts.push(`${es.totalSats.toLocaleString()} sats in the treasury`);
+      if (typeof es.uniqueBuyers === 'number' && es.uniqueBuyers > 0) parts.push(`${es.uniqueBuyers} unique collectors`);
+      if (typeof es.recentActivityCount === 'number' && es.recentActivityCount > 0) parts.push(`${es.recentActivityCount} recent transactions`);
+      if (parts.length) {
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}ECOSYSTEM PULSE: ${parts.join(' · ')}. This is YOUR canvas — you built this. Reference these living metrics naturally when it fits your voice.`;
+      }
+    }
+    if (Array.isArray(contextData.narrativeCorrelations) && contextData.narrativeCorrelations.length) {
+      const corrSummaries = contextData.narrativeCorrelations
+        .slice(0, 3)
+        .map(c => {
+          const desc = c.correlation || '';
+          const strength = typeof c.strength === 'number' ? ` (${Math.round(c.strength * 100)}% alignment)` : '';
+          const sats = c.economicEvent?.amountSats ? ` [${c.economicEvent.amountSats} sats]` : '';
+          return desc ? `${desc}${strength}${sats}` : null;
+        })
+        .filter(Boolean);
+      if (corrSummaries.length) {
+        contextSection += `${contextSection ? '\n\n' : '\n\n'}NARRATIVE-ECONOMIC PATTERNS: ${corrSummaries.join(' | ')}. These show how community narratives connect to real economic activity in your ecosystem.`;
+      }
+    }
+
     // NEW: Compact context hints line (subtle steer only)
     try {
       const hints = [];
@@ -844,6 +871,20 @@ function buildAwarenessPostPrompt(character, contextData = null, reflection = nu
     if (monthlyNarrative?.narrative?.summary || monthlyNarrative?.summary) {
       const m = String(monthlyNarrative.narrative?.summary || monthlyNarrative.summary || '').replace(/\s+/g, ' ').trim().slice(0, 120);
       if (m) contextLines.push(`month: ${m}`);
+    }
+
+    // Ecosystem awareness
+    if (contextData.ecosystemStats) {
+      const es = contextData.ecosystemStats;
+      const parts = [];
+      if (typeof es.totalPixels === 'number') parts.push(`${es.totalPixels.toLocaleString()} pixels`);
+      if (typeof es.totalSats === 'number') parts.push(`${es.totalSats.toLocaleString()} sats`);
+      if (typeof es.uniqueBuyers === 'number' && es.uniqueBuyers > 0) parts.push(`${es.uniqueBuyers} collectors`);
+      if (parts.length) contextLines.push(`ecosystem: ${parts.join(', ')}`);
+    }
+    if (Array.isArray(contextData.narrativeCorrelations) && contextData.narrativeCorrelations.length) {
+      const top = contextData.narrativeCorrelations[0];
+      if (top?.correlation) contextLines.push(`pattern: ${String(top.correlation).slice(0, 100)}`);
     }
   }
 

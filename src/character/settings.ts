@@ -38,9 +38,9 @@ export const settings = {
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || "",
   OPENAI_IMAGE_DESCRIPTION_MODEL: "gemini-2.0-flash",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
-  // Disable OpenAI embeddings - use OpenRouter instead
-  USE_OPENAI_EMBEDDING: process.env.USE_OPENAI_EMBEDDING || "false",
-  TEXT_EMBEDDING_MODEL: "text-embedding-3-small",
+  // Enable OpenAI embeddings via Gemini OpenAI-compat endpoint
+  USE_OPENAI_EMBEDDING: process.env.USE_OPENAI_EMBEDDING || "true",
+  TEXT_EMBEDDING_MODEL: process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
   // OpenAI model overrides (Gemini models via Google's OpenAI-compatible API)
   OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL || "gemini-2.0-flash",
   OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL || "gemini-2.5-flash",

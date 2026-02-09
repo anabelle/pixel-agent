@@ -100,6 +100,24 @@ RUN set -ex; \
     grep -q "bot.catch" "$TGFILE" && echo "[patch] ✅ bot.catch handler applied" || echo "[patch] ❌ bot.catch patch FAILED"; \
     fi
 
+# CRITICAL: @ai-sdk/openai v2.x defaults languageModel() to the OpenAI Responses API (/responses).
+# Google Gemini's OpenAI-compat endpoint only supports /chat/completions, NOT /responses.
+# This patch makes languageModel() use createChatModel (which calls /chat/completions) instead of
+# createResponsesModel (which calls /responses and returns 404 on non-OpenAI providers).
+RUN set -ex; \
+    for SDKFILE in \
+    /app/node_modules/@ai-sdk/openai/dist/index.js \
+    /app/node_modules/@ai-sdk/openai/dist/index.mjs \
+    ; do \
+    if [ -f "$SDKFILE" ]; then \
+    echo "[patch] Patching $SDKFILE to use /chat/completions instead of /responses..."; \
+    perl -pi -e 's/return createResponsesModel\(modelId\);/return createChatModel(modelId);/' "$SDKFILE"; \
+    grep -q "return createChatModel(modelId);" "$SDKFILE" && echo "[patch] ✅ ai-sdk chat endpoint patch applied to $SDKFILE" || echo "[patch] ❌ ai-sdk patch FAILED for $SDKFILE"; \
+    echo "[patch] Patching $SDKFILE to omit empty stop sequences (Gemini compat)..."; \
+    perl -pi -e 's/stop: stopSequences,/stop: stopSequences?.length > 0 ? stopSequences : undefined,/' "$SDKFILE"; \
+    fi; \
+    done
+
 # NOTE: The messageService callback patch was removed because ElizaOS CLI v1.7
 # DOES call the callback internally. Adding our own callback call caused double replies.
 

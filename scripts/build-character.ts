@@ -31,9 +31,10 @@ const PLUGIN_NAMES = [
   '@elizaos/plugin-bootstrap',
   // Database adapter (Modern SQL plugin for production)
   '@elizaos/plugin-sql',
-  // AI providers - OpenRouter as PRIMARY (routes to DeepSeek), OpenAI as fallback
-  '@elizaos/plugin-openrouter',
+  // AI providers - OpenAI as PRIMARY (configured to use Google Gemini endpoint)
+  // OpenRouter as fallback (has free tier models)
   '@elizaos/plugin-openai',
+  '@elizaos/plugin-openrouter',
   // Platform integrations
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured
   // Twitter: conditionally included based on ENABLE_TWITTER_PLUGIN setting

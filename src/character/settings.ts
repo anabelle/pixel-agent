@@ -35,11 +35,15 @@ export const settings = {
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-  OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
+  OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || "",
+  OPENAI_IMAGE_DESCRIPTION_MODEL: "gemini-2.0-flash",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
   // Disable OpenAI embeddings - use OpenRouter instead
   USE_OPENAI_EMBEDDING: process.env.USE_OPENAI_EMBEDDING || "false",
   TEXT_EMBEDDING_MODEL: "text-embedding-3-small",
+  // OpenAI model overrides (Gemini models via Google's OpenAI-compatible API)
+  OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL || "gemini-2.0-flash",
+  OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL || "gemini-2.5-flash",
   GOOGLE_GENERATIVE_AI_API_KEY:
     process.env.GOOGLE_GENERATIVE_AI_API_KEY || "",
   // Nostr

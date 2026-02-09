@@ -3631,7 +3631,7 @@ Response (YES/NO):`;
         this.runtime,
         type,
         prompt,
-        { maxTokens: 300, temperature: 0.75 },
+        { maxTokens: 512, temperature: 0.75, frequencyPenalty: 0.3, presencePenalty: 0.3 },
         (res) => this._extractTextFromModelResult(res),
         (s) => this._sanitizeWhitelist(s),
         () => {
@@ -6401,7 +6401,7 @@ USE: If it elevates the quote, connect to the current mood or arc naturally.`;
       this.runtime,
       type,
       promptSections,
-      { maxTokens: 180, temperature: 0.85 },
+      { maxTokens: 512, temperature: 0.85, frequencyPenalty: 0.3, presencePenalty: 0.3 },
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => null // No fallback - skip if LLM fails

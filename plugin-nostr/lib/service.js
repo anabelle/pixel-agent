@@ -2947,7 +2947,7 @@ Response (YES/NO):`;
       this.runtime,
       type,
       prompt,
-      { maxTokens: 256, temperature: 0.9 },
+      { maxTokens: 1024, temperature: 0.9, frequencyPenalty: 0.3, presencePenalty: 0.3 },
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => this.pickPostText()
@@ -3448,7 +3448,7 @@ Response (YES/NO):`;
       this.runtime,
       type,
       prompt,
-      { maxTokens: 200, temperature: 0.75 },
+      { maxTokens: 512, temperature: 0.75, frequencyPenalty: 0.3, presencePenalty: 0.3 },
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => null
@@ -3684,7 +3684,7 @@ Response (YES/NO):`;
       this.runtime,
       type,
       prompt,
-      { maxTokens: 128, temperature: 0.8 },
+      { maxTokens: 512, temperature: 0.8, frequencyPenalty: 0.3, presencePenalty: 0.3 },
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => generateThanksText(amountMsats)
@@ -3712,7 +3712,7 @@ Response (YES/NO):`;
       this.runtime,
       type,
       prompt,
-      { maxTokens: 220, temperature: 0.9 },
+      { maxTokens: 512, temperature: 0.9, frequencyPenalty: 0.3, presencePenalty: 0.3 },
       (res) => this._extractTextFromModelResult(res),
       (s) => this._sanitizeWhitelist(s),
       () => {
@@ -4351,7 +4351,7 @@ Response (YES/NO):`;
           this.runtime,
           type,
           prompt,
-          { maxTokens: 256, temperature: 0.8 },
+          { maxTokens: 1024, temperature: 0.8, frequencyPenalty: 0.3, presencePenalty: 0.3 },
           (res) => this._extractTextFromModelResult(res),
           (s) => this._sanitizeWhitelist(s),
           () => { throw new Error('LLM generation failed'); } // Force retry on fallback

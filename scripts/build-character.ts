@@ -23,7 +23,7 @@ const enableTwitter = settings.ENABLE_TWITTER_PLUGIN === 'true';
 
 // Plugin names that the ElizaOS CLI will resolve at runtime
 // Order matters: bootstrap first, then adapters, then features
-// NOTE: OpenRouter BEFORE OpenAI so it handles TEXT_SMALL/TEXT_LARGE first (free models)
+// NOTE: OpenRouter BEFORE OpenAI so it handles TEXT_SMALL/TEXT_LARGE first (DeepSeek via OpenRouter)
 const PLUGIN_NAMES = [
   // Platform integrations (Crucial for connectivity)
   '@elizaos/plugin-telegram',
@@ -31,7 +31,8 @@ const PLUGIN_NAMES = [
   '@elizaos/plugin-bootstrap',
   // Database adapter (Modern SQL plugin for production)
   '@elizaos/plugin-sql',
-  // AI providers - Using OpenAI as primary due to OpenRouter credit issues
+  // AI providers - OpenRouter as PRIMARY (routes to DeepSeek), OpenAI as fallback
+  '@elizaos/plugin-openrouter',
   '@elizaos/plugin-openai',
   // Platform integrations
   // '@elizaos/plugin-discord', // Disabled - re-enable when API credentials are configured

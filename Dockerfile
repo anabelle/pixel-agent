@@ -65,11 +65,12 @@ RUN set -ex; \
 # CRITICAL: Patch telegram plugin handlers to avoid Telegraf's default 90s handler timeout.
 # Do not await long-running message processing; log errors via promise .catch.
 # Without this, slow LLM responses cause Telegraf to throw TimeoutError which crashes the agent.
+# ALSO: Send a brief error message to the user so they know something went wrong (no silent failures).
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
     echo "[patch] Patching plugin-telegram for 90s timeout workaround..."; \
-    perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => logger3.error({ error }, "Error handling message"));/g' "$TGFILE"; \
+    perl -i -0pe 's/await this\.messageManager\.handleMessage\(ctx\);/void this.messageManager.handleMessage(ctx).catch((error) => { logger3.error({ error }, "Error handling message"); try { ctx.reply("brain glitch. try again in a sec."); } catch(e) {} });/g' "$TGFILE"; \
     perl -i -0pe 's/await this\.messageManager\.handleReaction\(ctx\);/void this.messageManager.handleReaction(ctx).catch((error) => logger3.error({ error }, "Error handling reaction"));/g' "$TGFILE"; \
     grep -q "void this.messageManager.handleMessage" "$TGFILE" && echo "[patch] ✅ 90s timeout workaround applied" || echo "[patch] ❌ 90s timeout patch FAILED"; \
     fi
@@ -87,12 +88,16 @@ RUN set -ex; \
     fi
 
 # Prevent self-inflicted 409 loops: if launch fails and we retry, ensure any prior polling is stopped.
+# ALSO: Add bot.catch() to prevent Telegraf's default error handler from setting process.exitCode=1.
 RUN set -ex; \
     TGFILE="/app/node_modules/@elizaos/plugin-telegram/dist/index.js"; \
     if [ -f "$TGFILE" ]; then \
     echo "[patch] Patching plugin-telegram for retry cleanup..."; \
     perl -i -0pe 's/(Telegram initialization attempt \$\{retryCount \+ 1\} failed:[^\n]*\n\s*\);\n\s*)retryCount\+\+;/\1try { service.bot?.stop(); } catch { }\n        retryCount++;/g' "$TGFILE"; \
     echo "[patch] ✅ Retry cleanup patch applied (best effort)"; \
+    echo "[patch] Adding bot.catch handler..."; \
+    perl -pi -e 's/(this\.bot = new Telegraf\(botToken, this\.options\);)/\1\n      this.bot.catch((err, ctx2) => { logger3.error({ err, updateType: ctx2?.updateType }, "Telegraf caught error"); });/' "$TGFILE"; \
+    grep -q "bot.catch" "$TGFILE" && echo "[patch] ✅ bot.catch handler applied" || echo "[patch] ❌ bot.catch patch FAILED"; \
     fi
 
 # NOTE: The messageService callback patch was removed because ElizaOS CLI v1.7

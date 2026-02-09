@@ -35,7 +35,7 @@ export const settings = {
   OPENROUTER_BASE_URL:
     process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-  OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-5-mini",
+  OPENAI_IMAGE_DESCRIPTION_MODEL: "gpt-4o-mini",
   OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS: "8192",
   // Disable OpenAI embeddings - use OpenRouter instead
   USE_OPENAI_EMBEDDING: process.env.USE_OPENAI_EMBEDDING || "false",

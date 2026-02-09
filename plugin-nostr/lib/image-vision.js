@@ -136,7 +136,7 @@ async function analyzeImageWithVision(imageUrl, runtime) {
               }
             ]
           }],
-          max_tokens: parseInt(runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS') || '300'),
+          max_completion_tokens: parseInt(runtime.getSetting('OPENAI_IMAGE_DESCRIPTION_MAX_TOKENS') || '300'),
           temperature: 0.7
         })
       });
@@ -249,7 +249,7 @@ async function generateNaturalReply(originalContent, imageDescription, runtime) 
           ? (runtime.getSetting('OPENROUTER_MODEL') || 'tngtech/deepseek-r1t2-chimera:free')
           : (runtime.getSetting('OPENAI_MODEL') || 'gpt-5-mini'),
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 200,
+        max_completion_tokens: 200,
         temperature: 0.8
       })
     });

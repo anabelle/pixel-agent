@@ -191,7 +191,7 @@ async function analyzeImageWithVision(imageUrl, runtime) {
               }
             ]
           }],
-          max_tokens: 300,
+          max_completion_tokens: 300,
           temperature: 0.7
         })
       });

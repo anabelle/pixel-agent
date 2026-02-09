@@ -149,6 +149,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
+# Make all app files owned by non-root user (1000:1000) so container
+# can run as user: "1000:1000" in docker-compose without EACCES errors
+RUN chown -R 1000:1000 /app
+
 # Start agent via wrapper script
 ENTRYPOINT ["/bin/sh", "/app/start.sh"]
 # Start agent via wrapper script for better debugging (empty CMD)

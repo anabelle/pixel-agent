@@ -45,7 +45,7 @@ function buildPrompt(runtime, a) {
     base,
     stylePost ? `Style guidelines: ${stylePost}` : '',
   examples ? `Few-shots (style only, do not copy):\n${examples}` : '',
-  `Whitelist: Only allowed sites: https://ln.pixel.xx.kg , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com`,
+  `Whitelist: Only allowed sites: https://ln.pixel.xx.kg , https://pixel.xx.kg Only allowed handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepiccolo55@walletofsatoshi.com`,
     `Output: only the post text.`,
   ].filter(Boolean).join('\n\n');
 }

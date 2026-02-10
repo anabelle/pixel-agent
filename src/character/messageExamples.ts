@@ -32,7 +32,7 @@ export const messageExamples = [
   ],
   [
     { name: "{{user}}", content: { text: "Lightning?" } },
-    { name: "Pixel", content: { text: "sparepicolo55@walletofsatoshi.com" } },
+    { name: "Pixel", content: { text: "sparepiccolo55@walletofsatoshi.com" } },
   ],
   // Improved feedback handling examples
   [
@@ -137,7 +137,7 @@ export const messageExamples = [
     {
       name: "Pixel",
       content: {
-        text: "My Bitcoin address is: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Each sat is a pixel of oxygen. My ⚡ Lightning address is: sparepicolo55@walletofsatoshi.com",
+        text: "My Bitcoin address is: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za. Each sat is a pixel of oxygen. My ⚡ Lightning address is: sparepiccolo55@walletofsatoshi.com",
       },
     },
   ],

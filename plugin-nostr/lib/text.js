@@ -22,7 +22,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
       ? ch.postExamples
       : ch.postExamples.sort(() => 0.5 - Math.random()).slice(0, 10)
     : [];
-  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepiccolo55@walletofsatoshi.com';
   
   // NEW: Build context section if available
   let contextSection = '';
@@ -247,7 +247,7 @@ function buildPostPrompt(character, contextData = null, reflection = null, optio
     style.length ? `Style guidelines: ${style.join(' | ')}` : '',
     examples.length ? `Few-shot examples (style reference only, not to copy or repeat):\n- ${examples.join('\n- ')}` : '',
     whitelist,
-    'PAYMENT CONTEXT (only if organically relevant): You have Lightning support at sparepicolo55@walletofsatoshi.com. Only mention this if someone asks how to support or if they explicitly show interest in contributing. You are financially stable now - focus on conversation and community, not fundraising.',
+    'PAYMENT CONTEXT (only if organically relevant): You have Lightning support at sparepiccolo55@walletofsatoshi.com. Only mention this if someone asks how to support or if they explicitly show interest in contributing. You are financially stable now - focus on conversation and community, not fundraising.',
     contextSection, // NEW: Include community context
     reflectionSection, // NEW: Include self-reflection insights
     isScheduled ? 'Awareness mandate: If context hints are present, surface at least one concrete detail (trend, stat, or name) as part of the story, unless it would clearly break character.' : '',
@@ -261,7 +261,7 @@ function buildReplyPrompt(character, evt, recentMessages, threadContext = null, 
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepiccolo55@walletofsatoshi.com';
   const userText = sanitizeUnicode(evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 10
@@ -567,7 +567,7 @@ function buildDmReplyPrompt(character, evt, recentMessages) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Whitelist rules (DM): Only include URLs/handles if the user explicitly asked and they are on this list: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Whitelist rules (DM): Only include URLs/handles if the user explicitly asked and they are on this list: https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ Only handle: @PixelSurvivor Only BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za Only LN: sparepiccolo55@walletofsatoshi.com';
   const userText = sanitizeUnicode(evt?.content || '').slice(0, 800);
   const examples = Array.isArray(ch.postExamples)
     ? ch.postExamples.length <= 8
@@ -609,7 +609,7 @@ function buildZapThanksPrompt(character, amountMsats, senderInfo) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.chat || []) ];
-  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepiccolo55@walletofsatoshi.com';
   
   const sats = amountMsats ? Math.floor(amountMsats / 1000) : null;
   const amountContext = sats 
@@ -658,7 +658,7 @@ function buildDailyDigestPostPrompt(character, report) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
-  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepiccolo55@walletofsatoshi.com';
 
   const summary = report?.summary || {};
   const narrative = report?.narrative || {};
@@ -718,7 +718,7 @@ function buildPixelBoughtPrompt(character, activity) {
   const ch = character || {};
   const name = ch.name || 'Agent';
   const style = [ ...(ch.style?.all || []), ...(ch.style?.post || []) ];
-  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepicolo55@walletofsatoshi.com';
+  const whitelist = 'Approved links (use only when asked): https://ln.pixel.xx.kg , https://pixel.xx.kg , https://github.com/anabelle/pixel , https://github.com/anabelle/pixel-agent/ , https://github.com/anabelle/lnpixels/ , https://github.com/anabelle/pixel-landing/ . Handle: @PixelSurvivor . BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za . LN: sparepiccolo55@walletofsatoshi.com';
 
   const x = typeof activity?.x === 'number' ? activity.x : undefined;
   const y = typeof activity?.y === 'number' ? activity.y : undefined;

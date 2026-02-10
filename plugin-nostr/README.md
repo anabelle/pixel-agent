@@ -27,7 +27,7 @@ What changed:
   - Site: https://ln.pixel.xx.kg
   - Handle: @PixelSurvivor
   - BTC: bc1q7e33r989x03ynp6h4z04zygtslp5v8mcx535za
-  - LN: sparepicolo55@walletofsatoshi.com
+  - LN: sparepiccolo55@walletofsatoshi.com
 
 Config (from Character.settings):
 - NOSTR_PRIVATE_KEY: hex or nsec
